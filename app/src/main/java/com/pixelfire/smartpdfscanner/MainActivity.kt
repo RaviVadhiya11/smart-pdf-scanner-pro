@@ -33,7 +33,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
-import org.apache.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
