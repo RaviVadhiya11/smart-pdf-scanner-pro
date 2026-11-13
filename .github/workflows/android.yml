@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-      - name: Apply top quick tools UI patch
-        run: python3 tools/patch_ui.py
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
