@@ -1608,13 +1608,15 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(8), 0, dp(4), 0)
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setTitle(name)
-                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Add/Remove Favourite", "Move to Trash")) { _, which ->
+                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Save to Google Drive", "Open with Google Docs", "Add/Remove Favourite", "Move to Trash")) { _, which ->
                         when (which) {
                             0 -> openPdf(uri)
                             1 -> showPdfEditor(uri)
                             2 -> sharePdf(uri)
-                            3 -> toggleFavourite(uri)
-                            4 -> moveToTrash(uri)
+                            3 -> sharePdfToGoogleDrive(uri)
+                            4 -> openPdfWithGoogleDocs(uri)
+                            5 -> toggleFavourite(uri)
+                            6 -> moveToTrash(uri)
                         }
                     }.show()
             }
@@ -2191,8 +2193,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun sharePdf(uri: Uri) {
         val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
-            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(send, "Share PDF"))
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(send, "Share PDF"))
+        } catch (_: Exception) {
+            Toast.makeText(this, "No app available to share this PDF", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Google Drive receives the PDF through Android's secure share sheet.
+    // This does not store Google passwords or request broad Drive access.
+    private fun sharePdfToGoogleDrive(uri: Uri) {
+        val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra(Intent.EXTRA_TITLE, "Save PDF to Google Drive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(send, "Save PDF using Google Drive"))
+        } catch (_: Exception) {
+            Toast.makeText(this, "Install or update Google Drive, then try again", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Google Docs import/conversion support depends on the installed Google app version.
+    private fun openPdfWithGoogleDocs(uri: Uri) {
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(view, "Open PDF with Google Docs or another app"))
+        } catch (_: Exception) {
+            Toast.makeText(this, "No compatible document app found", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun addWatermarkDialog(uri: Uri) {
