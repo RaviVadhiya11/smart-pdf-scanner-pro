@@ -386,6 +386,15 @@ class MainActivity : AppCompatActivity() {
         recentCard.addView(recent)
         content.addView(recentCard)
         content.addView(gap(16))
+        content.addView(label("MY DOCUMENTS", 15f, navy, true))
+        content.addView(gap(8))
+        homeFolders.forEach { folder -> content.addView(folderCard(folder)) }
+        val savedDocs = getSavedPdfs()
+        content.addView(label("Documents (" + savedDocs.size + ")", 14f, navy, true))
+        content.addView(gap(8))
+        if (savedDocs.isEmpty()) content.addView(label("Your scanned PDFs will appear here automatically.", 11f, muted))
+        else savedDocs.take(20).forEach { item -> content.addView(documentCard(item.first, item.second)) }
+        content.addView(gap(16))
 
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
