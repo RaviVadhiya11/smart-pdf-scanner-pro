@@ -26,10 +26,15 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Build installable debug APK
+        run: gradle :app:assembleDebug
       - name: Build release AAB
         run: gradle :app:bundleRelease
-      - name: Upload AAB artifact
+      - name: Upload Android builds
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-PDF-Scanner-Pro-AAB
-          path: app/build/outputs/bundle/release/app-release.aab
+          name: Smart-PDF-Scanner-Pro-Android-Builds
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
