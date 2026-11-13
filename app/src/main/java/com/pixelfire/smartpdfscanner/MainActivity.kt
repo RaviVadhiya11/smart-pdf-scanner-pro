@@ -265,7 +265,7 @@ class MainActivity : AppCompatActivity() {
         val paleBlue = 0xFFEAF2FF.toInt()
         val muted = 0xFF718096.toInt()
 
-        window.statusBarColor = bg
+        window.statusBarColor = 0xFF082D72.toInt()
         window.navigationBarColor = 0xFFFFFFFF.toInt()
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
@@ -289,14 +289,14 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = rounded(0xFFFFFFFF.toInt(), 20)
-            elevation = dp(2).toFloat()
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 20)
+            elevation = dp(3).toFloat()
         }
         header.addView(TextView(this).apply {
             text = "☰"
             textSize = 22f
             gravity = Gravity.CENTER
-            setTextColor(navy)
+            setTextColor(0xFFFFFFFF.toInt())
             setPadding(0, 0, dp(10), 0)
             setOnClickListener { showAppDrawer() }
         })
@@ -304,16 +304,16 @@ class MainActivity : AppCompatActivity() {
             text = "▣"
             textSize = 25f
             gravity = Gravity.CENTER
-            setTextColor(blue)
-            background = rounded(paleBlue, 14)
+            setTextColor(0xFF1764DE.toInt())
+            background = rounded(0xFFFFFFFF.toInt(), 14)
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         })
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
         }
-        brand.addView(label("Document Scanner", 19f, navy, true))
-        brand.addView(label("Scan • Convert • Edit • Share", 11f, muted))
+        brand.addView(label("DocNexa", 20f, 0xFFFFFFFF.toInt(), true))
+        brand.addView(label("PDF Scanner & Editor", 11f, 0xFFDCE8FF.toInt()))
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(TextView(this).apply {
             text = "★"
@@ -327,9 +327,9 @@ class MainActivity : AppCompatActivity() {
             text = "⌕"
             textSize = 30f
             gravity = Gravity.CENTER
-            setTextColor(navy)
+            setTextColor(0xFFFFFFFF.toInt())
             setPadding(dp(12), 0, dp(4), 0)
-            setOnClickListener { showComingSoon("Search documents") }
+            setOnClickListener { showDocumentSearch() }
         })
         header.addView(TextView(this).apply {
             text = "⋮"
@@ -347,6 +347,23 @@ class MainActivity : AppCompatActivity() {
             topMargin = dp(12)
             bottomMargin = dp(12)
         })
+
+        // Functional search field styled after the DocNexa reference screen.
+        val searchEntry = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+            background = rounded(0xFFFFFFFF.toInt(), 28, 0xFFB8D0FF.toInt())
+            elevation = dp(2).toFloat()
+            isClickable = true
+            setOnClickListener { showDocumentSearch() }
+        }
+        searchEntry.addView(label("⌕", 25f, 0xFF073B91.toInt(), true))
+        searchEntry.addView(label("  Search documents", 14f, 0xFF65738A.toInt()))
+        searchEntry.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        searchEntry.addView(label("×", 21f, 0xFF65738A.toInt()))
+        content.addView(searchEntry)
+        content.addView(gap(12))
 
         // One compact horizontal quick-access strip combines navigation and top tools.
         val quickAccessScroll = HorizontalScrollView(this).apply {
@@ -534,7 +551,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(gap(8))
         homeFolders.forEach { folder -> content.addView(folderCard(folder)) }
         val savedDocs = getSavedPdfs()
-        content.addView(label("Documents (" + savedDocs.size + ")", 14f, navy, true))
+        content.addView(label("Recent Documents (" + savedDocs.size + ")", 16f, navy, true))
         content.addView(gap(8))
         if (savedDocs.isEmpty()) content.addView(label("Your scanned PDFs will appear here automatically.", 11f, muted))
         else savedDocs.take(20).forEach { item -> content.addView(documentCard(item.first, item.second)) }
@@ -545,6 +562,21 @@ class MainActivity : AppCompatActivity() {
 
         addBottomAdAndActions(root)
         setScreenContent(root)
+    }
+
+    private fun showDocumentSearch() {
+        val field = EditText(this).apply { hint = "Enter document name"; singleLine = true }
+        AlertDialog.Builder(this).setTitle("Search documents").setView(field)
+            .setPositiveButton("Search") { _, _ ->
+                val query = field.text.toString().trim()
+                val matches = getSavedPdfs().filter { it.first.contains(query, ignoreCase = true) }
+                if (query.isBlank()) Toast.makeText(this, "Type a document name to search", Toast.LENGTH_SHORT).show()
+                else if (matches.isEmpty()) AlertDialog.Builder(this).setTitle("No documents found")
+                    .setMessage("No saved PDF matches: " + query).setPositiveButton("OK", null).show()
+                else AlertDialog.Builder(this).setTitle("Search results • " + matches.size)
+                    .setItems(matches.map { it.first }.toTypedArray()) { _, index -> openPdf(matches[index].second) }
+                    .setNegativeButton("Close", null).show()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showHomeOverflowMenu(anchor: View) {
@@ -1001,7 +1033,7 @@ class MainActivity : AppCompatActivity() {
         }
         info.addView(label(name, 14f, 0xFF666666.toInt(), true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         info.addView(gap(4))
-        info.addView(label("PDF document", 11f, 0xFF888888.toInt()))
+        info.addView(label("Saved on this device  •  PDF", 11f, 0xFF718096.toInt()))
         card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(TextView(this).apply {
             text = "•••"
