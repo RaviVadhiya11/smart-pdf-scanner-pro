@@ -1,10 +1,25 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-<path android:fillColor="#FFFFFFFF" android:pathData="M30,18 L62,18 L79,35 L79,82 Q79,86 75,86 L30,86 Q26,86 26,82 L26,22 Q26,18 30,18 Z"/>
-<path android:fillColor="#42DFFF" android:pathData="M62,18 L62,32 Q62,36 66,36 L79,36 Z"/>
-<path android:fillColor="#1262E8" android:pathData="M36,43 L66,43 L66,47 L36,47 Z M36,53 L70,53 L70,57 L36,57 Z M36,63 L60,63 L60,67 L36,67 Z"/>
-<path android:fillColor="#00DDF5" android:pathData="M17,37 L17,29 Q17,25 21,25 L31,25 L31,30 L22,30 L22,37 Z M77,25 L87,25 Q91,25 91,29 L91,37 L86,37 L86,30 L77,30 Z M17,72 L22,72 L22,79 L31,79 L31,84 L21,84 Q17,84 17,80 Z M86,72 L91,72 L91,80 Q91,84 87,84 L77,84 L77,79 L86,79 Z"/>
-<path android:fillColor="#073BBD" android:pathData="M67,62 A17,17 0,1 0,67 96 A17,17 0,1 0,67 62"/>
-<path android:strokeColor="#00E6FF" android:strokeWidth="2.5" android:fillColor="#073BBD" android:pathData="M67,62 A17,17 0,1 0,67 96 A17,17 0,1 0,67 62"/>
-<path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:pathData="M58,78 L64,84 L77,70"/>
-<path android:fillColor="#00E9FF" android:pathData="M18,58 L90,58 L87,61 L21,61 Z"/>
+    <!-- Raised scanner lid -->
+    <path android:fillColor="#F4F8FF" android:pathData="M22,18 Q22,12 29,12 L79,12 Q86,12 86,18 L91,35 L17,35 Z"/>
+    <path android:fillColor="#152A69" android:pathData="M28,20 L80,20 L84,31 L24,31 Z"/>
+    <!-- Glowing scan bar -->
+    <path android:fillColor="#00E9FF" android:pathData="M26,28 L82,28 L82,30 L26,30 Z"/>
+    <!-- Paper and scan bed -->
+    <path android:fillColor="#EAF5FF" android:pathData="M37,34 L71,34 L81,62 L27,62 Z"/>
+    <path android:fillColor="#1687F8" android:pathData="M42,40 L68,40 L69,43 L41,43 Z M38,47 L72,47 L73,50 L37,50 Z M35,54 L59,54 L60,57 L34,57 Z"/>
+    <!-- Scanner base -->
+    <path android:fillColor="#DCEBFF" android:pathData="M17,59 Q17,55 23,55 L85,55 Q91,55 91,61 L88,78 Q87,83 81,83 L27,83 Q21,83 20,78 Z"/>
+    <path android:fillColor="#4775D9" android:pathData="M22,61 L86,61 L84,76 Q84,79 80,79 L28,79 Q24,79 24,76 Z"/>
+    <!-- Camera button -->
+    <path android:fillColor="#0877F5" android:pathData="M28,63 Q28,61 32,61 L44,61 Q48,61 48,65 L48,74 Q48,77 44,77 L32,77 Q28,77 28,74 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M33,67 L35,65 L40,65 L42,67 L44,67 L44,73 L32,73 L32,67 Z"/>
+    <path android:fillColor="#0877F5" android:pathData="M35,68 A3,3 0,1 0,41 68 A3,3 0,1 0,35 68"/>
+    <!-- PDF button -->
+    <path android:fillColor="#F04438" android:pathData="M51,63 Q51,61 55,61 L68,61 Q72,61 72,65 L72,73 Q72,77 68,77 L55,77 Q51,77 51,73 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M56,66 L59,66 L59,67 L57,67 L57,69 L59,69 L59,70 L57,70 L57,73 L56,73 Z M61,66 L63,66 Q66,66 66,69.5 Q66,73 63,73 L61,73 Z M62,67 L62,72 L63,72 Q65,72 65,69.5 Q65,67 63,67 Z M68,66 L71,66 L71,67 L69,67 L69,69 L71,69 L71,70 L69,70 L69,73 L68,73 Z"/>
+    <!-- Tools button -->
+    <path android:fillColor="#102D5E" android:pathData="M75,63 Q75,61 79,61 L87,61 Q90,61 90,65 L90,73 Q90,77 87,77 L79,77 Q75,77 75,73 Z"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2.5" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M80,68 L86,73 M85,66 L79,72"/>
+    <!-- Feet -->
+    <path android:fillColor="#0A2868" android:pathData="M27,82 L37,82 L35,87 L29,87 Z M72,82 L82,82 L80,87 L74,87 Z"/>
 </vector>
