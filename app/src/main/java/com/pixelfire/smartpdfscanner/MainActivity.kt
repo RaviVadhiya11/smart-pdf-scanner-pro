@@ -193,6 +193,14 @@ class MainActivity : AppCompatActivity() {
             elevation = dp(2).toFloat()
         }
         header.addView(TextView(this).apply {
+            text = "☰"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(navy)
+            setPadding(0, 0, dp(10), 0)
+            setOnClickListener { showAppDrawer() }
+        })
+        header.addView(TextView(this).apply {
             text = "▣"
             textSize = 25f
             gravity = Gravity.CENTER
@@ -377,29 +385,88 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        // Four-item native bottom navigation.
-        val nav = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(6), dp(7), dp(6), dp(7))
-            setBackgroundColor(0xFFFFFFFF.toInt())
-            elevation = dp(8).toFloat()
-        }
-        fun navItem(symbol: String, title: String, selected: Boolean, action: () -> Unit) =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(dp(5), dp(3), dp(5), dp(3))
-                addView(label(symbol, 19f, if (selected) blue else 0xFF9AA5B5.toInt(), true))
-                addView(label(title, 9f, if (selected) blue else muted, selected))
-                setOnClickListener { action() }
-            }
-        nav.addView(navItem("⌂", "Home", true) { buildScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("▤", "Docs", false) { showDocsScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("▦", "Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("♙", "Profile", false) { showComingSoon("Profile") }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(nav)
+        addBottomAdAndActions(root)
         setScreenContent(root)
+    }
+
+    private fun addBottomAdAndActions(root: LinearLayout) {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+            setBackgroundColor(0xFFF5F8FF.toInt())
+        }
+        val camera = Button(this).apply {
+            text = "▣  Scan"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = gradient(0xFF3478F6.toInt(), 0xFF1764DE.toInt(), 28)
+            backgroundTintList = null
+            setOnClickListener { startDocumentScan() }
+        }
+        val import = Button(this).apply {
+            text = "+  Import"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(0xFF168BC5.toInt(), 28)
+            backgroundTintList = null
+            setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+        }
+        bar.addView(camera, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
+        bar.addView(import, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
+        root.addView(bar)
+        root.addView(TextView(this).apply {
+            text = "ADVERTISEMENT  •  Ad space"
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF8994A5.toInt())
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48))
+        })
+    }
+
+    private fun showAppDrawer() {
+        val items = arrayOf("♡  Favourite", "◇  Manage tags", "▤  Trash", "⚙  Settings", "Tools", "About us", "Connect with us", "Rate us", "Share with friends", "Privacy Policy")
+        AlertDialog.Builder(this).setTitle("Document Scanner Pro").setItems(items) { _, which ->
+            when (which) {
+                0 -> showComingSoon("Favourite")
+                1 -> manageTagsDialog()
+                2 -> showComingSoon("Trash")
+                3 -> showSettingsDialog()
+                4 -> showPdfTools()
+                5 -> AlertDialog.Builder(this).setTitle("About us").setMessage("Document Scanner Pro • Scan, convert, edit and share documents.").setPositiveButton("OK", null).show()
+                6, 8 -> shareApp()
+                7 -> Toast.makeText(this, "Thank you for supporting the app!", Toast.LENGTH_SHORT).show()
+                9 -> AlertDialog.Builder(this).setTitle("Privacy").setMessage("Review the app privacy policy before publishing.").setPositiveButton("OK", null).show()
+            }
+        }.show()
+    }
+
+    private fun manageTagsDialog() {
+        val field = android.widget.EditText(this).apply { hint = "Enter a tag name" }
+        AlertDialog.Builder(this).setTitle("Manage tags").setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                val tag = field.text.toString().trim()
+                if (tag.isNotEmpty()) Toast.makeText(this, "Tag saved: $tag", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showSettingsDialog() {
+        AlertDialog.Builder(this).setTitle("Settings")
+            .setItems(arrayOf("App information", "Storage location", "Share app")) { _, which ->
+                when (which) {
+                    0 -> AlertDialog.Builder(this).setMessage("Document Scanner Pro").setPositiveButton("OK", null).show()
+                    1 -> Toast.makeText(this, "PDFs are saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    2 -> shareApp()
+                }
+            }.show()
+    }
+
+    private fun shareApp() {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Try Document Scanner Pro.")
+        startActivity(Intent.createChooser(send, "Share app"))
     }
 
     private fun showDocsScreen() {
@@ -539,27 +606,7 @@ class MainActivity : AppCompatActivity() {
         })
         root.addView(overlay, LinearLayout.LayoutParams(-1, dp(78)))
 
-        val nav = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(6), dp(7), dp(6), dp(7))
-            setBackgroundColor(0xFFFFFFFF.toInt())
-            elevation = dp(8).toFloat()
-        }
-        fun navItem(symbol: String, title: String, selected: Boolean, action: () -> Unit) =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(dp(5), dp(3), dp(5), dp(3))
-                addView(label(symbol, 19f, if (selected) blue else 0xFF9AA5B5.toInt(), true))
-                addView(label(title, 9f, if (selected) blue else muted, selected))
-                setOnClickListener { action() }
-            }
-        nav.addView(navItem("⌂", "Home", false) { buildScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("▤", "Docs", true) { showDocsScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("▦", "Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
-        nav.addView(navItem("♙", "Profile", false) { showComingSoon("Profile") }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(nav)
+        addBottomAdAndActions(root)
         setScreenContent(root)
     }
 
@@ -833,21 +880,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 val circle = TextView(this).apply {
                     text = tool.symbol
-                    textSize = 23f
+                    textSize = 18f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                     setTextColor(0xFFFFFFFF.toInt())
                     gravity = Gravity.CENTER
                     background = rounded(tool.color, 50)
-                    elevation = dp(2).toFloat()
-                    layoutParams = LinearLayout.LayoutParams(dp(58), dp(58))
+                    elevation = dp(1).toFloat()
+                    layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
                 }
                 item.addView(circle)
-                item.addView(gap(9))
-                val caption = label(tool.title, 11.5f, subtitleColor)
+                item.addView(gap(5))
+                val caption = label(tool.title, 10.5f, subtitleColor)
                 caption.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
                 item.addView(caption)
-                row.addView(item, LinearLayout.LayoutParams(0, dp(112), 1f))
+                row.addView(item, LinearLayout.LayoutParams(0, dp(86), 1f))
             }
             repeat(4 - rowTools.size) {
                 row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
