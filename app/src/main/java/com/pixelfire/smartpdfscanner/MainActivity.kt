@@ -43,6 +43,7 @@ import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import java.io.ByteArrayOutputStream
@@ -134,6 +135,10 @@ class MainActivity : AppCompatActivity() {
     private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) compressPdf(uri) }
     private val pdfToWordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) exportPdfAsWord(uri) }
     private val qrImagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) readQrFromImage(uri) }
+    private val qrCameraPicker = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) readQrFromBitmap(bitmap)
+        else Toast.makeText(this, "Camera capture cancelled", Toast.LENGTH_SHORT).show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -205,9 +210,25 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
-    private val homeFolders = mutableListOf("New Folder", "ID Cards", "Bills")
+    private val prefs by lazy { getSharedPreferences("scanner_data", MODE_PRIVATE) }
+    private val homeFolders = mutableListOf<String>()
+    private var selectedFolder: String = "New Folder"
+    private val folderAssignments by lazy { prefs.getString("folder_assignments", "")?.split("\\n")?.filter { it.contains("|") }?.associate { it.substringBefore("|") to it.substringAfter("|") }?.toMutableMap() ?: mutableMapOf() }
+
+    private fun loadFolders() {
+        homeFolders.clear()
+        homeFolders.addAll(prefs.getStringSet("folders", setOf("New Folder", "ID Cards", "Bills")) ?: setOf("New Folder", "ID Cards", "Bills"))
+        if (homeFolders.isEmpty()) homeFolders.add("New Folder")
+    }
+    private fun saveFolders() { prefs.edit().putStringSet("folders", homeFolders.toSet()).apply() }
+    private fun assignPdf(uri: Uri) {
+        folderAssignments[uri.toString()] = selectedFolder
+        prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+    }
 
     private fun buildScreen() {
+        loadFolders()
+        selectedFolder = "New Folder"
         val bg = 0xFFF5F8FF.toInt()
         val navy = 0xFF172B4D.toInt()
         val blue = 0xFF3478F6.toInt()
@@ -698,7 +719,7 @@ class MainActivity : AppCompatActivity() {
             val params = LinearLayout.LayoutParams(-1, dp(82))
             params.bottomMargin = dp(9)
             layoutParams = params
-            setOnClickListener { showComingSoon("$name folder") }
+            setOnClickListener { showFolderContents(name) }
         }
         card.addView(TextView(this).apply {
             text = "📁"
@@ -709,7 +730,8 @@ class MainActivity : AppCompatActivity() {
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         info.addView(label(name, 16f, 0xFF666666.toInt()))
         info.addView(gap(3))
-        info.addView(label("Created today   •   0 files", 11f, 0xFF888888.toInt()))
+        val count = getSavedPdfs().count { ( _, uri) -> folderAssignments[uri.toString()] == name }
+        info.addView(label("Saved folder   •   $count file(s)", 11f, 0xFF888888.toInt()))
         card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(TextView(this).apply {
             text = "•••"
@@ -719,7 +741,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
                     when (which) {
-                        0 -> showComingSoon("$name folder")
+                        0 -> showFolderContents(name)
                         1 -> renameFolder(name)
                         2 -> deleteFolder(name)
                     }
@@ -795,6 +817,7 @@ class MainActivity : AppCompatActivity() {
                 val name = field.text.toString().trim()
                 if (name.isNotEmpty() && !homeFolders.contains(name)) {
                     homeFolders.add(name)
+                    saveFolders()
                     buildScreen()
                 }
             }.setNegativeButton("Cancel", null).show()
@@ -808,6 +831,9 @@ class MainActivity : AppCompatActivity() {
                 val index = homeFolders.indexOf(oldName)
                 if (name.isNotEmpty() && index >= 0) {
                     homeFolders[index] = name
+                    saveFolders()
+                    folderAssignments.entries.filter { it.value == oldName }.forEach { folderAssignments[it.key] = name }
+                    prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
                     buildScreen()
                 }
             }.setNegativeButton("Cancel", null).show()
@@ -815,8 +841,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun deleteFolder(name: String) {
         AlertDialog.Builder(this).setMessage("Delete folder '$name'?")
-            .setPositiveButton("Delete") { _, _ -> homeFolders.remove(name); buildScreen() }
+            .setPositiveButton("Delete") { _, _ -> homeFolders.remove(name); saveFolders(); buildScreen() }
             .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showFolderContents(folder: String) {
+        selectedFolder = folder
+        val items = getSavedPdfs().filter { folderAssignments[it.second.toString()] == folder }
+        val names = items.map { it.first }.toTypedArray()
+        if (items.isEmpty()) {
+            AlertDialog.Builder(this).setTitle(folder).setMessage("This folder is empty. New PDFs created while this folder is selected will be saved here.").setPositiveButton("OK", null).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle(folder).setItems(names) { _, which -> openPdf(items[which].second) }
+            .setPositiveButton("Close", null).show()
     }
 
     private fun shareLatestPdf() {
@@ -1234,14 +1272,16 @@ class MainActivity : AppCompatActivity() {
     private fun showPdfEditor(uri: Uri) {
         AlertDialog.Builder(this)
             .setTitle("PDF Editor")
-            .setItems(arrayOf("View PDF", "Rotate all pages", "Split into two PDFs", "Extract text", "PDF details", "Share PDF")) { _, which ->
+            .setItems(arrayOf("Open / Preview PDF", "Add text to PDF", "Add handwritten / typed signature", "Rotate all pages", "Split into two PDFs", "Extract text", "PDF details", "Share PDF")) { _, which ->
                 when (which) {
                     0 -> openPdf(uri)
-                    1 -> rotatePdfPages(uri)
-                    2 -> splitPdfFile(uri)
-                    3 -> extractPdfText(uri)
-                    4 -> showPdfDetails(uri)
-                    5 -> {
+                    1 -> addTextToPdfDialog(uri)
+                    2 -> { openSignatureEditor(); }
+                    3 -> rotatePdfPages(uri)
+                    4 -> splitPdfFile(uri)
+                    5 -> extractPdfText(uri)
+                    6 -> showPdfDetails(uri)
+                    7 -> {
                         val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
                             .putExtra(Intent.EXTRA_STREAM, uri)
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -1249,6 +1289,51 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.show()
+    }
+
+    private fun addTextToPdfDialog(uri: Uri) {
+        val field = EditText(this).apply { hint = "Enter text to place on first page"; minLines = 2 }
+        AlertDialog.Builder(this).setTitle("Add text to PDF").setView(field)
+            .setPositiveButton("Save edited PDF") { _, _ ->
+                val value = field.text.toString().trim()
+                if (value.isNotEmpty()) addTextToPdf(uri, value)
+                else Toast.makeText(this, "Enter some text first", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun addTextToPdf(uri: Uri, value: String) {
+        status.text = "Editing PDF…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val bytes = input.use { stream ->
+                    PDDocument.load(stream).use { doc ->
+                        val page = doc.getPage(0)
+                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                            cs.beginText()
+                            cs.setFont(PDType1Font.HELVETICA_BOLD, 14f)
+                            cs.setNonStrokingColor(20, 45, 90)
+                            cs.newLineAtOffset(48f, 48f)
+                            cs.showText(value.take(180).filter { it.code in 32..126 })
+                            cs.endText()
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Edited")
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved
+                        status.text = "Edited PDF saved"
+                        recent.text = "Latest: ${saved.lastPathSegment}"
+                        Toast.makeText(this, "Edited PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                        openPdf(saved)
+                    } else Toast.makeText(this, "Could not save edited PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF editing failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun compressPdf(uri: Uri) {
@@ -1322,9 +1407,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun showQrScanner() {
         AlertDialog.Builder(this).setTitle("QR Scanner")
-            .setMessage("Choose a picture containing a QR code. The app will detect and display its content.")
-            .setPositiveButton("Choose image") { _, _ -> qrImagePicker.launch("image/*") }
-            .setNegativeButton("Cancel", null).show()
+            .setItems(arrayOf("Scan with camera", "Choose QR image from gallery")) { _, which ->
+                if (which == 0) qrCameraPicker.launch(null) else qrImagePicker.launch("image/*")
+            }.show()
+    }
+
+    private fun readQrFromBitmap(bitmap: Bitmap) {
+        BarcodeScanning.getClient().process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { codes ->
+                val value = codes.mapNotNull { it.rawValue }.distinct().joinToString("\\n\\n")
+                showQrResult(value)
+                bitmap.recycle()
+            }
+            .addOnFailureListener { error ->
+                bitmap.recycle()
+                Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun showQrResult(value: String) {
+        AlertDialog.Builder(this).setTitle("QR Scanner")
+            .setMessage(value.ifBlank { "No QR code found. Try a clearer image." })
+            .setPositiveButton("Copy") { _, _ ->
+                if (value.isNotBlank()) {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QR content", value))
+                    Toast.makeText(this, "QR content copied", Toast.LENGTH_SHORT).show()
+                }
+            }.setNegativeButton("Close", null).show()
     }
 
     private fun readQrFromImage(uri: Uri) {
@@ -1332,15 +1442,8 @@ class MainActivity : AppCompatActivity() {
             val image = InputImage.fromFilePath(this, uri)
             BarcodeScanning.getClient().process(image)
                 .addOnSuccessListener { codes ->
-                    val result = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
-                    AlertDialog.Builder(this).setTitle("QR Scanner")
-                        .setMessage(result.ifBlank { "No QR code found in this image." })
-                        .setPositiveButton("Copy") { _, _ ->
-                            if (result.isNotBlank()) {
-                                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QR content", result))
-                            }
-                        }.setNegativeButton("Close", null).show()
+                    val result = codes.mapNotNull { it.rawValue }.distinct().joinToString("\\n\\n")
+                    showQrResult(result)
                 }
                 .addOnFailureListener { error ->
                     Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show()
@@ -1450,6 +1553,7 @@ class MainActivity : AppCompatActivity() {
             if (output == null) throw IllegalStateException("Unable to save PDF")
             output.write(bytes)
         }
+        assignPdf(uri)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
             contentResolver.update(uri, done, null, null)
@@ -1539,6 +1643,7 @@ class MainActivity : AppCompatActivity() {
             if (out == null) throw IllegalStateException("Unable to save PDF")
             document.writeTo(out)
         }
+        assignPdf(uri)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
             contentResolver.update(uri, done, null, null)
