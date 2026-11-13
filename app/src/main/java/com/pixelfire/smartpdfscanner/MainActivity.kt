@@ -147,203 +147,221 @@ class MainActivity : AppCompatActivity() {
     private val homeFolders = mutableListOf("New Folder", "ID Cards", "Bills")
 
     private fun buildScreen() {
-        val bg = 0xFFF7F8FA.toInt()
-        val ink = 0xFF1E3B49.toInt()
-        val blue = 0xFF078BCB.toInt()
-        val muted = 0xFF777777.toInt()
+        val bg = 0xFFF5F8FF.toInt()
+        val navy = 0xFF172B4D.toInt()
+        val blue = 0xFF3478F6.toInt()
+        val paleBlue = 0xFFEAF2FF.toInt()
+        val muted = 0xFF718096.toInt()
 
-        window.statusBarColor = ink
+        window.statusBarColor = bg
         window.navigationBarColor = 0xFFFFFFFF.toInt()
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
         }
 
-        // Compact dark-teal app bar, matching the supplied reference.
-        val appBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            setBackgroundColor(ink)
-        }
-        fun topAction(text: String, width: Int = 42, action: (() -> Unit)? = null) =
-            TextView(this).apply {
-                this.text = text
-                textSize = 25f
-                gravity = Gravity.CENTER
-                setTextColor(0xFFFFFFFF.toInt())
-                layoutParams = LinearLayout.LayoutParams(dp(width), dp(48))
-                if (action != null) setOnClickListener { action() }
-            }
-        appBar.addView(topAction("☰", 42) {
-            AlertDialog.Builder(this).setTitle("Document Scanner")
-                .setItems(arrayOf("Home", "PDF Tools", "Import ID Photo", "About")) { _, which ->
-                    when (which) {
-                        0 -> buildScreen()
-                        1 -> showPdfTools()
-                        2 -> imagePicker.launch(arrayOf("image/*"))
-                        else -> showComingSoon("About")
-                    }
-                }.show()
-        })
-        appBar.addView(label("Doc Scanner", 21f, 0xFFFFFFFF.toInt(), true).apply {
-            setPadding(dp(14), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        appBar.addView(topAction("♛", 42) { showComingSoon("Premium") }.apply {
-            setTextColor(0xFFFFC928.toInt())
-        })
-        appBar.addView(topAction("⌕", 42) { showComingSoon("Search documents") })
-        appBar.addView(topAction("⋮", 32) {
-            AlertDialog.Builder(this).setItems(arrayOf("Refresh", "Settings", "About")) { _, which ->
-                if (which == 0) buildScreen() else showComingSoon(if (which == 1) "Settings" else "About")
-            }.show()
-        })
-        root.addView(appBar)
-
-        // Main navigation tabs.
-        val tabs = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(0xFFFFFFFF.toInt())
-        }
-        fun tab(text: String, selected: Boolean, action: () -> Unit) = TextView(this).apply {
-            this.text = text
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setPadding(dp(7), dp(17), dp(7), dp(15))
-            setTextColor(if (selected) blue else muted)
-            if (selected) typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setOnClickListener { action() }
-        }
-        tabs.addView(tab("⌂  Home", true) { buildScreen() }, LinearLayout.LayoutParams(0, dp(54), 1f))
-        tabs.addView(tab("▣  PDF Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, dp(54), 1.15f))
-        tabs.addView(tab("▤  Import ID Photo", false) {
-            imagePicker.launch(arrayOf("image/*"))
-        }, LinearLayout.LayoutParams(0, dp(54), 1.45f))
-        root.addView(tabs)
-        root.addView(View(this).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(-1, dp(2)))
-
-        // Scrollable filters row.
-        val filterScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setBackgroundColor(0xFFFFFFFF.toInt())
-        }
-        val filters = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-        }
-        fun chip(text: String, selected: Boolean = false) = TextView(this).apply {
-            this.text = text
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(if (selected) 0xFFFFFFFF.toInt() else muted)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            background = rounded(if (selected) blue else 0xFFFFFFFF.toInt(), 24,
-                if (selected) blue else 0xFFD0D4D8.toInt())
-        }
-        filters.addView(chip("All docs", true))
-        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(12), 1) })
-        filters.addView(chip("◷  Recent"))
-        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(10), 1) })
-        filters.addView(chip("★  Favourite"))
-        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(10), 1) })
-        filters.addView(chip("Business Cards"))
-        filterScroll.addView(filters)
-        root.addView(filterScroll)
-        root.addView(View(this).apply { setBackgroundColor(0xFFE4E7EB.toInt()) },
-            LinearLayout.LayoutParams(-1, dp(1)))
-
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(16))
-        }
-
-        val folderHeading = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(4), dp(2), dp(10))
-        }
-        folderHeading.addView(label("Folders (${homeFolders.size})", 15f, muted, true),
-            LinearLayout.LayoutParams(0, -2, 1f))
-        folderHeading.addView(TextView(this).apply {
-            text = "▣+"
-            textSize = 23f
-            setTextColor(muted)
-            gravity = Gravity.CENTER
-            setOnClickListener { createFolderDialog() }
-        })
-        body.addView(folderHeading)
-        homeFolders.forEach { body.addView(folderCard(it)) }
-
-        body.addView(gap(14))
-        body.addView(label("Documents (${getSavedPdfNames().size})", 15f, muted, true))
-        body.addView(gap(8))
-        val docs = getSavedPdfNames()
-        if (docs.isEmpty()) {
-            val empty = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(dp(16), dp(24), dp(16), dp(24))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE4E7EB.toInt())
-            }
-            empty.addView(label("▤", 30f, blue, true))
-            empty.addView(gap(6))
-            empty.addView(label("No documents yet", 14f, ink, true))
-            empty.addView(label("Scan a document or import photos to create your first PDF.", 11f, muted))
-            body.addView(empty)
-        } else {
-            docs.forEach { body.addView(documentCard(it)) }
-        }
-
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
-            addView(body)
         }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+        }
 
-        // Fixed bottom scan/import controls. No ad banner or reserved ad space.
-        val bottom = LinearLayout(this).apply {
+        // Premium blue header.
+        val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(8), dp(18), dp(10))
-            setBackgroundColor(0xFFFFFFFF.toInt())
-            elevation = dp(8).toFloat()
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 20)
+            elevation = dp(2).toFloat()
         }
-        val camera = Button(this).apply {
-            text = "📷  Scan"
+        header.addView(TextView(this).apply {
+            text = "▣"
+            textSize = 25f
+            gravity = Gravity.CENTER
+            setTextColor(blue)
+            background = rounded(paleBlue, 14)
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        })
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        brand.addView(label("Document Scanner", 19f, navy, true))
+        brand.addView(label("Scan • Convert • Edit • Share", 11f, muted))
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(TextView(this).apply {
+            text = "♛"
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setTextColor(0xFFFFB82E.toInt())
+            setOnClickListener { showComingSoon("Premium") }
+        })
+        header.addView(TextView(this).apply {
+            text = "⌕"
+            textSize = 30f
+            gravity = Gravity.CENTER
+            setTextColor(navy)
+            setPadding(dp(12), 0, dp(4), 0)
+            setOnClickListener { showComingSoon("Search documents") }
+        })
+        content.addView(header)
+        content.addView(gap(16))
+
+        // Large scan hero card.
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = rounded(0xFFE5EFFF.toInt(), 22)
+        }
+        hero.addView(label("SMART DOCUMENT WORKSPACE", 11f, blue, true))
+        hero.addView(gap(10))
+        hero.addView(label("Scan documents.\nKeep everything organized.", 25f, navy, true))
+        hero.addView(gap(8))
+        hero.addView(label("Auto capture • Crop • Enhance • PDF export", 12f, muted))
+        hero.addView(gap(16))
+        val scanButton = Button(this).apply {
+            text = "▣   Scan Document"
             isAllCaps = false
-            textSize = 14f
+            textSize = 16f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
-            background = rounded(blue, 28)
+            background = gradient(0xFF4285F4.toInt(), 0xFF1764DE.toInt(), 16)
             backgroundTintList = null
             setOnClickListener { startDocumentScan() }
         }
-        bottom.addView(camera, LinearLayout.LayoutParams(dp(132), dp(48)))
-        val add = Button(this).apply {
-            text = "＋"
-            textSize = 24f
-            setTextColor(0xFFFFFFFF.toInt())
-            background = rounded(0xFF0879B7.toInt(), 28)
-            backgroundTintList = null
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setTitle("Add document")
-                    .setItems(arrayOf("Import images", "Scan document", "Create folder")) { _, which ->
-                        when (which) {
-                            0 -> imagePicker.launch(arrayOf("image/*"))
-                            1 -> startDocumentScan()
-                            2 -> createFolderDialog()
-                        }
-                    }.show()
-            }
-        }
-        val addParams = LinearLayout.LayoutParams(dp(58), dp(48))
-        addParams.leftMargin = dp(10)
-        bottom.addView(add, addParams)
-        root.addView(bottom)
+        hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(56)))
+        content.addView(hero)
+        content.addView(gap(20))
 
+        // Tool section title.
+        val quickTitle = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        quickTitle.addView(label("QUICK TOOLS", 15f, navy, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        quickTitle.addView(TextView(this).apply {
+            text = "VIEW ALL  ›"
+            textSize = 11f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(blue)
+            setOnClickListener { showPdfTools() }
+        })
+        content.addView(quickTitle)
+        content.addView(gap(10))
+
+        val tools = listOf(
+            Triple("Smart Scan", "Camera scanner", "▣"),
+            Triple("PDF Tools", "Merge • Split • Edit", "PDF"),
+            Triple("Import Picture", "Images to PDF", "▧"),
+            Triple("Import File", "Open PDF files", "⇧"),
+            Triple("Compress PDF", "Reduce file size", "⌁"),
+            Triple("Image to Text", "Extract OCR text", "T"),
+            Triple("PDF to Word", "Convert document", "W"),
+            Triple("QR Scanner", "Scan QR codes", "⌗")
+        )
+        tools.chunked(2).forEachIndexed { rowIndex, pair ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            pair.forEachIndexed { index, item ->
+                val accent = listOf(
+                    0xFF3478F6.toInt(), 0xFFE66AA6.toInt(),
+                    0xFF42B96B.toInt(), 0xFFFFC247.toInt(),
+                    0xFFE66AA6.toInt(), 0xFFFFC247.toInt(),
+                    0xFF3478F6.toInt(), 0xFF42B96B.toInt()
+                )[rowIndex * 2 + index]
+                val action: () -> Unit = when (rowIndex * 2 + index) {
+                    0 -> ({ startDocumentScan() })
+                    1 -> ({ showPdfTools() })
+                    2 -> ({ imagePicker.launch(arrayOf("image/*")) })
+                    3 -> ({ pdfPicker.launch(arrayOf("application/pdf")) })
+                    5 -> ({ ocrPicker.launch("image/*") })
+                    else -> ({ showComingSoon(item.first) })
+                }
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), dp(13), dp(10), dp(12))
+                    background = rounded(0xFFFFFFFF.toInt(), 17, 0xFFE8EDF5.toInt())
+                    elevation = dp(1).toFloat()
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { action() }
+                }
+                card.addView(TextView(this).apply {
+                    text = item.third
+                    textSize = 20f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setTextColor(accent)
+                    background = rounded(paleBlue, 13)
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(42))
+                })
+                card.addView(gap(8))
+                card.addView(label(item.first, 13f, navy, true))
+                card.addView(gap(3))
+                card.addView(label(item.second, 10f, muted))
+                val params = LinearLayout.LayoutParams(0, dp(116), 1f)
+                if (index == 0) params.rightMargin = dp(8) else params.leftMargin = dp(8)
+                row.addView(card, params)
+            }
+            content.addView(row)
+            content.addView(gap(10))
+        }
+
+        // Recent activity and actual document status.
+        val recentCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = rounded(0xFFFFFFFF.toInt(), 17, 0xFFE8EDF5.toInt())
+            elevation = dp(1).toFloat()
+        }
+        val recentHead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        recentHead.addView(label("RECENT ACTIVITY", 12f, navy, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        recentHead.addView(label("● READY", 10f, 0xFF24966B.toInt(), true))
+        recentCard.addView(recentHead)
+        recentCard.addView(gap(9))
+        status = label("Ready to scan your first document", 14f, navy, true)
+        recent = label("Your PDFs are saved in Downloads/DocumentScanner", 11f, muted)
+        recentCard.addView(status)
+        recentCard.addView(gap(4))
+        recentCard.addView(recent)
+        content.addView(recentCard)
+        content.addView(gap(16))
+
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // Four-item native bottom navigation.
+        val nav = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(6), dp(7), dp(6), dp(7))
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            elevation = dp(8).toFloat()
+        }
+        fun navItem(symbol: String, title: String, selected: Boolean, action: () -> Unit) =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(5), dp(3), dp(5), dp(3))
+                addView(label(symbol, 19f, if (selected) blue else 0xFF9AA5B5.toInt(), true))
+                addView(label(title, 9f, if (selected) blue else muted, selected))
+                setOnClickListener { action() }
+            }
+        nav.addView(navItem("⌂", "Home", true) { buildScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
+        nav.addView(navItem("▤", "Docs", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
+        nav.addView(navItem("▦", "Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
+        nav.addView(navItem("♙", "Profile", false) { showComingSoon("Profile") }, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(nav)
         setContentView(root)
     }
 
