@@ -957,10 +957,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun openFeedbackEmail(reportBug: Boolean) {
         val subject = if (reportBug) "DocNexa bug report" else "DocNexa support request"
+        val appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" }
         val body = if (reportBug) {
-            "Please describe the problem below:\n\nApp version: ${BuildConfig.VERSION_NAME}\nAndroid: ${Build.VERSION.RELEASE}\nDevice: ${Build.MANUFACTURER} ${Build.MODEL}\n\nSteps to reproduce:\n\nExpected result:\n\nActual result:"
+            "Please describe the problem below:\n\nApp version: ${appVersion}\nAndroid: ${Build.VERSION.RELEASE}\nDevice: ${Build.MANUFACTURER} ${Build.MODEL}\n\nSteps to reproduce:\n\nExpected result:\n\nActual result:"
         } else {
-            "Hello DocNexa team,\n\nI need help with:\n\nApp version: ${BuildConfig.VERSION_NAME}"
+            "Hello DocNexa team,\n\nI need help with:\n\nApp version: ${appVersion}"
         }
         val intent = Intent(Intent.ACTION_SENDTO).apply {
             data = Uri.parse("mailto:")
