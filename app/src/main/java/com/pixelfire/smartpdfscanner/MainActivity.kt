@@ -1466,7 +1466,7 @@ class MainActivity : AppCompatActivity() {
                             when (shape) {
                                 0 -> { cs.addRect(55f, 80f, 180f, 90f); cs.stroke() }
                                 1 -> { cs.moveTo(55f, 100f); cs.lineTo(260f, 100f); cs.stroke() }
-                                else -> { cs.addEllipse(150f, 130f, 45f, 45f); cs.stroke() }
+                                else -> { cs.moveTo(195f, 150f); cs.curveTo(195f, 174.85f, 174.85f, 195f, 150f, 195f); cs.curveTo(125.15f, 195f, 105f, 174.85f, 105f, 150f); cs.curveTo(105f, 125.15f, 125.15f, 105f, 150f, 105f); cs.curveTo(174.85f, 105f, 195f, 125.15f, 195f, 150f); cs.stroke() }
                             }
                         }
                         ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
