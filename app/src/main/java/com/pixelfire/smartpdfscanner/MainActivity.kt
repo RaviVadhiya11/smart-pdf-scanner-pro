@@ -71,7 +71,6 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
 
 
 private class SignatureCanvas(context: android.content.Context) : View(context) {
