@@ -37,6 +37,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -132,6 +133,7 @@ class MainActivity : AppCompatActivity() {
     private val pdfEditorPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfEditor(uri) }
     private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) compressPdf(uri) }
     private val pdfToWordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) exportPdfAsWord(uri) }
+    private val qrImagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) readQrFromImage(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1226,6 +1228,126 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not sign PDF", Toast.LENGTH_LONG).show() }
             } finally { signaturePng = null }
         }.start()
+    }
+
+
+    private fun showPdfEditor(uri: Uri) {
+        AlertDialog.Builder(this)
+            .setTitle("PDF Editor")
+            .setItems(arrayOf("View PDF", "Rotate all pages", "Split into two PDFs", "Extract text", "PDF details", "Share PDF")) { _, which ->
+                when (which) {
+                    0 -> openPdf(uri)
+                    1 -> rotatePdfPages(uri)
+                    2 -> splitPdfFile(uri)
+                    3 -> extractPdfText(uri)
+                    4 -> showPdfDetails(uri)
+                    5 -> {
+                        val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
+                            .putExtra(Intent.EXTRA_STREAM, uri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        startActivity(Intent.createChooser(send, "Share PDF"))
+                    }
+                }
+            }.show()
+    }
+
+    private fun compressPdf(uri: Uri) {
+        status.text = "Optimizing PDF…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val bytes = input.use { stream ->
+                    PDDocument.load(stream).use { document ->
+                        ByteArrayOutputStream().also { document.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Compressed")
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved
+                        status.text = "PDF optimized and saved"
+                        recent.text = "Latest: ${saved.lastPathSegment}"
+                        Toast.makeText(this, "Optimized PDF saved. Size reduction depends on the source PDF.", Toast.LENGTH_LONG).show()
+                    } else Toast.makeText(this, "Could not save optimized PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF optimization failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun exportPdfAsWord(uri: Uri) {
+        status.text = "Converting PDF text…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val text = input.use { stream -> PDDocument.load(stream).use { PDFTextStripper().getText(it) } }
+                if (text.isBlank()) error("No selectable text found in this PDF")
+                val escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    .replace("\n", "<br/>")
+                val html = "<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:Arial\">$escaped</body></html>"
+                val saved = saveDocumentBytes(html.toByteArray(Charsets.UTF_8), "Converted", "application/msword", "doc")
+                runOnUiThread {
+                    if (saved != null) {
+                        status.text = "Word-compatible document saved"
+                        Toast.makeText(this, "Word document saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    } else Toast.makeText(this, "Could not save Word document", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF conversion failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, "${prefix}_${stamp}.${extension}")
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        contentResolver.openOutputStream(uri).use { output ->
+            if (output == null) throw IllegalStateException("Unable to save document")
+            output.write(bytes)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+        }
+        return uri
+    }
+
+    private fun showQrScanner() {
+        AlertDialog.Builder(this).setTitle("QR Scanner")
+            .setMessage("Choose a picture containing a QR code. The app will detect and display its content.")
+            .setPositiveButton("Choose image") { _, _ -> qrImagePicker.launch("image/*") }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun readQrFromImage(uri: Uri) {
+        try {
+            val image = InputImage.fromFilePath(this, uri)
+            BarcodeScanning.getClient().process(image)
+                .addOnSuccessListener { codes ->
+                    val result = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
+                    AlertDialog.Builder(this).setTitle("QR Scanner")
+                        .setMessage(result.ifBlank { "No QR code found in this image." })
+                        .setPositiveButton("Copy") { _, _ ->
+                            if (result.isNotBlank()) {
+                                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QR content", result))
+                            }
+                        }.setNegativeButton("Close", null).show()
+                }
+                .addOnFailureListener { error ->
+                    Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show()
+                }
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Cannot read selected image", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showComingSoon(feature: String) {
