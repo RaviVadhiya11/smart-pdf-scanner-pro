@@ -893,6 +893,29 @@ class MainActivity : AppCompatActivity() {
             addView(password, LinearLayout.LayoutParams(-1, dp(52)))
             addView(gap(8))
         }
+        val extra = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        val forgot = TextView(this).apply {
+            text = "Forgot password?"
+            textSize = 12f
+            setTextColor(0xFF1764DE.toInt())
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setOnClickListener { sendCloudPasswordReset(email.text.toString().trim()) }
+        }
+        val resend = TextView(this).apply {
+            text = "Resend verification"
+            textSize = 12f
+            setTextColor(0xFF1764DE.toInt())
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setOnClickListener { resendCloudConfirmation(email.text.toString().trim()) }
+        }
+        extra.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
+        extra.addView(resend, LinearLayout.LayoutParams(0, -2, 1f))
+        box.addView(extra)
+
         val dialog = AlertDialog.Builder(this)
             .setTitle(if (startWithSignup) "Create your account" else "Welcome to DocNexa")
             .setView(box)
@@ -909,30 +932,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         dialog.show()
-        // Recovery and confirmation actions remain available without leaving the app.
-        val extra = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(4), dp(12), dp(8))
-        }
-        val forgot = TextView(this).apply {
-            text = "Forgot password?"
-            textSize = 12f
-            setTextColor(0xFF1764DE.toInt())
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setOnClickListener { sendCloudPasswordReset(email.text.toString().trim(), dialog) }
-        }
-        val resend = TextView(this).apply {
-            text = "Resend confirmation"
-            textSize = 12f
-            setTextColor(0xFF1764DE.toInt())
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setOnClickListener { resendCloudConfirmation(email.text.toString().trim(), dialog) }
-        }
-        extra.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
-        extra.addView(resend, LinearLayout.LayoutParams(0, -2, 1f))
-        // Keep the dialog compact; actions are added to the form before showing in the next screen.
-        // The two recovery actions are available from the Account / Cloud Sync menu as well.
     }
 
     private fun resendCloudConfirmation(email: String, dialog: AlertDialog? = null) {
