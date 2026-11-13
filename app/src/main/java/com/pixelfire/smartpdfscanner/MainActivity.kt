@@ -1029,7 +1029,13 @@ class MainActivity : AppCompatActivity() {
             val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
             val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?" else "${MediaStore.MediaColumns.MIME_TYPE} = ?"
             val args = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) arrayOf("Download/DocumentScanner/", "application/pdf") else arrayOf("application/pdf")
-            contentResolver.query(collection, projection, selection, args, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+            val sortOrder = when (prefs.getInt("document_sort_order", 2)) {
+                0 -> "${MediaStore.MediaColumns.DISPLAY_NAME} ASC"
+                1 -> "${MediaStore.MediaColumns.DISPLAY_NAME} DESC"
+                3 -> "${MediaStore.MediaColumns.DATE_ADDED} ASC"
+                else -> "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+            }
+            contentResolver.query(collection, projection, selection, args, sortOrder)?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                 val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
                 while (cursor.moveToNext() && results.size < 100) {
