@@ -120,10 +120,12 @@ class MainActivity : AppCompatActivity() {
                 lastPdf = copyPdfToDownloads(pdf.uri)
                 if (lastPdf != null) {
                     prefs.edit().putBoolean("has_completed_first_scan", true).apply()
+                    Toast.makeText(this, "Saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    // Rebuild the home screen immediately so the new PDF appears without restarting.
+                    buildScreen()
+                } else {
+                    Toast.makeText(this, "PDF could not be saved. Please scan again.", Toast.LENGTH_LONG).show()
                 }
-                status.text = "Scan complete • ${pdf.pageCount} page(s)"
-                recent.text = "Latest: ${lastPdf?.lastPathSegment ?: "PDF"}"
-                Toast.makeText(this, "Saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
             } else status.text = "No PDF was returned."
         } else status.text = "Scan cancelled."
     }
@@ -1940,6 +1942,7 @@ class MainActivity : AppCompatActivity() {
                     lastPdf = output
                     status.text = "PDF created • ${uris.size} page(s)"
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
+                    if (output != null) buildScreen()
                     Toast.makeText(this, "PDF saved to Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
