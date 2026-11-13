@@ -781,7 +781,7 @@ class MainActivity : AppCompatActivity() {
             isFocusable = true
             setOnClickListener {
                 drawer.dismiss()
-                if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
+                if (cloudToken().isBlank()) showCloudLoginDialog(startWithSignup = true) else cloudAccountMenu()
             }
         }
         authActions.addView(loginButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(6) })
@@ -856,12 +856,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
 
-    private fun showCloudLoginDialog() {
+    private fun showCloudLoginDialog(startWithSignup: Boolean = false) {
         val email = EditText(this).apply { hint = "Email address"; inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
         val password = EditText(this).apply { hint = "Password (minimum 6 characters)"; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(email); addView(password) }
-        AlertDialog.Builder(this).setTitle("DocNexa Cloud")
-            .setMessage("Sign in to back up your PDFs and restore them on another device.")
+        AlertDialog.Builder(this).setTitle(if (startWithSignup) "Create DocNexa Account" else "DocNexa Cloud")
+            .setMessage(if (startWithSignup) "Enter your email and password, then tap Create Account to enable PDF backup and sync." else "Sign in to back up your PDFs and restore them on another device.")
             .setView(box)
             .setPositiveButton("Sign In", null)
             .setNeutralButton("Create Account", null)
