@@ -38,6 +38,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.HorizontalScrollView
 import android.widget.TextView
@@ -56,6 +57,8 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -313,11 +316,12 @@ class MainActivity : AppCompatActivity() {
         brand.addView(label("Scan • Convert • Edit • Share", 11f, muted))
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(TextView(this).apply {
-            text = "♛"
+            text = "★"
             textSize = 24f
             gravity = Gravity.CENTER
             setTextColor(0xFFFFB82E.toInt())
-            setOnClickListener { showComingSoon("Premium") }
+            contentDescription = "Favourite documents"
+            setOnClickListener { showFavouriteDocs() }
         })
         header.addView(TextView(this).apply {
             text = "⌕"
@@ -722,7 +726,7 @@ class MainActivity : AppCompatActivity() {
         fun separator() { menu.addView(View(this).apply { setBackgroundColor(0xFFE6E6E6.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) }) }
 
         section("General")
-        item("♡", "Favourite") { showComingSoon("Favourite") }
+        item("♡", "Favourite") { showFavouriteDocs() }
         item("◇", "Manage tags") { manageTagsDialog() }
         item("▤", "Trash") { showTrashScreen() }
         item("⚙", "Settings") { showSettingsDialog() }
@@ -732,7 +736,7 @@ class MainActivity : AppCompatActivity() {
         item("▣", "Edit/Create PDF") { imagePicker.launch(arrayOf("image/*")) }
         item("✍", "Signature") { openSignatureEditor() }
         item("▦", "QR Scanner") { showQrScanner() }
-        item("▦", "QR Generator") { showComingSoon("QR Generator") }
+        item("▦", "QR Generator") { showQrGenerator() }
         separator()
         section("Other")
         item("?", "Help and FAQ") {
@@ -1006,12 +1010,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(8), 0, dp(4), 0)
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setTitle(name)
-                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Move to Trash")) { _, which ->
+                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Add/Remove Favourite", "Move to Trash")) { _, which ->
                         when (which) {
                             0 -> openPdf(uri)
                             1 -> showPdfEditor(uri)
                             2 -> sharePdf(uri)
-                            3 -> moveToTrash(uri)
+                            3 -> toggleFavourite(uri)
+                            4 -> moveToTrash(uri)
                         }
                     }.show()
             }
@@ -1931,6 +1936,64 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, e.localizedMessage ?: "Cannot read selected image", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun toggleFavourite(uri: Uri) {
+        val set = (prefs.getStringSet("favourite_uris", emptySet()) ?: emptySet()).toMutableSet()
+        if (!set.add(uri.toString())) set.remove(uri.toString())
+        prefs.edit().putStringSet("favourite_uris", set).apply()
+        Toast.makeText(this, if (set.contains(uri.toString())) "Added to Favourite" else "Removed from Favourite", Toast.LENGTH_SHORT).show()
+        buildScreen()
+    }
+
+    private fun showFavouriteDocs() {
+        val favourites = prefs.getStringSet("favourite_uris", emptySet()) ?: emptySet()
+        val docs = getSavedPdfs().filter { favourites.contains(it.second.toString()) }
+        if (docs.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("Favourite").setMessage("No favourite PDFs yet. Open a document menu and choose Add/Remove Favourite.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Favourite documents")
+            .setItems(docs.map { it.first }.toTypedArray()) { _, index -> openPdf(docs[index].second) }
+            .setNegativeButton("Close", null).show()
+    }
+
+    private fun showQrGenerator() {
+        val field = EditText(this).apply {
+            hint = "Enter text, phone number or website URL"
+            minLines = 2
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        AlertDialog.Builder(this).setTitle("Create QR Code").setView(field)
+            .setPositiveButton("Generate") { _, _ ->
+                val value = field.text.toString().trim()
+                if (value.isBlank()) {
+                    Toast.makeText(this, "Enter text or a URL first", Toast.LENGTH_SHORT).show()
+                } else {
+                    try {
+                        val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 900, 900)
+                        val bitmap = Bitmap.createBitmap(900, 900, Bitmap.Config.ARGB_8888)
+                        for (x in 0 until 900) for (y in 0 until 900) {
+                            bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                        }
+                        val bytes = ByteArrayOutputStream().also { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }.toByteArray()
+                        val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
+                        if (saved != null) {
+                            val preview = ImageView(this).apply {
+                                setImageBitmap(bitmap)
+                                adjustViewBounds = true
+                                setPadding(dp(12), dp(12), dp(12), dp(12))
+                            }
+                            AlertDialog.Builder(this).setTitle("QR Code Ready").setView(preview)
+                                .setMessage("Saved to Downloads. You can share the PNG from your file manager.")
+                                .setPositiveButton("Done", null).show()
+                        } else Toast.makeText(this, "Could not save QR image", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.localizedMessage ?: "QR generation failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showComingSoon(feature: String) {
