@@ -104,10 +104,23 @@ internal object SupabaseCloud {
                 output.toByteArray()
             } ?: ByteArray(0)
             if (code !in 200..299) {
+                val raw = String(bytes, Charsets.UTF_8)
                 val message = try {
-                    val json = JSONObject(String(bytes, Charsets.UTF_8))
-                    json.optString("message").ifBlank { json.optString("error_description").ifBlank { json.optString("error") } }
-                } catch (_: Exception) { String(bytes, Charsets.UTF_8) }
+                    val json = JSONObject(raw)
+                    json.optString("message")
+                        .ifBlank { json.optString("msg") }
+                        .ifBlank { json.optString("error_description") }
+                        .ifBlank { json.optString("error") }
+                } catch (_: Exception) { raw }
+                if (code == 429) {
+                    val retryAfter = connection.getHeaderField("Retry-After")?.toLongOrNull()
+                    val waitText = if (retryAfter != null && retryAfter > 0) {
+                        " Try again in about ${(retryAfter + 59) / 60} minute(s)."
+                    } else {
+                        " Please wait before requesting another email, then try again."
+                    }
+                    throw IllegalStateException("Too many password reset or email requests.$waitText")
+                }
                 throw IllegalStateException("Supabase error $code: ${message.ifBlank { "Request failed" }}")
             }
             return bytes
