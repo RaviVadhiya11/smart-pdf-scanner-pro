@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun gradient(start: Int, end: Int, radius: Int): GradientDrawable =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(start, end)).apply {
+        GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(start, end)).apply {
             cornerRadius = dp(radius).toFloat()
         }
 
@@ -104,8 +104,8 @@ class MainActivity : AppCompatActivity() {
     private fun toolCard(title: String, subtitle: String, symbol: String, accent: Int, action: () -> Unit): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(17), dp(14), dp(16))
-            background = rounded(0xFF151F35.toInt(), 20, 0xFF263653.toInt())
+            setPadding(dp(15), dp(15), dp(12), dp(13))
+            background = rounded(0xFFFFFFFF.toInt(), 18, 0xFFE5EAF2.toInt())
             elevation = dp(2).toFloat()
             isClickable = true
             isFocusable = true
@@ -113,160 +113,164 @@ class MainActivity : AppCompatActivity() {
         }
         val icon = TextView(this).apply {
             text = symbol
-            textSize = 24f
+            textSize = 22f
             setTextColor(accent)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            background = rounded(0xFF202E49.toInt(), 13)
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(44))
+            background = rounded(0xFFEAF2FF.toInt(), 13)
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(44))
         }
         card.addView(icon)
-        card.addView(gap(13))
-        card.addView(label(title, 15f, 0xFFF5F7FF.toInt(), true))
-        card.addView(gap(5))
-        card.addView(label(subtitle, 11f, 0xFFAAB7CF.toInt()))
+        card.addView(gap(11))
+        card.addView(label(title, 14f, 0xFF17243A.toInt(), true))
+        card.addView(gap(4))
+        card.addView(label(subtitle, 10.5f, 0xFF69778D.toInt()))
         return card
     }
 
     private fun buildScreen() {
-        val bg = 0xFF080E1C.toInt()
-        val white = 0xFFF5F7FF.toInt()
-        val muted = 0xFFAAB7CF.toInt()
-        val aqua = 0xFF69DED5.toInt()
-        val purple = 0xFF8A72FF.toInt()
+        val bg = 0xFFF5F7FB.toInt()
+        val ink = 0xFF14233A.toInt()
+        val muted = 0xFF69778D.toInt()
+        val blue = 0xFF1769E8.toInt()
+        val cyan = 0xFF16A6B2.toInt()
+
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(20), dp(30))
+            setPadding(dp(20), dp(20), dp(20), dp(30))
             setBackgroundColor(bg)
         }
 
-        // Premium brand header
+        // Clean white header
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val logo = TextView(this).apply {
-            text = "D"
-            textSize = 23f
+            text = "▣"
+            textSize = 24f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(white)
+            setTextColor(blue)
             gravity = Gravity.CENTER
-            background = gradient(0xFF7964F4.toInt(), 0xFF35BFC0.toInt(), 16)
+            background = rounded(0xFFE4EFFF.toInt(), 15)
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         }
         header.addView(logo)
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
+            setPadding(dp(11), 0, 0, 0)
         }
-        brand.addView(label("DOCUMENT SCANNER", 18f, white, true))
-        brand.addView(gap(2))
-        brand.addView(label("Scan  •  Organize  •  Share", 11f, muted))
+        brand.addView(label("DOCUMENT SCANNER", 17f, ink, true))
+        brand.addView(gap(3))
+        brand.addView(label("Scan  •  Convert  •  Edit  •  Share", 10.5f, muted))
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        val pro = TextView(this).apply {
+        header.addView(TextView(this).apply {
             text = "✦ PRO"
-            textSize = 11f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(aqua)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(0xFF142F3A.toInt(), 30)
-        }
-        header.addView(pro)
-        content.addView(header)
-        content.addView(gap(25))
-
-        // Hero action panel
-        val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(21), dp(22), dp(21), dp(21))
-            background = gradient(0xFF27365A.toInt(), 0xFF172642.toInt(), 24)
-            elevation = dp(5).toFloat()
-        }
-        val tag = TextView(this).apply {
-            text = "✦  PAPERLESS WORKSPACE"
             textSize = 10f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(aqua)
-            letterSpacing = 0.08f
+            setTextColor(0xFF9A6500.toInt())
+            setPadding(dp(11), dp(8), dp(11), dp(8))
+            background = rounded(0xFFFFF1C9.toInt(), 30)
+        })
+        content.addView(header)
+        content.addView(gap(22))
+
+        // Soft blue information banner
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(17), dp(17), dp(13), dp(17))
+            background = rounded(0xFFE3F0FF.toInt(), 22)
         }
-        hero.addView(tag)
-        hero.addView(gap(14))
-        hero.addView(label("Every page.\nPerfectly scanned.", 27f, white, true))
-        hero.addView(gap(9))
-        hero.addView(label("Turn paper documents into clear,\nshareable digital PDFs.", 12f, 0xFFC1CBE0.toInt()))
-        hero.addView(gap(19))
+        val heroText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heroText.addView(label("SCAN TO PDF", 10f, blue, true))
+        heroText.addView(gap(8))
+        heroText.addView(label("Your papers,\nperfectly organized.", 21f, ink, true))
+        heroText.addView(gap(7))
+        heroText.addView(label("Auto crop • Enhance • Share", 10f, muted))
+        hero.addView(heroText, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(TextView(this).apply {
+            text = "▤"
+            textSize = 54f
+            setTextColor(blue)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(82), dp(100))
+        })
+        content.addView(hero)
+        content.addView(gap(15))
+
         val scanButton = Button(this).apply {
-            text = "＋   Scan document"
+            text = "▣   Scan Document"
             isAllCaps = false
             textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(white)
-            background = gradient(0xFF8B70FF.toInt(), 0xFF6551DB.toInt(), 14)
+            setTextColor(0xFFFFFFFF.toInt())
+            background = gradient(0xFF2879F2.toInt(), 0xFF0755CF.toInt(), 16)
             backgroundTintList = null
             elevation = dp(3).toFloat()
             setOnClickListener { startDocumentScan() }
         }
-        hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(56)))
-        hero.addView(gap(10))
-        hero.addView(label("AUTO EDGE DETECTION   •   SMART CROP   •   PDF", 9f, 0xFFB7C8E5.toInt(), true))
-        content.addView(hero)
-        content.addView(gap(26))
+        content.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
+        content.addView(gap(23))
 
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        section.addView(label("QUICK TOOLS", 13f, white, true), LinearLayout.LayoutParams(0, -2, 1f))
-        section.addView(label("4 TOOLS", 9f, aqua, true))
+        section.addView(label("QUICK TOOLS", 13f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+        section.addView(label("VIEW ALL  ›", 9f, blue, true))
         content.addView(section)
-        content.addView(gap(13))
+        content.addView(gap(12))
 
         addToolRow(content,
-            toolCard("Import images", "Multiple photos to PDF", "▧", aqua) {
+            toolCard("Import Images", "Create PDF from photos", "▧", blue) {
                 imagePicker.launch(arrayOf("image/*"))
             },
-            toolCard("My documents", "Browse and open PDFs", "▤", 0xFFB49BFF.toInt()) {
+            toolCard("My Documents", "Browse saved PDF files", "▤", 0xFFDA8A18.toInt()) {
                 pdfPicker.launch(arrayOf("application/pdf"))
             })
-        content.addView(gap(11))
+        content.addView(gap(10))
         addToolRow(content,
-            toolCard("OCR text", "Extract text from image", "T", 0xFFFFC778.toInt()) {
+            toolCard("OCR Text", "Extract text from images", "T", 0xFF7756D8.toInt()) {
                 ocrPicker.launch("image/*")
             },
-            toolCard("PDF tools", "Create PDF from images", "PDF", 0xFF7DC8FF.toInt()) {
+            toolCard("PDF Tools", "Convert • Merge • Compress", "PDF", 0xFF1A9B75.toInt()) {
                 imagePicker.launch(arrayOf("image/*"))
             })
-        content.addView(gap(22))
+        content.addView(gap(21))
 
-        // Activity/status panel
+        // Recent activity panel
         val activity = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(15), dp(16), dp(15))
-            background = rounded(0xFF111B2E.toInt(), 18, 0xFF263653.toInt())
+            setPadding(dp(15), dp(14), dp(15), dp(14))
+            background = rounded(0xFFFFFFFF.toInt(), 18, 0xFFE5EAF2.toInt())
+            elevation = dp(1).toFloat()
         }
         val activityHead = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        activityHead.addView(label("RECENT ACTIVITY", 10f, aqua, true), LinearLayout.LayoutParams(0, -2, 1f))
-        activityHead.addView(label("● READY", 9f, 0xFF83D7A9.toInt(), true))
+        activityHead.addView(label("RECENT ACTIVITY", 10f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+        activityHead.addView(label("● READY", 9f, 0xFF198754.toInt(), true))
         activity.addView(activityHead)
-        activity.addView(gap(10))
-        status = label("Ready to scan", 14f, white, true)
+        activity.addView(gap(9))
+        status = label("Ready to scan", 13f, ink, true)
         activity.addView(status)
-        activity.addView(gap(5))
-        recent = label("Your PDFs are saved in Downloads/DocumentScanner.", 11f, muted)
+        activity.addView(gap(4))
+        recent = label("Your PDFs are saved in Downloads/DocumentScanner.", 10.5f, muted)
         activity.addView(recent)
         content.addView(activity)
-        content.addView(gap(23))
+        content.addView(gap(21))
 
-        content.addView(label("PRIVATE BY DESIGN", 10f, aqua, true).apply {
+        content.addView(label("SECURE • SIMPLE • PRIVATE", 10f, cyan, true).apply {
             gravity = Gravity.CENTER
-            letterSpacing = 0.12f
         })
         content.addView(gap(5))
-        content.addView(label("Scanning and OCR are processed on your device.", 10f, muted).apply {
+        content.addView(label("Scan and OCR are processed on your device.", 10f, muted).apply {
             gravity = Gravity.CENTER
         })
 
@@ -280,9 +284,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun addToolRow(parent: LinearLayout, first: View, second: View) {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(first, LinearLayout.LayoutParams(0, dp(154), 1f))
-        row.addView(View(this), LinearLayout.LayoutParams(dp(11), 1))
-        row.addView(second, LinearLayout.LayoutParams(0, dp(154), 1f))
+        row.addView(first, LinearLayout.LayoutParams(0, dp(148), 1f))
+        row.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
+        row.addView(second, LinearLayout.LayoutParams(0, dp(148), 1f))
         parent.addView(row)
     }
 
