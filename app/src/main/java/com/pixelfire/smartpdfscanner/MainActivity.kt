@@ -230,8 +230,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), 0, dp(4), 0)
             setOnClickListener { showComingSoon("Search documents") }
         })
-        content.addView(header)
-        content.addView(gap(12))
+        // Keep the brand header outside the ScrollView so it stays fixed while content moves.
+        root.addView(header, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = dp(18)
+            rightMargin = dp(18)
+            topMargin = dp(12)
+            bottomMargin = dp(12)
+        })
 
         // Main navigation tabs requested: Home, PDF Tools, Import ID Photo.
         val topTabs = LinearLayout(this).apply {
