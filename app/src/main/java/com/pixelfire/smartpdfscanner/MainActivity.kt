@@ -565,7 +565,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDocumentSearch() {
-        val field = EditText(this).apply { hint = "Enter document name"; singleLine = true }
+        val field = EditText(this).apply { hint = "Enter document name"; setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Search documents").setView(field)
             .setPositiveButton("Search") { _, _ ->
                 val query = field.text.toString().trim()
