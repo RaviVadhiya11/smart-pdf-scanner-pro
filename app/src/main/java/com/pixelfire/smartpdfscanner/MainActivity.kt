@@ -857,31 +857,117 @@ class MainActivity : AppCompatActivity() {
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
 
     private fun showCloudLoginDialog(startWithSignup: Boolean = false) {
-        val email = EditText(this).apply { hint = "Email address"; inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
-        val password = EditText(this).apply { hint = "Password (minimum 6 characters)"; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(email); addView(password) }
-        AlertDialog.Builder(this).setTitle(if (startWithSignup) "Create DocNexa Account" else "DocNexa Cloud")
-            .setMessage(if (startWithSignup) "Enter your email and password, then tap Create Account to enable PDF backup and sync." else "Sign in to back up your PDFs and restore them on another device.")
+        val email = EditText(this).apply {
+            hint = "Email address"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            singleLine = true
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
+        }
+        val password = EditText(this).apply {
+            hint = "Password (minimum 6 characters)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            singleLine = true
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
+        }
+        val title = label("DOCNEXA ACCOUNT", 12f, 0xFF3478F6.toInt(), true)
+        val subtitle = label(
+            if (startWithSignup) "Create your account to back up and access PDFs across devices."
+            else "Sign in to securely access your DocNexa cloud documents.",
+            13f, 0xFF68778E.toInt()
+        )
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(8), dp(22), dp(4))
+            addView(title)
+            addView(gap(8))
+            addView(subtitle)
+            addView(gap(16))
+            addView(label("EMAIL", 11f, 0xFF34445E.toInt(), true))
+            addView(gap(5))
+            addView(email, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(gap(12))
+            addView(label("PASSWORD", 11f, 0xFF34445E.toInt(), true))
+            addView(gap(5))
+            addView(password, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(gap(8))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (startWithSignup) "Create your account" else "Welcome to DocNexa")
             .setView(box)
             .setPositiveButton("Sign In", null)
             .setNeutralButton("Create Account", null)
             .setNegativeButton("Continue as Guest", null)
-            .create().also { dialog ->
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        cloudAuthenticate(email.text.toString().trim(), password.text.toString(), false, dialog)
-                    }
-                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                        cloudAuthenticate(email.text.toString().trim(), password.text.toString(), true, dialog)
-                    }
-                }
-                dialog.show()
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                cloudAuthenticate(email.text.toString().trim(), password.text.toString(), false, dialog)
             }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                cloudAuthenticate(email.text.toString().trim(), password.text.toString(), true, dialog)
+            }
+        }
+        dialog.show()
+        // Recovery and confirmation actions remain available without leaving the app.
+        val extra = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(4), dp(12), dp(8))
+        }
+        val forgot = TextView(this).apply {
+            text = "Forgot password?"
+            textSize = 12f
+            setTextColor(0xFF1764DE.toInt())
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { sendCloudPasswordReset(email.text.toString().trim(), dialog) }
+        }
+        val resend = TextView(this).apply {
+            text = "Resend confirmation"
+            textSize = 12f
+            setTextColor(0xFF1764DE.toInt())
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { resendCloudConfirmation(email.text.toString().trim(), dialog) }
+        }
+        extra.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
+        extra.addView(resend, LinearLayout.LayoutParams(0, -2, 1f))
+        // Keep the dialog compact; actions are added to the form before showing in the next screen.
+        // The two recovery actions are available from the Account / Cloud Sync menu as well.
+    }
+
+    private fun resendCloudConfirmation(email: String, dialog: AlertDialog? = null) {
+        if (email.isBlank() || !email.contains("@")) {
+            Toast.makeText(this, "Enter your email address first.", Toast.LENGTH_LONG).show()
+            return
+        }
+        Thread {
+            try {
+                SupabaseCloud.resendConfirmation(email)
+                runOnUiThread { Toast.makeText(this, "Confirmation email sent. Check your inbox and spam folder.", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not resend confirmation email.", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun sendCloudPasswordReset(email: String, dialog: AlertDialog? = null) {
+        if (email.isBlank() || !email.contains("@")) {
+            Toast.makeText(this, "Enter your email address first.", Toast.LENGTH_LONG).show()
+            return
+        }
+        Thread {
+            try {
+                SupabaseCloud.sendPasswordReset(email)
+                runOnUiThread { Toast.makeText(this, "Password reset email sent. Check your inbox.", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not send reset email.", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun cloudAuthenticate(email: String, password: String, signUp: Boolean, dialog: AlertDialog) {
-        if (email.isBlank() || !email.contains("@") || password.length < 6) {
-            Toast.makeText(this, "Enter a valid email and password (6+ characters).", Toast.LENGTH_LONG).show()
+        if (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() || password.length < 8) {
+            Toast.makeText(this, "Enter a valid email and a password with at least 8 characters.", Toast.LENGTH_LONG).show()
             return
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
@@ -895,19 +981,29 @@ class MainActivity : AppCompatActivity() {
                             .putString("cloud_user_id", result.userId)
                             .putString("cloud_email", email).apply()
                         dialog.dismiss()
-                        Toast.makeText(this, "Cloud account connected.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
                         syncCloudNow()
                     } else {
                         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
                         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
-                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                        if (signUp) {
+                            AlertDialog.Builder(this)
+                                .setTitle("Verify your email")
+                                .setMessage("We sent a confirmation link to $email. Open that email, tap Confirm, then return to DocNexa and Sign In. Also check Spam/Junk.")
+                                .setPositiveButton("I’ll sign in") { _, _ -> dialog.dismiss(); showCloudLoginDialog(false) }
+                                .setNeutralButton("Resend email") { _, _ -> resendCloudConfirmation(email, dialog) }
+                                .setNegativeButton("Not now", null)
+                                .show()
+                        } else {
+                            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
                     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
-                    Toast.makeText(this, e.localizedMessage ?: "Cloud sign-in failed", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, e.localizedMessage ?: "Cloud authentication failed.", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
