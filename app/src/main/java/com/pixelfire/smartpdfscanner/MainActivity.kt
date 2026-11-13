@@ -868,7 +868,7 @@ class MainActivity : AppCompatActivity() {
         addPdfToolHorizontal(body, listOf(
             PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Page Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showSignaturePad() },
+            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { openSignatureEditor() },
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
@@ -1120,7 +1120,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun showSignaturePad() {
+    private fun openSignatureEditor() {
         val canvas = SignatureCanvas(this)
         val typed = EditText(this).apply { hint = "Enter signature text"; textSize = 24f }
         val preview = TextView(this).apply {
