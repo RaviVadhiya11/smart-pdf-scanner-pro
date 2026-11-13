@@ -118,6 +118,9 @@ class MainActivity : AppCompatActivity() {
             val pdf = scan?.pdf
             if (pdf != null) {
                 lastPdf = copyPdfToDownloads(pdf.uri)
+                if (lastPdf != null) {
+                    prefs.edit().putBoolean("has_completed_first_scan", true).apply()
+                }
                 status.text = "Scan complete • ${pdf.pageCount} page(s)"
                 recent.text = "Latest: ${lastPdf?.lastPathSegment ?: "PDF"}"
                 Toast.makeText(this, "Saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
@@ -470,28 +473,46 @@ class MainActivity : AppCompatActivity() {
             content.addView(gap(10))
         }
 
-        // Recent activity and actual document status.
-        val recentCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            background = rounded(0xFFFFFFFF.toInt(), 17, 0xFFE8EDF5.toInt())
-            elevation = dp(1).toFloat()
-        }
-        val recentHead = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        recentHead.addView(label("RECENT ACTIVITY", 12f, navy, true),
-            LinearLayout.LayoutParams(0, -2, 1f))
-        recentHead.addView(label("● READY", 10f, 0xFF24966B.toInt(), true))
-        recentCard.addView(recentHead)
-        recentCard.addView(gap(9))
-        status = label("Ready to scan your first document", 14f, navy, true)
+        // Before first successful scan show onboarding; afterwards reserve this area for ads.
+        val hasScannedOnce = prefs.getBoolean("has_completed_first_scan", false)
+        status = label(
+            if (hasScannedOnce) "Your scanner is ready" else "Ready to scan your first document",
+            14f, navy, true
+        )
         recent = label("Your PDFs are saved in Downloads/DocumentScanner", 11f, muted)
-        recentCard.addView(status)
-        recentCard.addView(gap(4))
-        recentCard.addView(recent)
-        content.addView(recentCard)
+        if (!hasScannedOnce) {
+            val recentCard = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = rounded(0xFFFFFFFF.toInt(), 17, 0xFFE8EDF5.toInt())
+                elevation = dp(1).toFloat()
+            }
+            val recentHead = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            recentHead.addView(label("RECENT ACTIVITY", 12f, navy, true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            recentHead.addView(label("● READY", 10f, 0xFF24966B.toInt(), true))
+            recentCard.addView(recentHead)
+            recentCard.addView(gap(9))
+            recentCard.addView(status)
+            recentCard.addView(gap(4))
+            recentCard.addView(recent)
+            content.addView(recentCard)
+        } else {
+            val adSlot = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE8EDF5.toInt())
+                minimumHeight = dp(92)
+            }
+            adSlot.addView(label("ADVERTISEMENT  •  Ad space", 11f, muted, true))
+            adSlot.addView(gap(5))
+            adSlot.addView(label("Banner ad placement", 10f, muted))
+            content.addView(adSlot)
+        }
         content.addView(gap(16))
         content.addView(label("MY DOCUMENTS", 15f, navy, true))
         content.addView(gap(8))
