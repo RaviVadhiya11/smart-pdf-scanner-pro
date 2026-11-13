@@ -1,5 +1,22 @@
 package com.pixelfire.smartpdfscanner
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import androidx.core.content.ContextCompat
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -88,6 +105,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
     private var signaturePng: ByteArray? = null
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val qrAlreadyRead = AtomicBoolean(false)
+    private var qrCameraProvider: ProcessCameraProvider? = null
+    private val qrCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) openLiveQrCamera() else Toast.makeText(this, "Camera permission is required for live QR scanning.", Toast.LENGTH_LONG).show() }
 
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -135,10 +156,10 @@ class MainActivity : AppCompatActivity() {
     private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) compressPdf(uri) }
     private val pdfToWordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) exportPdfAsWord(uri) }
     private val qrImagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) readQrFromImage(uri) }
-    private val qrCameraPicker = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        if (bitmap != null) readQrFromBitmap(bitmap)
-        else Toast.makeText(this, "Camera capture cancelled", Toast.LENGTH_SHORT).show()
-    }
+    private val pdfToImagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) convertPdfToImages(uri) }
+    private val passwordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) passwordDialog(uri, false) }
+    private val removePasswordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) passwordDialog(uri, true) }
+    private val zipPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) zipPdf(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -977,7 +998,7 @@ class MainActivity : AppCompatActivity() {
             PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Page Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { openSignatureEditor() },
-            PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
+            PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { pdfToImagePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
                 lastPdf?.let { uri ->
@@ -995,10 +1016,10 @@ class MainActivity : AppCompatActivity() {
             PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Rotate all pages", "✎", 0xFF13A6D8.toInt()) { rotatePicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { showComingSoon("Add Password") },
-            PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { showComingSoon("Remove Password") },
+            PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { passwordPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { removePasswordPicker.launch(arrayOf("application/pdf")) },
             PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { pdfTextPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { showComingSoon("PDF to ZIP") },
+            PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { zipPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() },
             PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) }
         ), ink, muted)
@@ -1592,28 +1613,129 @@ class MainActivity : AppCompatActivity() {
         return uri
     }
 
+    private fun passwordDialog(uri: Uri, remove: Boolean) {
+        val field = EditText(this).apply { hint = if (remove) "Current PDF password" else "Set PDF password"; inputType = 129 }
+        AlertDialog.Builder(this).setTitle(if (remove) "Remove PDF password" else "Protect PDF")
+            .setView(field).setPositiveButton(if (remove) "Unlock and save" else "Protect and save") { _, _ ->
+                val password = field.text.toString()
+                if (password.isBlank()) Toast.makeText(this, "Enter a password", Toast.LENGTH_SHORT).show()
+                else processPdfPassword(uri, password, remove)
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun processPdfPassword(uri: Uri, password: String, remove: Boolean) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                    val doc = if (remove) PDDocument.load(input, password) else PDDocument.load(input)
+                    doc.use {
+                        if (!remove) {
+                            val policy = StandardProtectionPolicy(password, password, AccessPermission())
+                            policy.encryptionKeyLength = 128
+                            it.protect(policy)
+                        }
+                        ByteArrayOutputStream().also { out -> it.save(out) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, if (remove) "Unlocked" else "Protected")
+                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show(); buildScreen() } }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Password operation failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
+    private fun convertPdfToImages(uri: Uri) {
+        Thread {
+            try {
+                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
+                val renderer = PdfRenderer(pfd)
+                try {
+                    for (index in 0 until renderer.pageCount) {
+                        renderer.openPage(index).use { page ->
+                            val bitmap = Bitmap.createBitmap((page.width * 2).coerceAtLeast(1), (page.height * 2).coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            val out = ByteArrayOutputStream()
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                            bitmap.recycle()
+                            saveDocumentBytes(out.toByteArray(), "PDF_Page_${index + 1}", "image/jpeg", "jpg")
+                        }
+                    }
+                } finally { renderer.close(); pfd.close() }
+                runOnUiThread { Toast.makeText(this, "PDF pages exported as images to Downloads/DocumentScanner", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to Image failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
+    private fun zipPdf(uri: Uri) {
+        Thread {
+            try {
+                val bytes = ByteArrayOutputStream()
+                ZipOutputStream(bytes).use { zip ->
+                    zip.putNextEntry(ZipEntry("document.pdf"))
+                    contentResolver.openInputStream(uri)!!.use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+                val saved = saveDocumentBytes(bytes.toByteArray(), "PDF_Archive", "application/zip", "zip")
+                runOnUiThread { if (saved != null) Toast.makeText(this, "ZIP saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to ZIP failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
     private fun showQrScanner() {
         AlertDialog.Builder(this).setTitle("QR Scanner")
-            .setItems(arrayOf("Scan with camera", "Choose QR image from gallery")) { _, which ->
-                if (which == 0) qrCameraPicker.launch(null) else qrImagePicker.launch("image/*")
+            .setItems(arrayOf("Live automatic camera scan", "Scan QR from gallery image")) { _, which ->
+                if (which == 0) {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) openLiveQrCamera()
+                    else qrCameraPermission.launch(Manifest.permission.CAMERA)
+                } else qrImagePicker.launch("image/*")
             }.show()
     }
 
-    private fun readQrFromBitmap(bitmap: Bitmap) {
-        BarcodeScanning.getClient().process(InputImage.fromBitmap(bitmap, 0))
+    private fun openLiveQrCamera() {
+        qrAlreadyRead.set(false)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)); setBackgroundColor(0xFF101216.toInt()) }
+        val preview = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
+        root.addView(preview, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(label("Keep the QR code inside the camera frame. It scans automatically.", 13f, 0xFFFFFFFF.toInt()).apply { setPadding(dp(8), dp(12), dp(8), dp(12)) })
+        val close = Button(this).apply { text = "Close scanner"; setOnClickListener { qrCameraProvider?.unbindAll(); buildScreen() } }
+        root.addView(close, LinearLayout.LayoutParams(-1, dp(48)))
+        setScreenContent(root)
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                qrCameraProvider = provider
+                val cameraPreview = Preview.Builder().build().also { it.setSurfaceProvider(preview.surfaceProvider) }
+                val scanner = BarcodeScanning.getClient()
+                val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+                analysis.setAnalyzer(cameraExecutor) { proxy -> analyzeQrFrame(proxy, scanner) }
+                provider.unbindAll()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, cameraPreview, analysis)
+            } catch (e: Exception) {
+                Toast.makeText(this, e.localizedMessage ?: "Could not start camera", Toast.LENGTH_LONG).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun analyzeQrFrame(proxy: ImageProxy, scanner: com.google.mlkit.vision.barcode.BarcodeScanner) {
+        val media = proxy.image
+        if (media == null || qrAlreadyRead.get()) { proxy.close(); return }
+        val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
+        scanner.process(image)
             .addOnSuccessListener { codes ->
-                val value = codes.mapNotNull { it.rawValue }.distinct().joinToString("\\n\\n")
-                showQrResult(value)
-                bitmap.recycle()
+                val value = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
+                if (value.isNotBlank() && qrAlreadyRead.compareAndSet(false, true)) {
+                    runOnUiThread {
+                        qrCameraProvider?.unbindAll()
+                        showQrResult(value)
+                    }
+                }
             }
-            .addOnFailureListener { error ->
-                bitmap.recycle()
-                Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show()
-            }
+            .addOnCompleteListener { proxy.close() }
     }
 
     private fun showQrResult(value: String) {
-        AlertDialog.Builder(this).setTitle("QR Scanner")
+        AlertDialog.Builder(this).setTitle("QR Scanner • Result")
             .setMessage(value.ifBlank { "No QR code found. Try a clearer image." })
             .setPositiveButton("Copy") { _, _ ->
                 if (value.isNotBlank()) {
@@ -1621,7 +1743,13 @@ class MainActivity : AppCompatActivity() {
                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("QR content", value))
                     Toast.makeText(this, "QR content copied", Toast.LENGTH_SHORT).show()
                 }
-            }.setNegativeButton("Close", null).show()
+            }.setNeutralButton("Open link") { _, _ ->
+                val link = value.trim()
+                if (link.startsWith("https://") || link.startsWith("http://")) {
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) }
+                    catch (_: Exception) { Toast.makeText(this, "No app can open this link", Toast.LENGTH_SHORT).show() }
+                } else Toast.makeText(this, "This QR does not contain a web link", Toast.LENGTH_LONG).show()
+            }.setNegativeButton("Close") { _, _ -> buildScreen() }.show()
     }
 
     private fun readQrFromImage(uri: Uri) {
@@ -1629,12 +1757,10 @@ class MainActivity : AppCompatActivity() {
             val image = InputImage.fromFilePath(this, uri)
             BarcodeScanning.getClient().process(image)
                 .addOnSuccessListener { codes ->
-                    val result = codes.mapNotNull { it.rawValue }.distinct().joinToString("\\n\\n")
+                    val result = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
                     showQrResult(result)
                 }
-                .addOnFailureListener { error ->
-                    Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show()
-                }
+                .addOnFailureListener { error -> Toast.makeText(this, error.localizedMessage ?: "QR scan failed", Toast.LENGTH_LONG).show() }
         } catch (e: Exception) {
             Toast.makeText(this, e.localizedMessage ?: "Cannot read selected image", Toast.LENGTH_LONG).show()
         }
