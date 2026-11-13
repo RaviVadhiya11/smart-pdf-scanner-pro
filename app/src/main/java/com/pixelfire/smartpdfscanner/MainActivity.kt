@@ -824,33 +824,13 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(18), dp(10), dp(28))
         }
-        addPdfToolGrid(body, listOf(
+        addPdfSectionTitle(body, "Quick Access")
+        addPdfToolHorizontal(body, listOf(
             PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
-            PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Page size / Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Rotate all pages", "✎", 0xFF13A6D8.toInt()) { rotatePicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { showComingSoon("Add Password") },
-            PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { showComingSoon("Remove Password") },
-            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showComingSoon("Signature") }
-        ), ink, muted)
-
-        addPdfSectionTitle(body, "PDF To Other Format")
-        addPdfToolGrid(body, listOf(
+            PdfTool("Page Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showComingSoon("Signature") },
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
-            PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { pdfTextPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { showComingSoon("PDF to ZIP") }
-        ), ink, muted)
-
-        addPdfSectionTitle(body, "Other Format To PDF")
-        addPdfToolGrid(body, listOf(
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
-            PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() }
-        ), ink, muted)
-
-        addPdfSectionTitle(body, "More")
-        addPdfToolGrid(body, listOf(
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
                 lastPdf?.let { uri ->
                     val share = Intent(Intent.ACTION_SEND).setType("application/pdf")
@@ -858,7 +838,20 @@ class MainActivity : AppCompatActivity() {
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     startActivity(Intent.createChooser(share, "Share PDF"))
                 } ?: pdfPicker.launch(arrayOf("application/pdf"))
-            },
+            }
+        ))
+
+        addPdfSectionTitle(body, "PDF Tools")
+        addPdfToolGrid(body, listOf(
+            PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
+            PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Rotate all pages", "✎", 0xFF13A6D8.toInt()) { rotatePicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { showComingSoon("Add Password") },
+            PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { showComingSoon("Remove Password") },
+            PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { pdfTextPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { showComingSoon("PDF to ZIP") },
+            PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() },
             PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) }
         ), ink, muted)
 
@@ -876,6 +869,51 @@ class MainActivity : AppCompatActivity() {
         val color: Int,
         val action: () -> Unit
     )
+
+    private fun addPdfToolHorizontal(parent: LinearLayout, tools: List<PdfTool>) {
+        val horizontal = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(0, dp(2), 0, dp(4))
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        tools.forEachIndexed { index, tool ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                setPadding(dp(4), dp(8), dp(4), dp(10))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { tool.action() }
+            }
+            val circle = TextView(this).apply {
+                text = tool.symbol
+                textSize = 19f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(tool.color)
+                }
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+                elevation = dp(2).toFloat()
+            }
+            item.addView(circle)
+            item.addView(gap(5))
+            val caption = label(tool.title, 9.5f, 0xFF777777.toInt())
+            caption.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
+            caption.maxLines = 2
+            item.addView(caption)
+            row.addView(item, LinearLayout.LayoutParams(dp(82), dp(82)))
+        }
+        horizontal.addView(row)
+        parent.addView(horizontal)
+    }
 
     private fun addPdfToolGrid(
         parent: LinearLayout,
