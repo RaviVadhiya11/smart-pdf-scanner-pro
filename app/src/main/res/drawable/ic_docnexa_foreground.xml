@@ -1,4 +1,3 @@
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/docnexa_icon_art"
-    android:gravity="center"
-    android:filter="true" />
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/docnexa_icon_art"
+    android:inset="18%" />
