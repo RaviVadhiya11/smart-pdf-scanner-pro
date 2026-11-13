@@ -24,11 +24,21 @@ internal object SupabaseCloud {
         val user = json.optJSONObject("user") ?: json
         val userId = user.optString("id")
         if (token.isBlank()) {
-            val msg = if (signUp) "Account created. Check your email to confirm it, then sign in." else
-                json.optJSONObject("msg")?.toString() ?: json.optString("message", "Sign-in did not return a session.")
+            val msg = if (signUp) "Account created. Check your inbox and spam folder for the confirmation link. Confirm your email, then sign in." else
+                json.optString("msg").ifBlank { json.optString("message", "Sign-in did not return a session.") }
             return AuthResult("", "", msg)
         }
         return AuthResult(token, userId, "Signed in")
+    }
+
+    fun resendConfirmation(email: String) {
+        val body = JSONObject().put("type", "signup").put("email", email).toString().toByteArray()
+        request("POST", "/auth/v1/resend", body, "application/json")
+    }
+
+    fun sendPasswordReset(email: String) {
+        val body = JSONObject().put("email", email).toString().toByteArray()
+        request("POST", "/auth/v1/recover", body, "application/json")
     }
 
     fun upload(token: String, userId: String, fileName: String, bytes: ByteArray) {
