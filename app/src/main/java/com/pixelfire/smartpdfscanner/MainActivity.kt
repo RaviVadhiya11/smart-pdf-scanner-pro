@@ -71,6 +71,7 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 private class SignatureCanvas(context: android.content.Context) : View(context) {
@@ -622,7 +623,7 @@ class MainActivity : AppCompatActivity() {
         }
         popup.menu.add("Create Folder").setOnMenuItemClickListener { createFolderDialog(); true }
         popup.menu.add("Sync now").setOnMenuItemClickListener {
-            Toast.makeText(this, "Your documents are saved on this device. Cloud sync is not connected.", Toast.LENGTH_LONG).show()
+            if (cloudToken().isBlank()) showCloudLoginDialog() else syncCloudNow()
             true
         }
         popup.menu.add("View Mode").setOnMenuItemClickListener {
@@ -737,7 +738,14 @@ class MainActivity : AppCompatActivity() {
         accountText.addView(label("Sign In (Cloud)", 18f, 0xFFFFFFFF.toInt(), true))
         accountText.addView(gap(5))
         accountText.addView(label("Sign in to sync documents", 13f, 0xFFE5EDF3.toInt()))
+        accountText.removeAllViews()
+        val signedInEmail = prefs.getString("cloud_email", null)
+        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign In (Cloud)" else signedInEmail, 18f, 0xFFFFFFFF.toInt(), true))
+        accountText.addView(gap(5))
+        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign in to sync documents" else "Cloud account connected", 13f, 0xFFE5EDF3.toInt()))
         account.addView(accountText)
+        account.isClickable = true
+        account.setOnClickListener { drawer.dismiss(); if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu() }
         menu.addView(account)
 
         fun section(title: String) {
@@ -805,6 +813,118 @@ class MainActivity : AppCompatActivity() {
         drawer.show()
         drawer.window?.setLayout((screenWidth * 0.86f).toInt(), -1)
     }
+
+    private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
+
+    private fun showCloudLoginDialog() {
+        val email = EditText(this).apply { hint = "Email address"; inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
+        val password = EditText(this).apply { hint = "Password (minimum 6 characters)"; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0); addView(email); addView(password) }
+        AlertDialog.Builder(this).setTitle("DocNexa Cloud")
+            .setMessage("Sign in to back up your PDFs and restore them on another device.")
+            .setView(box)
+            .setPositiveButton("Sign In", null)
+            .setNeutralButton("Create Account", null)
+            .setNegativeButton("Cancel", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        cloudAuthenticate(email.text.toString().trim(), password.text.toString(), false, dialog)
+                    }
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        cloudAuthenticate(email.text.toString().trim(), password.text.toString(), true, dialog)
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun cloudAuthenticate(email: String, password: String, signUp: Boolean, dialog: AlertDialog) {
+        if (email.isBlank() || !email.contains("@") || password.length < 6) {
+            Toast.makeText(this, "Enter a valid email and password (6+ characters).", Toast.LENGTH_LONG).show()
+            return
+        }
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = false
+        Thread {
+            try {
+                val result = SupabaseCloud.authenticate(email, password, signUp)
+                runOnUiThread {
+                    if (result.accessToken.isNotBlank()) {
+                        prefs.edit().putString("cloud_access_token", result.accessToken)
+                            .putString("cloud_user_id", result.userId)
+                            .putString("cloud_email", email).apply()
+                        dialog.dismiss()
+                        Toast.makeText(this, "Cloud account connected.", Toast.LENGTH_LONG).show()
+                        syncCloudNow()
+                    } else {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
+                    Toast.makeText(this, e.localizedMessage ?: "Cloud sign-in failed", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun cloudAccountMenu() {
+        AlertDialog.Builder(this).setTitle("DocNexa Cloud")
+            .setMessage("Connected: ${prefs.getString("cloud_email", "")}")
+            .setItems(arrayOf("Sync now", "Sign out")) { _, which ->
+                if (which == 0) syncCloudNow() else {
+                    prefs.edit().remove("cloud_access_token").remove("cloud_user_id").remove("cloud_email").apply()
+                    Toast.makeText(this, "Signed out. Local PDFs are unchanged.", Toast.LENGTH_LONG).show()
+                    buildScreen()
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun syncCloudNow() {
+        val token = cloudToken()
+        val userId = prefs.getString("cloud_user_id", "") ?: ""
+        if (token.isBlank() || userId.isBlank()) { showCloudLoginDialog(); return }
+        val localDocs = getSavedPdfs()
+        status.text = "Syncing with DocNexa Cloud…"
+        Thread {
+            try {
+                var uploaded = 0
+                for ((name, uri) in localDocs) {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("Could not read $name")
+                    SupabaseCloud.upload(token, userId, name, bytes)
+                    uploaded++
+                }
+                val remoteFiles = SupabaseCloud.list(token, userId)
+                var downloaded = 0
+                val localNames = getSavedPdfs().map { it.first }.toMutableSet()
+                for (name in remoteFiles) {
+                    if (name !in localNames && name.endsWith(".pdf", true)) {
+                        val bytes = SupabaseCloud.download(token, userId, name)
+                        val saved = savePdfBytes(bytes, "Cloud_${name.substringBeforeLast('.').take(35)}")
+                        if (saved != null) { downloaded++; localNames.add(name) }
+                    }
+                }
+                runOnUiThread {
+                    status.text = "Cloud sync complete"
+                    recent.text = "Cloud: $uploaded uploaded • $downloaded restored"
+                    Toast.makeText(this, "Sync complete: $uploaded uploaded, $downloaded downloaded.", Toast.LENGTH_LONG).show()
+                    buildScreen()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "Cloud sync failed"
+                    Toast.makeText(this, e.localizedMessage ?: "Cloud sync failed. Check internet and Storage policies.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     private fun manageTagsDialog() {
         val field = android.widget.EditText(this).apply { hint = "Enter a tag name" }
         AlertDialog.Builder(this).setTitle("Manage tags").setView(field)
