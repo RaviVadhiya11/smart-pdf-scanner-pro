@@ -770,18 +770,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val signupButton = TextView(this).apply {
-            text = "SIGN UP"
+            text = if (signedInEmail.isNullOrBlank()) "SIGN UP" else "SIGN OUT"
             textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setTextColor(0xFF17324D.toInt())
-            background = rounded(0xFFFFFFFF.toInt(), 10)
+            setTextColor(if (signedInEmail.isNullOrBlank()) 0xFF17324D.toInt() else 0xFFFFFFFF.toInt())
+            background = rounded(if (signedInEmail.isNullOrBlank()) 0xFFFFFFFF.toInt() else 0xFFD94B55.toInt(), 10)
             setPadding(dp(12), dp(12), dp(12), dp(12))
             isClickable = true
             isFocusable = true
             setOnClickListener {
                 drawer.dismiss()
-                if (cloudToken().isBlank()) showCloudLoginDialog(startWithSignup = true) else cloudAccountMenu()
+                if (cloudToken().isBlank()) showCloudLoginDialog(startWithSignup = true) else confirmCloudSignOut()
             }
         }
         authActions.addView(loginButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(6) })
@@ -1098,12 +1098,24 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("DocNexa Cloud")
             .setMessage("Connected: ${prefs.getString("cloud_email", "")}")
             .setItems(arrayOf("Sync now", "Sign out")) { _, which ->
-                if (which == 0) syncCloudNow() else {
-                    prefs.edit().remove("cloud_access_token").remove("cloud_user_id").remove("cloud_email").apply()
-                    Toast.makeText(this, "Signed out. Local PDFs are unchanged.", Toast.LENGTH_LONG).show()
-                    buildScreen()
-                }
+                if (which == 0) syncCloudNow() else confirmCloudSignOut()
             }.setNegativeButton("Close", null).show()
+    }
+
+    private fun confirmCloudSignOut() {
+        AlertDialog.Builder(this)
+            .setTitle("Sign out of DocNexa?")
+            .setMessage("Your cloud account will be disconnected on this device. Your locally saved PDFs will not be deleted.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Sign out") { _, _ ->
+                prefs.edit().remove("cloud_access_token")
+                    .remove("cloud_user_id")
+                    .remove("cloud_email")
+                    .apply()
+                Toast.makeText(this, "Signed out. Local PDFs are unchanged.", Toast.LENGTH_LONG).show()
+                buildScreen()
+            }
+            .show()
     }
 
     private fun syncCloudNow() {
