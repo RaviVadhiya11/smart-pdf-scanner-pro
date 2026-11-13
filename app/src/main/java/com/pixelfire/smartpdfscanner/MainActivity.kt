@@ -906,7 +906,7 @@ class MainActivity : AppCompatActivity() {
                 for (name in remoteFiles) {
                     if (name !in localNames && name.endsWith(".pdf", true)) {
                         val bytes = SupabaseCloud.download(token, userId, name)
-                        val saved = savePdfBytes(bytes, "Cloud_${name.substringBeforeLast('.').take(35)}")
+                        val saved = saveCloudPdf(name, bytes)
                         if (saved != null) { downloaded++; localNames.add(name) }
                     }
                 }
@@ -2236,6 +2236,31 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+
+    private fun saveCloudPdf(fileName: String, bytes: ByteArray): Uri? {
+        val safeName = fileName.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100)
+            .ifBlank { "Cloud_Document.pdf" }
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        contentResolver.openOutputStream(uri).use { output ->
+            if (output == null) throw IllegalStateException("Unable to save downloaded PDF")
+            output.write(bytes)
+        }
+        assignPdf(uri)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            contentResolver.update(uri, done, null, null)
+        }
+        return uri
     }
 
     private fun savePdfBytes(bytes: ByteArray, prefix: String): Uri? {
