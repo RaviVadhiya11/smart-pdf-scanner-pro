@@ -609,22 +609,108 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAppDrawer() {
-        val items = arrayOf("♡  Favourite", "◇  Manage tags", "▤  Trash", "⚙  Settings", "Tools", "About us", "Connect with us", "Rate us", "Share with friends", "Privacy Policy")
-        AlertDialog.Builder(this).setTitle("Document Scanner Pro").setItems(items) { _, which ->
-            when (which) {
-                0 -> showComingSoon("Favourite")
-                1 -> manageTagsDialog()
-                2 -> showTrashScreen()
-                3 -> showSettingsDialog()
-                4 -> showPdfTools()
-                5 -> AlertDialog.Builder(this).setTitle("About us").setMessage("Document Scanner Pro • Scan, convert, edit and share documents.").setPositiveButton("OK", null).show()
-                6, 8 -> shareApp()
-                7 -> Toast.makeText(this, "Thank you for supporting the app!", Toast.LENGTH_SHORT).show()
-                9 -> AlertDialog.Builder(this).setTitle("Privacy").setMessage("Review the app privacy policy before publishing.").setPositiveButton("OK", null).show()
-            }
-        }.show()
-    }
+        val drawer = android.app.Dialog(this)
+        val screenWidth = resources.displayMetrics.widthPixels
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val menu = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, dp(20))
+        }
+        val account = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(28), dp(16), dp(24))
+            setBackgroundColor(0xFF1D3B4A.toInt())
+        }
+        account.addView(TextView(this).apply {
+            text = "◉"; textSize = 42f; setTextColor(0xFFFFFFFF.toInt()); gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(dp(62), dp(62)))
+        val accountText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
+        accountText.addView(label("Sign In (Cloud)", 18f, 0xFFFFFFFF.toInt(), true))
+        accountText.addView(gap(5))
+        accountText.addView(label("Sign in to sync documents", 13f, 0xFFE5EDF3.toInt()))
+        account.addView(accountText)
+        menu.addView(account)
 
+        val premium = TextView(this).apply {
+            text = "🏅   Upgrade to Premium\n       Unlock Full Features and Go Ads Free!"
+            textSize = 14f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xFFFFFFFF.toInt()); gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(17), dp(12), dp(17))
+            background = gradient(0xFF08A96B.toInt(), 0xFF31B88D.toInt(), 0)
+            setOnClickListener { drawer.dismiss(); showComingSoon("Premium") }
+        }
+        menu.addView(premium)
+
+        fun section(title: String) {
+            menu.addView(TextView(this).apply {
+                text = title; textSize = 14f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF333333.toInt()); setPadding(dp(20), dp(22), dp(16), dp(12))
+            })
+        }
+        fun item(icon: String, title: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(28), dp(12), dp(16), dp(12)); minimumHeight = dp(54)
+                isClickable = true; isFocusable = true
+                setBackgroundResource(android.R.drawable.list_selector_background)
+                setOnClickListener { drawer.dismiss(); action() }
+            }
+            row.addView(TextView(this).apply {
+                text = icon; textSize = 19f; gravity = Gravity.CENTER
+                setTextColor(0xFF168BC5.toInt()); background = rounded(0xFFEAF2FF.toInt(), 24)
+            }, LinearLayout.LayoutParams(dp(38), dp(38)))
+            row.addView(label(title, 15f, 0xFF161616.toInt(), true).apply { setPadding(dp(22), 0, 0, 0) })
+            menu.addView(row)
+        }
+        fun separator() { menu.addView(View(this).apply { setBackgroundColor(0xFFE6E6E6.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) }) }
+
+        section("General")
+        item("♡", "Favourite") { showComingSoon("Favourite") }
+        item("◇", "Manage tags") { manageTagsDialog() }
+        item("▤", "Trash") { showTrashScreen() }
+        item("⚙", "Settings") { showSettingsDialog() }
+        separator()
+        section("Tools")
+        item("⚒", "PDF Tools") { showPdfTools() }
+        item("▣", "Edit/Create PDF") { imagePicker.launch(arrayOf("image/*")) }
+        item("✍", "Signature") { openSignatureEditor() }
+        item("▦", "QR Scanner") { showQrScanner() }
+        item("▦", "QR Generator") { showComingSoon("QR Generator") }
+        separator()
+        section("Other")
+        item("?", "Help and FAQ") {
+            AlertDialog.Builder(this).setTitle("Help and FAQ")
+                .setMessage("Scan documents, import pictures, create PDFs, manage files and use PDF tools.")
+                .setPositiveButton("OK", null).show()
+        }
+        item("✉", "Contact us / Report a bug") { shareApp() }
+        item("ⓘ", "About us") {
+            AlertDialog.Builder(this).setTitle("About DocNexa")
+                .setMessage("DocNexa – PDF Scanner & Editor").setPositiveButton("OK", null).show()
+        }
+        section("More")
+        item("↗", "Share with friends") { shareApp() }
+        item("★", "Rate us") { Toast.makeText(this, "Thank you for supporting DocNexa!", Toast.LENGTH_SHORT).show() }
+
+        scroll.addView(menu)
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        drawer.setContentView(panel)
+        drawer.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setDimAmount(0.45f)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setLayout((screenWidth * 0.86f).toInt(), -1)
+            setGravity(Gravity.START)
+            navigationBarColor = 0xFFFFFFFF.toInt()
+        }
+        drawer.show()
+        drawer.window?.setLayout((screenWidth * 0.86f).toInt(), -1)
+    }
     private fun manageTagsDialog() {
         val field = android.widget.EditText(this).apply { hint = "Enter a tag name" }
         AlertDialog.Builder(this).setTitle("Manage tags").setView(field)
