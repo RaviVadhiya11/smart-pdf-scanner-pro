@@ -636,16 +636,6 @@ class MainActivity : AppCompatActivity() {
         account.addView(accountText)
         menu.addView(account)
 
-        val premium = TextView(this).apply {
-            text = "🏅   Upgrade to Premium\n       Unlock Full Features and Go Ads Free!"
-            textSize = 14f; typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(0xFFFFFFFF.toInt()); gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(17), dp(12), dp(17))
-            background = gradient(0xFF08A96B.toInt(), 0xFF31B88D.toInt(), 0)
-            setOnClickListener { drawer.dismiss(); showComingSoon("Premium") }
-        }
-        menu.addView(premium)
-
         fun section(title: String) {
             menu.addView(TextView(this).apply {
                 text = title; textSize = 14f; typeface = android.graphics.Typeface.DEFAULT_BOLD
