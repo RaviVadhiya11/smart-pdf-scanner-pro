@@ -333,11 +333,17 @@ class MainActivity : AppCompatActivity() {
         })
         header.addView(TextView(this).apply {
             text = "⋮"
-            textSize = 30f
+            textSize = 32f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            includeFontPadding = false
             gravity = Gravity.CENTER
-            setTextColor(navy)
-            setPadding(dp(10), 0, dp(2), 0)
+            setTextColor(0xFFFFFFFF.toInt())
+            minWidth = dp(42)
+            minHeight = dp(48)
+            setPadding(dp(8), 0, dp(4), 0)
             contentDescription = "More options"
+            isClickable = true
+            isFocusable = true
             setOnClickListener { showHomeOverflowMenu(this) }
         })
         // Keep the brand header outside the ScrollView so it stays fixed while content moves.
