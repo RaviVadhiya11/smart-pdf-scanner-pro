@@ -15,9 +15,13 @@ internal object SupabaseCloud {
 
     data class AuthResult(val accessToken: String, val userId: String, val message: String)
 
-    fun authenticate(email: String, password: String, signUp: Boolean): AuthResult {
+    fun authenticate(email: String, password: String, signUp: Boolean, fullName: String = ""): AuthResult {
         val endpoint = if (signUp) "/auth/v1/signup" else "/auth/v1/token?grant_type=password"
-        val body = JSONObject().put("email", email).put("password", password).toString().toByteArray()
+        val payload = JSONObject().put("email", email).put("password", password)
+        if (signUp && fullName.isNotBlank()) {
+            payload.put("data", JSONObject().put("full_name", fullName))
+        }
+        val body = payload.toString().toByteArray()
         val response = request("POST", endpoint, body, "application/json")
         val json = JSONObject(response)
         val token = json.optString("access_token")
