@@ -129,6 +129,9 @@ class MainActivity : AppCompatActivity() {
     private val pdfTextPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) extractPdfText(uri) }
     private val detailsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfDetails(uri) }
     private val rotatePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) rotatePdfPages(uri) }
+    private val pdfEditorPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfEditor(uri) }
+    private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) compressPdf(uri) }
+    private val pdfToWordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) exportPdfAsWord(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -282,29 +285,41 @@ class MainActivity : AppCompatActivity() {
             bottomMargin = dp(12)
         })
 
-        // Main navigation tabs requested: Home, PDF Tools, Import ID Photo.
-        val topTabs = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        // One compact horizontal quick-access strip combines navigation and top tools.
+        val quickAccessScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
             background = rounded(0xFFFFFFFF.toInt(), 14)
             elevation = dp(1).toFloat()
             setPadding(dp(5), dp(4), dp(5), dp(4))
         }
-        fun topTab(title: String, selected: Boolean, action: () -> Unit): TextView =
-            TextView(this).apply {
+        val quickAccess = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun quickItem(title: String, selected: Boolean = false, action: () -> Unit) {
+            val chip = TextView(this).apply {
                 text = title
-                textSize = 12f
+                textSize = 11f
                 gravity = Gravity.CENTER
                 typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
                 setTextColor(if (selected) blue else muted)
                 background = if (selected) rounded(0xFFEAF2FF.toInt(), 10) else null
-                setPadding(dp(9), dp(12), dp(9), dp(12))
+                setPadding(dp(11), dp(12), dp(11), dp(12))
+                isClickable = true
+                isFocusable = true
                 setOnClickListener { action() }
             }
-        topTabs.addView(topTab("⌂  Home", true) { buildScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
-        topTabs.addView(topTab("▤  PDF Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
-        topTabs.addView(topTab("▣  Import ID Photo", false) { imagePicker.launch(arrayOf("image/*")) }, LinearLayout.LayoutParams(0, -2, 1.25f))
-        content.addView(topTabs)
+            quickAccess.addView(chip, LinearLayout.LayoutParams(-2, -2))
+        }
+        quickItem("⌂ Home", true) { buildScreen() }
+        quickItem("▤ PDF Tools") { showPdfTools() }
+        quickItem("▣ ID Photo") { imagePicker.launch(arrayOf("image/*")) }
+        quickItem("PDF Editor") { pdfEditorPicker.launch(arrayOf("application/pdf")) }
+        quickItem("✍ Signature") { openSignatureEditor() }
+        quickItem("OCR Image") { ocrPicker.launch("image/*") }
+        quickAccessScroll.addView(quickAccess)
+        content.addView(quickAccessScroll)
         content.addView(gap(16))
 
         // Large scan hero card.
@@ -374,8 +389,11 @@ class MainActivity : AppCompatActivity() {
                     1 -> ({ showPdfTools() })
                     2 -> ({ imagePicker.launch(arrayOf("image/*")) })
                     3 -> ({ pdfPicker.launch(arrayOf("application/pdf")) })
+                    4 -> ({ compressPicker.launch(arrayOf("application/pdf")) })
                     5 -> ({ ocrPicker.launch("image/*") })
-                    else -> ({ showComingSoon(item.first) })
+                    6 -> ({ pdfToWordPicker.launch(arrayOf("application/pdf")) })
+                    7 -> ({ showQrScanner() })
+                    else -> ({ showPdfTools() })
                 }
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
