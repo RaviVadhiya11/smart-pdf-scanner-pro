@@ -1101,8 +1101,8 @@ class MainActivity : AppCompatActivity() {
                 val first = PDDocument()
                 val second = PDDocument()
                 try {
-                    for (i in 0 until middle) first.addPage(source.getPage(i))
-                    for (i in middle until total) second.addPage(source.getPage(i))
+                    for (i in 0 until middle) first.importPage(source.getPage(i))
+                    for (i in middle until total) second.importPage(source.getPage(i))
                     val firstBytes = ByteArrayOutputStream().also { first.save(it) }.toByteArray()
                     val secondBytes = ByteArrayOutputStream().also { second.save(it) }.toByteArray()
                     val savedA = savePdfBytes(firstBytes, "Split_Part_1")
