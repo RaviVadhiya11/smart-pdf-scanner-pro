@@ -527,6 +527,43 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun moveToTrash(uri: Uri) {
+        val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
+        set.add(uri.toString())
+        prefs.edit().putStringSet("trash_uris", set).apply()
+        Toast.makeText(this, "Moved to Trash", Toast.LENGTH_SHORT).show()
+        buildScreen()
+    }
+
+    private fun showTrashScreen() {
+        val trashed = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toList()
+        if (trashed.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("Trash").setMessage("Trash is empty.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        val names = trashed.map { Uri.parse(it).lastPathSegment ?: "Deleted PDF" }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Trash • " + trashed.size + " item(s)")
+            .setItems(names) { _, index ->
+                val target = Uri.parse(trashed[index])
+                AlertDialog.Builder(this).setTitle("Trash item")
+                    .setItems(arrayOf("Restore", "Delete permanently")) { _, action ->
+                        val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
+                        if (action == 0) {
+                            set.remove(target.toString())
+                            prefs.edit().putStringSet("trash_uris", set).apply()
+                            Toast.makeText(this, "PDF restored", Toast.LENGTH_SHORT).show()
+                        } else {
+                            try { contentResolver.delete(target, null, null) } catch (_: Exception) {}
+                            set.remove(target.toString())
+                            prefs.edit().putStringSet("trash_uris", set).apply()
+                            Toast.makeText(this, "Deleted permanently", Toast.LENGTH_SHORT).show()
+                        }
+                        showTrashScreen()
+                    }.setNegativeButton("Cancel", null).show()
+            }.setPositiveButton("Close", null).show()
+    }
+
     private fun showAppDrawer() {
         val items = arrayOf("♡  Favourite", "◇  Manage tags", "▤  Trash", "⚙  Settings", "Tools", "About us", "Connect with us", "Rate us", "Share with friends", "Privacy Policy")
         AlertDialog.Builder(this).setTitle("Document Scanner Pro").setItems(items) { _, which ->
