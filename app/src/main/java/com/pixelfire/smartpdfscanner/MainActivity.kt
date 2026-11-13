@@ -857,81 +857,163 @@ class MainActivity : AppCompatActivity() {
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
 
     private fun showCloudLoginDialog(startWithSignup: Boolean = false) {
-        val email = EditText(this).apply {
-            hint = "Email address"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setSingleLine(true)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
-        }
-        val password = EditText(this).apply {
-            hint = "Password (minimum 6 characters)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
-        }
-        val title = label("DOCNEXA ACCOUNT", 12f, 0xFF3478F6.toInt(), true)
-        val subtitle = label(
-            if (startWithSignup) "Create your account to back up and access PDFs across devices."
-            else "Sign in to securely access your DocNexa cloud documents.",
-            13f, 0xFF68778E.toInt()
-        )
-        val box = LinearLayout(this).apply {
+        val dialog = android.app.Dialog(this)
+        var signupMode = startWithSignup
+        val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(8), dp(22), dp(4))
-            addView(title)
-            addView(gap(8))
-            addView(subtitle)
-            addView(gap(16))
-            addView(label("EMAIL", 11f, 0xFF34445E.toInt(), true))
-            addView(gap(5))
-            addView(email, LinearLayout.LayoutParams(-1, dp(52)))
-            addView(gap(12))
-            addView(label("PASSWORD", 11f, 0xFF34445E.toInt(), true))
-            addView(gap(5))
-            addView(password, LinearLayout.LayoutParams(-1, dp(52)))
-            addView(gap(8))
+            setPadding(dp(22), dp(22), dp(22), dp(18))
+            background = rounded(0xFFFFFFFF.toInt(), 24)
         }
-        val extra = LinearLayout(this).apply {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val logo = TextView(this).apply {
+            text = "▤"
+            textSize = 30f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF315CF5.toInt())
+            background = rounded(0xFFEAF0FF.toInt(), 18)
+            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
+        }
+        content.addView(logo)
+        content.addView(gap(12))
+        content.addView(label("DOCNEXA", 22f, 0xFF1B2B4B.toInt(), true))
+        content.addView(gap(4))
+        val subtitle = label("Your documents. Safe, synced and organised.", 12f, 0xFF77839A.toInt())
+        content.addView(subtitle)
+        content.addView(gap(20))
+
+        val tabs = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, dp(4), 0, dp(4))
+            background = rounded(0xFFF0F3FA.toInt(), 14)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        fun tabButton(text: String): TextView = TextView(this).apply {
+            this.text = text
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+        }
+        val loginTab = tabButton("LOGIN")
+        val signupTab = tabButton("CREATE ACCOUNT")
+        tabs.addView(loginTab, LinearLayout.LayoutParams(0, dp(44), 1f))
+        tabs.addView(signupTab, LinearLayout.LayoutParams(0, dp(44), 1f))
+        content.addView(tabs)
+        content.addView(gap(18))
+
+        val name = EditText(this).apply {
+            hint = "Full name"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
+        }
+        val email = EditText(this).apply {
+            hint = "Email address"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
+        }
+        val password = EditText(this).apply {
+            hint = "Password (8+ characters)"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
+        }
+        fun addField(caption: String, field: EditText) {
+            content.addView(label(caption, 11f, 0xFF53627A.toInt(), true).apply {
+                gravity = Gravity.START
+                setPadding(dp(2), 0, 0, dp(6))
+            })
+            content.addView(field, LinearLayout.LayoutParams(-1, dp(52)))
+            content.addView(gap(13))
+        }
+        addField("FULL NAME", name)
+        addField("EMAIL ADDRESS", email)
+        addField("PASSWORD", password)
+
+        val recovery = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
         val forgot = TextView(this).apply {
             text = "Forgot password?"
             textSize = 12f
-            setTextColor(0xFF1764DE.toInt())
-            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setTextColor(0xFF315CF5.toInt())
+            setPadding(0, dp(6), dp(8), dp(6))
             setOnClickListener { sendCloudPasswordReset(email.text.toString().trim()) }
         }
         val resend = TextView(this).apply {
             text = "Resend verification"
             textSize = 12f
-            setTextColor(0xFF1764DE.toInt())
-            setPadding(dp(6), dp(8), dp(6), dp(8))
+            setTextColor(0xFF315CF5.toInt())
+            gravity = Gravity.END
+            setPadding(dp(8), dp(6), 0, dp(6))
             setOnClickListener { resendCloudConfirmation(email.text.toString().trim()) }
         }
-        extra.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
-        extra.addView(resend, LinearLayout.LayoutParams(0, -2, 1f))
-        box.addView(extra)
+        recovery.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
+        recovery.addView(resend, LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(recovery)
+        content.addView(gap(14))
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(if (startWithSignup) "Create your account" else "Welcome to DocNexa")
-            .setView(box)
-            .setPositiveButton("Sign In", null)
-            .setNeutralButton("Create Account", null)
-            .setNegativeButton("Continue as Guest", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                cloudAuthenticate(email.text.toString().trim(), password.text.toString(), false, dialog)
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                cloudAuthenticate(email.text.toString().trim(), password.text.toString(), true, dialog)
-            }
+        val submit = Button(this).apply {
+            text = "SIGN IN  →"
+            isAllCaps = false
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xFFFFFFFF.toInt())
+            background = gradient(0xFF5367F6.toInt(), 0xFF315CF5.toInt(), 14)
+            backgroundTintList = null
+            layoutParams = LinearLayout.LayoutParams(-1, dp(52))
         }
+        content.addView(submit)
+        content.addView(gap(10))
+        val guest = TextView(this).apply {
+            text = "Continue as Guest"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF52627A.toInt())
+            setPadding(dp(12), dp(12), dp(12), dp(8))
+            setOnClickListener { dialog.dismiss() }
+        }
+        content.addView(guest)
+        content.addView(gap(8))
+        content.addView(label("By continuing, you agree to use DocNexa responsibly.", 10f, 0xFF9AA4B4.toInt()))
+        scroll.addView(content)
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, -1))
+        dialog.setContentView(panel)
+
+        fun renderMode() {
+            name.visibility = if (signupMode) View.VISIBLE else View.GONE
+            forgot.visibility = if (signupMode) View.GONE else View.VISIBLE
+            loginTab.setTextColor(if (signupMode) 0xFF758198.toInt() else 0xFF315CF5.toInt())
+            loginTab.background = if (signupMode) null else rounded(0xFFFFFFFF.toInt(), 11)
+            signupTab.setTextColor(if (signupMode) 0xFF315CF5.toInt() else 0xFF758198.toInt())
+            signupTab.background = if (signupMode) rounded(0xFFFFFFFF.toInt(), 11) else null
+            submit.text = if (signupMode) "CREATE ACCOUNT  →" else "SIGN IN  →"
+            subtitle.text = if (signupMode) "Create an account and keep your PDFs backed up." else "Sign in to access your secure cloud documents."
+        }
+        loginTab.setOnClickListener { signupMode = false; renderMode() }
+        signupTab.setOnClickListener { signupMode = true; renderMode() }
+        submit.setOnClickListener {
+            cloudAuthenticate(
+                email.text.toString().trim(), password.text.toString(),
+                signupMode, dialog, submit, name.text.toString().trim()
+            )
+        }
+        renderMode()
         dialog.show()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+            (resources.displayMetrics.heightPixels * 0.82f).toInt()
+        )
     }
 
     private fun resendCloudConfirmation(email: String, dialog: AlertDialog? = null) {
@@ -964,17 +1046,26 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun cloudAuthenticate(email: String, password: String, signUp: Boolean, dialog: AlertDialog) {
+    private fun cloudAuthenticate(
+        email: String, password: String, signUp: Boolean,
+        dialog: android.app.Dialog, submit: Button, fullName: String = ""
+    ) {
+        if (signUp && fullName.isBlank()) {
+            Toast.makeText(this, "Enter your full name.", Toast.LENGTH_LONG).show()
+            return
+        }
         if (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() || password.length < 8) {
             Toast.makeText(this, "Enter a valid email and a password with at least 8 characters.", Toast.LENGTH_LONG).show()
             return
         }
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = false
+        submit.isEnabled = false
+        submit.text = "PLEASE WAIT…"
         Thread {
             try {
-                val result = SupabaseCloud.authenticate(email, password, signUp)
+                val result = SupabaseCloud.authenticate(email, password, signUp, fullName)
                 runOnUiThread {
+                    submit.isEnabled = true
+                    submit.text = if (signUp) "CREATE ACCOUNT  →" else "SIGN IN  →"
                     if (result.accessToken.isNotBlank()) {
                         prefs.edit().putString("cloud_access_token", result.accessToken)
                             .putString("cloud_user_id", result.userId)
@@ -982,26 +1073,21 @@ class MainActivity : AppCompatActivity() {
                         dialog.dismiss()
                         Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
                         syncCloudNow()
+                    } else if (signUp) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Verify your email")
+                            .setMessage("We sent a confirmation link to $email. Open the email, tap Confirm, then return to DocNexa and sign in. Check Spam/Junk too.")
+                            .setPositiveButton("OK", null)
+                            .setNeutralButton("Resend email") { _, _ -> resendCloudConfirmation(email) }
+                            .show()
                     } else {
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
-                        if (signUp) {
-                            AlertDialog.Builder(this)
-                                .setTitle("Verify your email")
-                                .setMessage("We sent a confirmation link to $email. Open that email, tap Confirm, then return to DocNexa and Sign In. Also check Spam/Junk.")
-                                .setPositiveButton("I’ll sign in") { _, _ -> dialog.dismiss(); showCloudLoginDialog(false) }
-                                .setNeutralButton("Resend email") { _, _ -> resendCloudConfirmation(email, dialog) }
-                                .setNegativeButton("Not now", null)
-                                .show()
-                        } else {
-                            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-                        }
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled = true
+                    submit.isEnabled = true
+                    submit.text = if (signUp) "CREATE ACCOUNT  →" else "SIGN IN  →"
                     Toast.makeText(this, e.localizedMessage ?: "Cloud authentication failed.", Toast.LENGTH_LONG).show()
                 }
             }
