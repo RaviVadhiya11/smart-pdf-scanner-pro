@@ -687,31 +687,108 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTrashScreen() {
         val trashed = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toList()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(8))
+            background = rounded(0xFFF5F8FF.toInt(), 20)
+        }
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(documentIconTile(54))
+        val headingText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        headingText.addView(label("Recently deleted", 17f, 0xFF172B4D.toInt(), true))
+        headingText.addView(gap(3))
+        headingText.addView(label("${trashed.size} document(s) in Trash", 11f, 0xFF718096.toInt()))
+        heading.addView(headingText)
+        panel.addView(heading)
+        panel.addView(gap(14))
+
         if (trashed.isEmpty()) {
-            AlertDialog.Builder(this).setTitle("Trash").setMessage("Trash is empty.")
+            val empty = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(28), dp(18), dp(28))
+                background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE2EAF5.toInt())
+            }
+            empty.addView(documentIconTile(76))
+            empty.addView(gap(12))
+            empty.addView(label("Trash is empty", 17f, 0xFF263957.toInt(), true))
+            empty.addView(gap(5))
+            empty.addView(label("Deleted PDFs will appear here. You can restore them or delete them permanently.", 11f, 0xFF718096.toInt()).apply {
+                gravity = Gravity.CENTER
+            })
+            panel.addView(empty)
+            AlertDialog.Builder(this).setTitle("Trash").setView(panel)
                 .setPositiveButton("OK", null).show()
             return
         }
-        val names = trashed.map { Uri.parse(it).lastPathSegment ?: "Deleted PDF" }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Trash • " + trashed.size + " item(s)")
-            .setItems(names) { _, index ->
-                val target = Uri.parse(trashed[index])
-                AlertDialog.Builder(this).setTitle("Trash item")
-                    .setItems(arrayOf("Restore", "Delete permanently")) { _, action ->
-                        val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
-                        if (action == 0) {
-                            set.remove(target.toString())
-                            prefs.edit().putStringSet("trash_uris", set).apply()
-                            Toast.makeText(this, "PDF restored", Toast.LENGTH_SHORT).show()
-                        } else {
-                            try { contentResolver.delete(target, null, null) } catch (_: Exception) {}
-                            set.remove(target.toString())
-                            prefs.edit().putStringSet("trash_uris", set).apply()
-                            Toast.makeText(this, "Deleted permanently", Toast.LENGTH_SHORT).show()
-                        }
-                        showTrashScreen()
-                    }.setNegativeButton("Cancel", null).show()
-            }.setPositiveButton("Close", null).show()
+
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        trashed.forEach { raw ->
+            val target = Uri.parse(raw)
+            val name = target.lastPathSegment ?: "Deleted PDF"
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE2EAF5.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, dp(82)).apply { bottomMargin = dp(9) }
+            }
+            card.addView(documentIconTile(58))
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(11), 0, dp(4), 0)
+            }
+            info.addView(label(name, 13f, 0xFF263957.toInt(), true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            info.addView(gap(4))
+            info.addView(label("PDF document  •  In Trash", 10.5f, 0xFF718096.toInt()))
+            card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            card.addView(TextView(this).apply {
+                text = "•••"
+                textSize = 19f
+                setTextColor(0xFF64748B.toInt())
+                setPadding(dp(10), dp(8), dp(4), dp(8))
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle(name)
+                        .setItems(arrayOf("Restore document", "Delete permanently")) { _, action ->
+                            val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
+                            if (action == 0) {
+                                set.remove(target.toString())
+                                prefs.edit().putStringSet("trash_uris", set).apply()
+                                Toast.makeText(this@MainActivity, "PDF restored", Toast.LENGTH_SHORT).show()
+                                showTrashScreen()
+                            } else {
+                                AlertDialog.Builder(this@MainActivity)
+                                    .setTitle("Delete permanently?")
+                                    .setMessage("This PDF will be removed from your device.")
+                                    .setNegativeButton("Cancel", null)
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        try { contentResolver.delete(target, null, null) } catch (_: Exception) {}
+                                        val updated = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
+                                        updated.remove(target.toString())
+                                        prefs.edit().putStringSet("trash_uris", updated).apply()
+                                        Toast.makeText(this@MainActivity, "Deleted permanently", Toast.LENGTH_SHORT).show()
+                                        showTrashScreen()
+                                    }.show()
+                            }
+                        }.setNegativeButton("Cancel", null).show()
+                }
+            })
+            list.addView(card)
+        }
+        scroll.addView(list)
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
+        AlertDialog.Builder(this).setTitle("Trash • ${trashed.size} item(s)")
+            .setView(panel).setPositiveButton("Close", null).show()
     }
 
     private fun showAppDrawer() {
@@ -1378,14 +1455,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = params
             setOnClickListener { openPdf(uri) }
         }
-        card.addView(TextView(this).apply {
-            text = "▤"
-            textSize = 32f
-            setTextColor(blueForDocs())
-            gravity = Gravity.CENTER
-            background = rounded(0xFFF0F4F8.toInt(), 8)
-            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
-        })
+        card.addView(documentIconTile(62))
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
@@ -1413,6 +1483,31 @@ class MainActivity : AppCompatActivity() {
             }
         })
         return card
+    }
+
+    private fun documentIconTile(sizeDp: Int = 62): View {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(0xFFEAF2FF.toInt(), 13, 0xFFDCE7FA.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        }
+        tile.addView(TextView(this).apply {
+            text = "▤"
+            textSize = if (sizeDp >= 60) 29f else 24f
+            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+            setTextColor(0xFF167FBD.toInt())
+            gravity = Gravity.CENTER
+        })
+        tile.addView(TextView(this).apply {
+            text = "PDF"
+            textSize = 8f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            letterSpacing = 0.08f
+            setTextColor(0xFF167FBD.toInt())
+            gravity = Gravity.CENTER
+        })
+        return tile
     }
 
     private fun blueForDocs() = 0xFF078BCB.toInt()
