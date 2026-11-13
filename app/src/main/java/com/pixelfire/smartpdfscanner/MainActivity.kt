@@ -558,10 +558,10 @@ class MainActivity : AppCompatActivity() {
         body.addView(gap(8))
         homeFolders.forEach { body.addView(folderCard(it)) }
         body.addView(gap(8))
-        val names = getSavedPdfNames()
-        body.addView(label("Documents (${names.size})", 15f, navy, true))
+        val documents = getSavedPdfs()
+        body.addView(label("Documents (${documents.size})", 15f, navy, true))
         body.addView(gap(8))
-        if (names.isEmpty()) {
+        if (documents.isEmpty()) {
             val empty = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -572,7 +572,7 @@ class MainActivity : AppCompatActivity() {
             empty.addView(gap(5))
             empty.addView(label("Tap the camera button to scan your first document.", 11f, muted))
             body.addView(empty)
-        } else names.forEach { body.addView(documentCard(it)) }
+        } else documents.forEach { item -> body.addView(documentCard(item.first, item.second)) }
 
         scroll.addView(body)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -656,7 +656,7 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
-    private fun documentCard(name: String): View {
+    private fun documentCard(name: String, uri: Uri): View {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -666,7 +666,7 @@ class MainActivity : AppCompatActivity() {
             val params = LinearLayout.LayoutParams(-1, dp(86))
             params.bottomMargin = dp(9)
             layoutParams = params
-            setOnClickListener { pdfPicker.launch(arrayOf("application/pdf")) }
+            setOnClickListener { openPdf(uri) }
         }
         card.addView(TextView(this).apply {
             text = "▤"
@@ -696,24 +696,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun blueForDocs() = 0xFF078BCB.toInt()
 
-    private fun getSavedPdfNames(): List<String> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
+    private fun getSavedPdfs(): List<Pair<String, Uri>> {
         return try {
-            val names = mutableListOf<String>()
-            val projection = arrayOf(MediaStore.Downloads.DISPLAY_NAME)
-            val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ?"
-            val args = arrayOf("Download/DocumentScanner/")
-            contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, args,
-                "${MediaStore.Downloads.DATE_ADDED} DESC")?.use { cursor ->
-                val index = cursor.getColumnIndex(MediaStore.Downloads.DISPLAY_NAME)
-                while (cursor.moveToNext() && names.size < 20) {
-                    if (index >= 0) names.add(cursor.getString(index))
+            val results = mutableListOf<Pair<String, Uri>>()
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+            val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?" else "${MediaStore.MediaColumns.MIME_TYPE} = ?"
+            val args = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) arrayOf("Download/DocumentScanner/", "application/pdf") else arrayOf("application/pdf")
+            contentResolver.query(collection, projection, selection, args, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                while (cursor.moveToNext() && results.size < 100) {
+                    val id = cursor.getLong(idIndex)
+                    val name = cursor.getString(nameIndex) ?: "Document.pdf"
+                    results.add(name to Uri.withAppendedPath(collection, id.toString()))
                 }
             }
-            names
+            results
         } catch (_: Exception) { emptyList() }
     }
-
     private fun createFolderDialog() {
         val field = android.widget.EditText(this).apply { hint = "Folder name" }
         AlertDialog.Builder(this).setTitle("Create folder").setView(field)
