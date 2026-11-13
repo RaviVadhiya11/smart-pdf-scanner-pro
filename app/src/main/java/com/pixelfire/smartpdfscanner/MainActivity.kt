@@ -307,15 +307,170 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showPdfTools() {
-        val options = arrayOf("Merge PDF files", "Split PDF into two parts", "Create PDF from images")
-        AlertDialog.Builder(this).setTitle("PDF Tools")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> mergePicker.launch(arrayOf("application/pdf"))
-                    1 -> splitPicker.launch(arrayOf("application/pdf"))
-                    2 -> imagePicker.launch(arrayOf("image/*"))
+        val bg = 0xFFF7F8FA.toInt()
+        val ink = 0xFF343A40.toInt()
+        val muted = 0xFF777777.toInt()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+        }
+
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(18))
+            background = rounded(0xFFFFFFFF.toInt(), 0)
+            elevation = dp(2).toFloat()
+        }
+        val back = TextView(this).apply {
+            text = "‹"
+            textSize = 34f
+            setTextColor(0xFF1686C8.toInt())
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(46))
+            setOnClickListener { buildScreen() }
+        }
+        toolbar.addView(back)
+        val fileIcon = TextView(this).apply {
+            text = "PDF"
+            textSize = 12f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.CENTER
+            background = rounded(0xFF168BC5.toInt(), 5)
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+        }
+        toolbar.addView(fileIcon)
+        val heading = label("PDF Tools", 20f, 0xFF666666.toInt(), true)
+        heading.setPadding(dp(18), 0, 0, 0)
+        toolbar.addView(heading)
+        root.addView(toolbar)
+
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(18), dp(10), dp(28))
+        }
+        addPdfToolGrid(body, listOf(
+            PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
+            PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Page size", "↔", 0xFF4CAF50.toInt()) { showComingSoon("Page size") },
+            PdfTool("Page Adjust/Rotate/Delete", "✎", 0xFF13A6D8.toInt()) { showComingSoon("Page Adjust / Rotate / Delete") },
+            PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { showComingSoon("Add Password") },
+            PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { showComingSoon("Remove Password") },
+            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showComingSoon("Signature") }
+        ), ink, muted)
+
+        addPdfSectionTitle(body, "PDF To Other Format")
+        addPdfToolGrid(body, listOf(
+            PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
+            PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { showComingSoon("PDF to Text") },
+            PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { showComingSoon("PDF to ZIP") }
+        ), ink, muted)
+
+        addPdfSectionTitle(body, "Other Format To PDF")
+        addPdfToolGrid(body, listOf(
+            PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
+            PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { showComingSoon("Text to PDF") }
+        ), ink, muted)
+
+        addPdfSectionTitle(body, "More")
+        addPdfToolGrid(body, listOf(
+            PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
+                lastPdf?.let { uri ->
+                    val share = Intent(Intent.ACTION_SEND).setType("application/pdf")
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(Intent.createChooser(share, "Share PDF"))
+                } ?: pdfPicker.launch(arrayOf("application/pdf"))
+            },
+            PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { showComingSoon("PDF Details") }
+        ), ink, muted)
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(body)
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private data class PdfTool(
+        val title: String,
+        val symbol: String,
+        val color: Int,
+        val action: () -> Unit
+    )
+
+    private fun addPdfToolGrid(
+        parent: LinearLayout,
+        tools: List<PdfTool>,
+        titleColor: Int,
+        subtitleColor: Int
+    ) {
+        tools.chunked(4).forEach { rowTools ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.TOP
+            }
+            rowTools.forEach { tool ->
+                val item = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(3), dp(8), dp(3), dp(13))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { tool.action() }
                 }
-            }.setNegativeButton("Close", null).show()
+                val circle = TextView(this).apply {
+                    text = tool.symbol
+                    textSize = 23f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(0xFFFFFFFF.toInt())
+                    gravity = Gravity.CENTER
+                    background = rounded(tool.color, 50)
+                    elevation = dp(2).toFloat()
+                    layoutParams = LinearLayout.LayoutParams(dp(58), dp(58))
+                }
+                item.addView(circle)
+                item.addView(gap(9))
+                val caption = label(tool.title, 11.5f, subtitleColor)
+                caption.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
+                item.addView(caption)
+                row.addView(item, LinearLayout.LayoutParams(0, dp(112), 1f))
+            }
+            repeat(4 - rowTools.size) {
+                row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            }
+            parent.addView(row)
+        }
+    }
+
+    private fun addPdfSectionTitle(parent: LinearLayout, title: String) {
+        val lineColor = 0xFFDADADA.toInt()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        row.addView(View(this).apply { setBackgroundColor(lineColor) },
+            LinearLayout.LayoutParams(0, dp(1), 1f))
+        val text = label(title, 15f, 0xFF777777.toInt())
+        text.setPadding(dp(10), 0, dp(10), 0)
+        row.addView(text)
+        row.addView(View(this).apply { setBackgroundColor(lineColor) },
+            LinearLayout.LayoutParams(0, dp(1), 1f))
+        parent.addView(row)
+    }
+
+    private fun showComingSoon(feature: String) {
+        AlertDialog.Builder(this)
+            .setTitle(feature)
+            .setMessage("This tool is planned for a future update. The available PDF tools are Open PDF, Merge, Split, Image to PDF and Share PDF.")
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun mergePdfFiles(uris: List<Uri>) {
