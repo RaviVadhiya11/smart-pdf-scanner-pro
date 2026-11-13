@@ -374,7 +374,7 @@ class MainActivity : AppCompatActivity() {
         nav.addView(navItem("▦", "Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
         nav.addView(navItem("♙", "Profile", false) { showComingSoon("Profile") }, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(nav)
-        setContentView(root)
+        setScreenContent(root)
     }
 
     private fun folderCard(name: String): View {
@@ -615,7 +615,7 @@ class MainActivity : AppCompatActivity() {
             addView(body)
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        setContentView(root)
+        setScreenContent(root)
     }
 
     private data class PdfTool(
