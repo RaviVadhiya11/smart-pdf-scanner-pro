@@ -18,6 +18,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.HorizontalScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
@@ -143,158 +144,349 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
+    private val homeFolders = mutableListOf("New Folder", "ID Cards", "Bills")
+
     private fun buildScreen() {
-        val bg = 0xFFF5F7FB.toInt()
-        val ink = 0xFF14233A.toInt()
-        val muted = 0xFF69778D.toInt()
-        val blue = 0xFF1769E8.toInt()
-        val cyan = 0xFF16A6B2.toInt()
+        val bg = 0xFFF7F8FA.toInt()
+        val ink = 0xFF1E3B49.toInt()
+        val blue = 0xFF078BCB.toInt()
+        val muted = 0xFF777777.toInt()
 
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        window.statusBarColor = ink
+        window.navigationBarColor = 0xFFFFFFFF.toInt()
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
-        val content = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(30))
             setBackgroundColor(bg)
         }
 
-        // Clean white header
-        val header = LinearLayout(this).apply {
+        // Compact dark-teal app bar, matching the supplied reference.
+        val appBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setBackgroundColor(ink)
         }
-        val logo = TextView(this).apply {
-            text = "▣"
-            textSize = 24f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(blue)
+        fun topAction(text: String, width: Int = 42, action: (() -> Unit)? = null) =
+            TextView(this).apply {
+                this.text = text
+                textSize = 25f
+                gravity = Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                layoutParams = LinearLayout.LayoutParams(dp(width), dp(48))
+                if (action != null) setOnClickListener { action() }
+            }
+        appBar.addView(topAction("☰", 42) {
+            AlertDialog.Builder(this).setTitle("Document Scanner")
+                .setItems(arrayOf("Home", "PDF Tools", "Import ID Photo", "About")) { _, which ->
+                    when (which) {
+                        0 -> buildScreen()
+                        1 -> showPdfTools()
+                        2 -> imagePicker.launch(arrayOf("image/*"))
+                        else -> showComingSoon("About")
+                    }
+                }.show()
+        })
+        appBar.addView(label("Doc Scanner", 21f, 0xFFFFFFFF.toInt(), true).apply {
+            setPadding(dp(14), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        appBar.addView(topAction("♛", 42) { showComingSoon("Premium") }.apply {
+            setTextColor(0xFFFFC928.toInt())
+        })
+        appBar.addView(topAction("⌕", 42) { showComingSoon("Search documents") })
+        appBar.addView(topAction("⋮", 32) {
+            AlertDialog.Builder(this).setItems(arrayOf("Refresh", "Settings", "About")) { _, which ->
+                if (which == 0) buildScreen() else showComingSoon(if (which == 1) "Settings" else "About")
+            }.show()
+        })
+        root.addView(appBar)
+
+        // Main navigation tabs.
+        val tabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+        fun tab(text: String, selected: Boolean, action: () -> Unit) = TextView(this).apply {
+            this.text = text
+            textSize = 14f
             gravity = Gravity.CENTER
-            background = rounded(0xFFE4EFFF.toInt(), 15)
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+            setPadding(dp(7), dp(17), dp(7), dp(15))
+            setTextColor(if (selected) blue else muted)
+            if (selected) typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setOnClickListener { action() }
         }
-        header.addView(logo)
-        val brand = LinearLayout(this).apply {
+        tabs.addView(tab("⌂  Home", true) { buildScreen() }, LinearLayout.LayoutParams(0, dp(54), 1f))
+        tabs.addView(tab("▣  PDF Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, dp(54), 1.15f))
+        tabs.addView(tab("▤  Import ID Photo", false) {
+            imagePicker.launch(arrayOf("image/*"))
+        }, LinearLayout.LayoutParams(0, dp(54), 1.45f))
+        root.addView(tabs)
+        root.addView(View(this).apply { setBackgroundColor(blue) }, LinearLayout.LayoutParams(-1, dp(2)))
+
+        // Scrollable filters row.
+        val filterScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+        val filters = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        fun chip(text: String, selected: Boolean = false) = TextView(this).apply {
+            this.text = text
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(if (selected) 0xFFFFFFFF.toInt() else muted)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = rounded(if (selected) blue else 0xFFFFFFFF.toInt(), 24,
+                if (selected) blue else 0xFFD0D4D8.toInt())
+        }
+        filters.addView(chip("All docs", true))
+        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(12), 1) })
+        filters.addView(chip("◷  Recent"))
+        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(10), 1) })
+        filters.addView(chip("★  Favourite"))
+        filters.addView(gap(1).apply { layoutParams = LinearLayout.LayoutParams(dp(10), 1) })
+        filters.addView(chip("Business Cards"))
+        filterScroll.addView(filters)
+        root.addView(filterScroll)
+        root.addView(View(this).apply { setBackgroundColor(0xFFE4E7EB.toInt()) },
+            LinearLayout.LayoutParams(-1, dp(1)))
+
+        val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
+            setPadding(dp(14), dp(12), dp(14), dp(16))
         }
-        brand.addView(label("DOCUMENT SCANNER", 17f, ink, true))
-        brand.addView(gap(3))
-        brand.addView(label("Scan  •  Convert  •  Edit  •  Share", 10.5f, muted))
-        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(TextView(this).apply {
-            text = "✦ PRO"
-            textSize = 10f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(0xFF9A6500.toInt())
-            setPadding(dp(11), dp(8), dp(11), dp(8))
-            background = rounded(0xFFFFF1C9.toInt(), 30)
-        })
-        content.addView(header)
-        content.addView(gap(22))
 
-        // Soft blue information banner
-        val hero = LinearLayout(this).apply {
+        val folderHeading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(17), dp(17), dp(13), dp(17))
-            background = rounded(0xFFE3F0FF.toInt(), 22)
+            setPadding(dp(2), dp(4), dp(2), dp(10))
         }
-        val heroText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        heroText.addView(label("SCAN TO PDF", 10f, blue, true))
-        heroText.addView(gap(8))
-        heroText.addView(label("Your papers,\nperfectly organized.", 21f, ink, true))
-        heroText.addView(gap(7))
-        heroText.addView(label("Auto crop • Enhance • Share", 10f, muted))
-        hero.addView(heroText, LinearLayout.LayoutParams(0, -2, 1f))
-        hero.addView(TextView(this).apply {
-            text = "▤"
-            textSize = 54f
-            setTextColor(blue)
+        folderHeading.addView(label("Folders (${homeFolders.size})", 15f, muted, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        folderHeading.addView(TextView(this).apply {
+            text = "▣+"
+            textSize = 23f
+            setTextColor(muted)
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(dp(82), dp(100))
+            setOnClickListener { createFolderDialog() }
         })
-        content.addView(hero)
-        content.addView(gap(15))
+        body.addView(folderHeading)
+        homeFolders.forEach { body.addView(folderCard(it)) }
 
-        val scanButton = Button(this).apply {
-            text = "▣   Scan Document"
-            isAllCaps = false
-            textSize = 15f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(0xFFFFFFFF.toInt())
-            background = gradient(0xFF2879F2.toInt(), 0xFF0755CF.toInt(), 16)
-            backgroundTintList = null
-            elevation = dp(3).toFloat()
-            setOnClickListener { startDocumentScan() }
+        body.addView(gap(14))
+        body.addView(label("Documents (${getSavedPdfNames().size})", 15f, muted, true))
+        body.addView(gap(8))
+        val docs = getSavedPdfNames()
+        if (docs.isEmpty()) {
+            val empty = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(16), dp(24), dp(16), dp(24))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE4E7EB.toInt())
+            }
+            empty.addView(label("▤", 30f, blue, true))
+            empty.addView(gap(6))
+            empty.addView(label("No documents yet", 14f, ink, true))
+            empty.addView(label("Scan a document or import photos to create your first PDF.", 11f, muted))
+            body.addView(empty)
+        } else {
+            docs.forEach { body.addView(documentCard(it)) }
         }
-        content.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
-        content.addView(gap(23))
 
-        val section = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        section.addView(label("QUICK TOOLS", 13f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-        section.addView(label("VIEW ALL  ›", 9f, blue, true))
-        content.addView(section)
-        content.addView(gap(12))
-
-        addToolRow(content,
-            toolCard("Import Images", "Create PDF from photos", "▧", blue) {
-                imagePicker.launch(arrayOf("image/*"))
-            },
-            toolCard("My Documents", "Browse saved PDF files", "▤", 0xFFDA8A18.toInt()) {
-                pdfPicker.launch(arrayOf("application/pdf"))
-            })
-        content.addView(gap(10))
-        addToolRow(content,
-            toolCard("OCR Text", "Extract text from images", "T", 0xFF7756D8.toInt()) {
-                ocrPicker.launch("image/*")
-            },
-            toolCard("PDF Tools", "Merge • Split • More", "PDF", 0xFF1A9B75.toInt()) {
-                showPdfTools()
-            })
-        content.addView(gap(21))
-
-        // Recent activity panel
-        val activity = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(15), dp(14), dp(15), dp(14))
-            background = rounded(0xFFFFFFFF.toInt(), 18, 0xFFE5EAF2.toInt())
-            elevation = dp(1).toFloat()
-        }
-        val activityHead = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        activityHead.addView(label("RECENT ACTIVITY", 10f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-        activityHead.addView(label("● READY", 9f, 0xFF198754.toInt(), true))
-        activity.addView(activityHead)
-        activity.addView(gap(9))
-        status = label("Ready to scan", 13f, ink, true)
-        activity.addView(status)
-        activity.addView(gap(4))
-        recent = label("Your PDFs are saved in Downloads/DocumentScanner.", 10.5f, muted)
-        activity.addView(recent)
-        content.addView(activity)
-        content.addView(gap(21))
-
-        content.addView(label("SECURE • SIMPLE • PRIVATE", 10f, cyan, true).apply {
-            gravity = Gravity.CENTER
-        })
-        content.addView(gap(5))
-        content.addView(label("Scan and OCR are processed on your device.", 10f, muted).apply {
-            gravity = Gravity.CENTER
-        })
-
-        setContentView(ScrollView(this).apply {
-            setBackgroundColor(bg)
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
-            addView(content)
+            addView(body)
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // Fixed bottom scan/import controls. No ad banner or reserved ad space.
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(8), dp(18), dp(10))
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            elevation = dp(8).toFloat()
+        }
+        val camera = Button(this).apply {
+            text = "📷  Scan"
+            isAllCaps = false
+            textSize = 14f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(blue, 28)
+            backgroundTintList = null
+            setOnClickListener { startDocumentScan() }
+        }
+        bottom.addView(camera, LinearLayout.LayoutParams(dp(132), dp(48)))
+        val add = Button(this).apply {
+            text = "＋"
+            textSize = 24f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(0xFF0879B7.toInt(), 28)
+            backgroundTintList = null
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("Add document")
+                    .setItems(arrayOf("Import images", "Scan document", "Create folder")) { _, which ->
+                        when (which) {
+                            0 -> imagePicker.launch(arrayOf("image/*"))
+                            1 -> startDocumentScan()
+                            2 -> createFolderDialog()
+                        }
+                    }.show()
+            }
+        }
+        val addParams = LinearLayout.LayoutParams(dp(58), dp(48))
+        addParams.leftMargin = dp(10)
+        bottom.addView(add, addParams)
+        root.addView(bottom)
+
+        setContentView(root)
+    }
+
+    private fun folderCard(name: String): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 13, 0xFFE5E7EB.toInt())
+            elevation = dp(2).toFloat()
+            val params = LinearLayout.LayoutParams(-1, dp(82))
+            params.bottomMargin = dp(9)
+            layoutParams = params
+            setOnClickListener { showComingSoon("$name folder") }
+        }
+        card.addView(TextView(this).apply {
+            text = "📁"
+            textSize = 35f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(70), -1)
         })
+        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        info.addView(label(name, 16f, 0xFF666666.toInt()))
+        info.addView(gap(3))
+        info.addView(label("Created today   •   0 files", 11f, 0xFF888888.toInt()))
+        card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(TextView(this).apply {
+            text = "•••"
+            textSize = 18f
+            setTextColor(0xFF777777.toInt())
+            setPadding(dp(8), 0, dp(8), 0)
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
+                    when (which) {
+                        0 -> showComingSoon("$name folder")
+                        1 -> renameFolder(name)
+                        2 -> deleteFolder(name)
+                    }
+                }.show()
+            }
+        })
+        return card
+    }
+
+    private fun documentCard(name: String): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(10), dp(10))
+            background = rounded(0xFFFFFFFF.toInt(), 13, 0xFFE5E7EB.toInt())
+            elevation = dp(2).toFloat()
+            val params = LinearLayout.LayoutParams(-1, dp(86))
+            params.bottomMargin = dp(9)
+            layoutParams = params
+            setOnClickListener { pdfPicker.launch(arrayOf("application/pdf")) }
+        }
+        card.addView(TextView(this).apply {
+            text = "▤"
+            textSize = 32f
+            setTextColor(blueForDocs())
+            gravity = Gravity.CENTER
+            background = rounded(0xFFF0F4F8.toInt(), 8)
+            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
+        })
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        info.addView(label(name, 14f, 0xFF666666.toInt(), true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        info.addView(gap(4))
+        info.addView(label("PDF document", 11f, 0xFF888888.toInt()))
+        card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(TextView(this).apply {
+            text = "•••"
+            textSize = 18f
+            setTextColor(0xFF777777.toInt())
+            setPadding(dp(8), 0, dp(4), 0)
+            setOnClickListener { shareLatestPdf() }
+        })
+        return card
+    }
+
+    private fun blueForDocs() = 0xFF078BCB.toInt()
+
+    private fun getSavedPdfNames(): List<String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
+        return try {
+            val names = mutableListOf<String>()
+            val projection = arrayOf(MediaStore.Downloads.DISPLAY_NAME)
+            val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ?"
+            val args = arrayOf("Download/DocumentScanner/")
+            contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, args,
+                "${MediaStore.Downloads.DATE_ADDED} DESC")?.use { cursor ->
+                val index = cursor.getColumnIndex(MediaStore.Downloads.DISPLAY_NAME)
+                while (cursor.moveToNext() && names.size < 20) {
+                    if (index >= 0) names.add(cursor.getString(index))
+                }
+            }
+            names
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun createFolderDialog() {
+        val field = android.widget.EditText(this).apply { hint = "Folder name" }
+        AlertDialog.Builder(this).setTitle("Create folder").setView(field)
+            .setPositiveButton("Create") { _, _ ->
+                val name = field.text.toString().trim()
+                if (name.isNotEmpty() && !homeFolders.contains(name)) {
+                    homeFolders.add(name)
+                    buildScreen()
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun renameFolder(oldName: String) {
+        val field = android.widget.EditText(this).apply { setText(oldName) }
+        AlertDialog.Builder(this).setTitle("Rename folder").setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                val name = field.text.toString().trim()
+                val index = homeFolders.indexOf(oldName)
+                if (name.isNotEmpty() && index >= 0) {
+                    homeFolders[index] = name
+                    buildScreen()
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun deleteFolder(name: String) {
+        AlertDialog.Builder(this).setMessage("Delete folder '$name'?")
+            .setPositiveButton("Delete") { _, _ -> homeFolders.remove(name); buildScreen() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun shareLatestPdf() {
+        val uri = lastPdf
+        if (uri == null) {
+            pdfPicker.launch(arrayOf("application/pdf"))
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND).setType("application/pdf")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(intent, "Share PDF"))
     }
 
     private fun addToolRow(parent: LinearLayout, first: View, second: View) {
