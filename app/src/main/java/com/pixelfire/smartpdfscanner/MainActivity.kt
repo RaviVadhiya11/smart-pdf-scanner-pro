@@ -341,6 +341,7 @@ class MainActivity : AppCompatActivity() {
         quickItem("PDF Editor") { pdfEditorPicker.launch(arrayOf("application/pdf")) }
         quickItem("✍ Signature") { openSignatureEditor() }
         quickItem("OCR Image") { ocrPicker.launch("image/*") }
+        quickItem("▤ Trash") { showTrashScreen() }
         quickAccessScroll.addView(quickAccess)
         content.addView(quickAccessScroll)
         content.addView(gap(16))
@@ -532,7 +533,7 @@ class MainActivity : AppCompatActivity() {
             when (which) {
                 0 -> showComingSoon("Favourite")
                 1 -> manageTagsDialog()
-                2 -> showComingSoon("Trash")
+                2 -> showTrashScreen()
                 3 -> showSettingsDialog()
                 4 -> showPdfTools()
                 5 -> AlertDialog.Builder(this).setTitle("About us").setMessage("Document Scanner Pro • Scan, convert, edit and share documents.").setPositiveButton("OK", null).show()
@@ -784,7 +785,17 @@ class MainActivity : AppCompatActivity() {
             textSize = 18f
             setTextColor(0xFF777777.toInt())
             setPadding(dp(8), 0, dp(4), 0)
-            setOnClickListener { shareLatestPdf() }
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle(name)
+                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Move to Trash")) { _, which ->
+                        when (which) {
+                            0 -> openPdf(uri)
+                            1 -> showPdfEditor(uri)
+                            2 -> sharePdf(uri)
+                            3 -> moveToTrash(uri)
+                        }
+                    }.show()
+            }
         })
         return card
     }
@@ -792,6 +803,7 @@ class MainActivity : AppCompatActivity() {
     private fun blueForDocs() = 0xFF078BCB.toInt()
 
     private fun getSavedPdfs(): List<Pair<String, Uri>> {
+        val trashed = prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()
         return try {
             val results = mutableListOf<Pair<String, Uri>>()
             val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external")
@@ -804,7 +816,8 @@ class MainActivity : AppCompatActivity() {
                 while (cursor.moveToNext() && results.size < 100) {
                     val id = cursor.getLong(idIndex)
                     val name = cursor.getString(nameIndex) ?: "Document.pdf"
-                    results.add(name to Uri.withAppendedPath(collection, id.toString()))
+                    val itemUri = Uri.withAppendedPath(collection, id.toString())
+                    if (!trashed.contains(itemUri.toString())) results.add(name to itemUri)
                 }
             }
             results
@@ -1273,25 +1286,159 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showPdfEditor(uri: Uri) {
-        AlertDialog.Builder(this)
-            .setTitle("PDF Editor")
-            .setItems(arrayOf("Open / Preview PDF", "Add text to PDF", "Add handwritten / typed signature", "Rotate all pages", "Split into two PDFs", "Extract text", "PDF details", "Share PDF")) { _, which ->
-                when (which) {
-                    0 -> openPdf(uri)
-                    1 -> addTextToPdfDialog(uri)
-                    2 -> openSignatureEditor(uri)
-                    3 -> rotatePdfPages(uri)
-                    4 -> splitPdfFile(uri)
-                    5 -> extractPdfText(uri)
-                    6 -> showPdfDetails(uri)
-                    7 -> {
-                        val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
-                            .putExtra(Intent.EXTRA_STREAM, uri)
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        startActivity(Intent.createChooser(send, "Share PDF"))
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(18))
+            setBackgroundColor(0xFF101216.toInt())
+        }
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        header.addView(TextView(this).apply {
+            text = "‹"; textSize = 34f; setTextColor(0xFFFFFFFF.toInt())
+            setOnClickListener { buildScreen() }
+        })
+        header.addView(label("  PDF Editor", 20f, 0xFFFFFFFF.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(TextView(this).apply {
+            text = "💾"; textSize = 23f; setTextColor(0xFFFFFFFF.toInt())
+            setOnClickListener { Toast.makeText(this@MainActivity, "Choose a tool to apply changes and save a new PDF.", Toast.LENGTH_LONG).show() }
+        })
+        root.addView(header); root.addView(gap(12))
+        root.addView(label("EDIT PDF", 12f, 0xFF55A7FF.toInt(), true)); root.addView(gap(10))
+        val scroller = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun editorAction(title: String, detail: String, symbol: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(15), dp(13), dp(15), dp(13))
+                background = rounded(0xFF20242B.toInt(), 13); isClickable = true
+                setOnClickListener { action() }
+            }
+            row.addView(label(symbol, 23f, 0xFF55A7FF.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            texts.addView(label(title, 15f, 0xFFFFFFFF.toInt(), true))
+            texts.addView(label(detail, 11f, 0xFFB8C0CC.toInt()))
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 24f, 0xFFB8C0CC.toInt()))
+            list.addView(row); list.addView(gap(8))
+        }
+        editorAction("Add Text", "Place text on the first page", "T") { addTextToPdfDialog(uri) }
+        editorAction("Signature", "Draw and apply your signature", "✍") { openSignatureEditor(uri) }
+        editorAction("Watermark", "Add a text watermark to every page", "▧") { addWatermarkDialog(uri) }
+        editorAction("Whitener Tool", "Cover the lower area with white", "□") { addWhitenerDialog(uri) }
+        editorAction("Add Blank Page", "Append a blank page to this PDF", "＋") { addBlankPage(uri) }
+        editorAction("Add Page from Gallery", "Choose an image to convert to PDF", "▣") { addPageImageToPdf(uri) }
+        editorAction("Line and Shapes", "Add a line, rectangle or circle", "◇") { addShapeDialog(uri) }
+        editorAction("Rotate Pages", "Rotate all pages by 90 degrees", "↻") { rotatePdfPages(uri) }
+        editorAction("Split PDF", "Split this PDF into two files", "⇄") { splitPdfFile(uri) }
+        editorAction("Extract Text", "Copy searchable PDF text", "Aa") { extractPdfText(uri) }
+        editorAction("PDF Details", "View page count and file information", "ⓘ") { showPdfDetails(uri) }
+        editorAction("Share PDF", "Share the original PDF", "↗") { sharePdf(uri) }
+        scroller.addView(list); root.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
+        setScreenContent(root)
+    }
+
+    private fun sharePdf(uri: Uri) {
+        val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(send, "Share PDF"))
+    }
+
+    private fun addWatermarkDialog(uri: Uri) {
+        val field = EditText(this).apply { hint = "Watermark text" }
+        AlertDialog.Builder(this).setTitle("Watermark").setView(field)
+            .setPositiveButton("Apply") { _, _ -> if (field.text.isNotBlank()) addWatermark(uri, field.text.toString()) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun addWatermark(uri: Uri, value: String) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                    PDDocument.load(input).use { doc ->
+                        for (page in doc.pages) PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                            cs.beginText(); cs.setFont(PDType1Font.HELVETICA_BOLD, 28f)
+                            cs.setNonStrokingColor(170, 170, 170); cs.newLineAtOffset(55f, 100f)
+                            cs.showText(value.take(60).filter { it.code in 32..126 }); cs.endText()
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
                     }
                 }
-            }.show()
+                val saved = savePdfBytes(bytes, "Watermarked")
+                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "Watermarked PDF saved", Toast.LENGTH_LONG).show(); buildScreen() } }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Watermark failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
+    private fun addWhitenerDialog(uri: Uri) {
+        AlertDialog.Builder(this).setTitle("Whitener Tool")
+            .setMessage("This adds a white cover to the lower area of every page. The original remains unchanged.")
+            .setPositiveButton("Add Whitener") { _, _ -> applyWhiteout(uri) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun applyWhiteout(uri: Uri) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                    PDDocument.load(input).use { doc ->
+                        for (page in doc.pages) PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                            cs.setNonStrokingColor(255, 255, 255)
+                            cs.addRect(36f, 36f, page.mediaBox.width - 72f, 42f); cs.fill()
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Whitened")
+                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "New whitened PDF saved", Toast.LENGTH_LONG).show(); buildScreen() } }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Whitener failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
+    private fun addBlankPage(uri: Uri) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                    PDDocument.load(input).use { doc ->
+                        doc.addPage(com.tom_roush.pdfbox.pdmodel.PDPage())
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Page_Added")
+                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "Blank page added and saved", Toast.LENGTH_LONG).show(); buildScreen() } }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Add page failed", Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+
+    private fun addPageImageToPdf(uri: Uri) {
+        Toast.makeText(this, "Select the image; it will be converted to a separate PDF. Merge it with this PDF from PDF Tools.", Toast.LENGTH_LONG).show()
+        imagePicker.launch(arrayOf("image/*"))
+    }
+
+    private fun addShapeDialog(uri: Uri) {
+        AlertDialog.Builder(this).setTitle("Line and Shapes")
+            .setItems(arrayOf("Add rectangle", "Add line", "Add circle")) { _, which -> addShapeToPdf(uri, which) }.show()
+    }
+
+    private fun addShapeToPdf(uri: Uri, shape: Int) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                    PDDocument.load(input).use { doc ->
+                        val page = doc.getPage(0)
+                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                            cs.setStrokingColor(40, 120, 230); cs.setLineWidth(2f)
+                            when (shape) {
+                                0 -> { cs.addRect(55f, 80f, 180f, 90f); cs.stroke() }
+                                1 -> { cs.moveTo(55f, 100f); cs.lineTo(260f, 100f); cs.stroke() }
+                                else -> { cs.addEllipse(150f, 130f, 45f, 45f); cs.stroke() }
+                            }
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Shapes")
+                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "Shape added to PDF", Toast.LENGTH_LONG).show(); buildScreen() } }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Shape tool failed", Toast.LENGTH_LONG).show() } }
+        }.start()
     }
 
     private fun addTextToPdfDialog(uri: Uri) {
