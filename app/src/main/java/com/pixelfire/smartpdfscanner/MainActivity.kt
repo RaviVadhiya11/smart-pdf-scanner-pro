@@ -6,6 +6,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
+import android.view.MotionEvent
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
@@ -36,6 +40,8 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import java.io.ByteArrayOutputStream
@@ -43,10 +49,43 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+
+private class SignatureCanvas(context: android.content.Context) : View(context) {
+    private val path = Path()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 7f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    fun clear() { path.reset(); invalidate() }
+    fun toBitmap(): Bitmap {
+        val w = width.coerceAtLeast(1); val h = height.coerceAtLeast(1)
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+            val c = Canvas(it); c.drawColor(android.graphics.Color.WHITE); c.drawPath(path, paint)
+        }
+    }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawPath(path, paint)
+    }
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> { path.moveTo(event.x, event.y); invalidate(); return true }
+            MotionEvent.ACTION_MOVE -> { path.lineTo(event.x, event.y); invalidate(); return true }
+            MotionEvent.ACTION_UP -> { path.lineTo(event.x, event.y); invalidate(); return true }
+        }
+        return true
+    }
+}
+
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
+    private var signaturePng: ByteArray? = null
 
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -828,7 +867,7 @@ class MainActivity : AppCompatActivity() {
         addPdfToolHorizontal(body, listOf(
             PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Page Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showComingSoon("Signature") },
+            PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showSignaturePad() },
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
@@ -1077,6 +1116,96 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Text PDF failed", Toast.LENGTH_LONG).show() }
             }
+        }.start()
+    }
+
+    private fun showSignaturePad() {
+        val canvas = SignatureCanvas()
+        val typed = EditText(this).apply { hint = "Enter signature text"; textSize = 24f }
+        val preview = TextView(this).apply {
+            text = "Draw your signature in the box"
+            textSize = 13f
+            setTextColor(0xFF64748B.toInt())
+            gravity = Gravity.CENTER
+        }
+        val drawArea = FrameLayout(this).apply {
+            setBackgroundColor(0xFFF1F3F5.toInt())
+            addView(canvas, FrameLayout.LayoutParams(-1, dp(210)))
+        }
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(drawArea)
+            addView(preview)
+            addView(typed, LinearLayout.LayoutParams(-1, -2))
+        }
+        val tabs = arrayOf("Draw", "Text")
+        var textMode = false
+        AlertDialog.Builder(this)
+            .setTitle("Create Signature")
+            .setView(layout)
+            .setNeutralButton("Clear") { _, _ -> canvas.clear(); typed.setText("") }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Use Signature") { _, _ ->
+                val bitmap = if (textMode || typed.text.toString().isNotBlank()) {
+                    val value = typed.text.toString().trim()
+                    if (value.isBlank()) null else renderTypedSignature(value)
+                } else canvas.toBitmap()
+                if (bitmap == null) {
+                    Toast.makeText(this, "Please draw or type your signature", Toast.LENGTH_LONG).show()
+                } else {
+                    val out = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    signaturePng = out.toByteArray()
+                    bitmap.recycle()
+                    pdfPicker.launch(arrayOf("application/pdf"))
+                }
+            }
+            .show()
+        // The user can draw directly; entering text switches to a typed signature.
+        typed.setOnFocusChangeListener { _, hasFocus -> textMode = hasFocus }
+    }
+
+    private fun renderTypedSignature(value: String): Bitmap {
+        val bitmap = Bitmap.createBitmap(1000, 300, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            textSize = 112f
+            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
+        }
+        canvas.drawText(value, 30f, 190f, paint)
+        return bitmap
+    }
+
+    private fun applySignatureToPdf(uri: Uri, png: ByteArray) {
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val bytes = input.use { stream ->
+                    PDDocument.load(stream).use { doc ->
+                        val page = doc.getPage(0)
+                        val image = PDImageXObject.createFromByteArray(doc, png, "signature")
+                        val box = page.mediaBox
+                        val width = minOf(box.width * 0.35f, 180f)
+                        val height = width * image.height.toFloat() / image.width.toFloat()
+                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                            cs.drawImage(image, box.width - width - 36f, 36f, width, height)
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+                val saved = savePdfBytes(bytes, "Signed")
+                runOnUiThread {
+                    lastPdf = saved
+                    status.text = "Signature added to PDF"
+                    recent.text = "Latest: ${saved?.lastPathSegment ?: "Signed PDF"}"
+                    Toast.makeText(this, "Signed PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    buildScreen()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not sign PDF", Toast.LENGTH_LONG).show() }
+            } finally { signaturePng = null }
         }.start()
     }
 
