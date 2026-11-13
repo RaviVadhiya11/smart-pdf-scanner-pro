@@ -36,6 +36,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -85,6 +86,9 @@ class MainActivity : AppCompatActivity() {
             openPdf(uri)
         }
     }
+    private val pdfTextPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) extractPdfText(uri) }
+    private val detailsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfDetails(uri) }
+    private val rotatePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) rotatePdfPages(uri) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -825,8 +829,8 @@ class MainActivity : AppCompatActivity() {
             PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("Page size", "↔", 0xFF4CAF50.toInt()) { showComingSoon("Page size") },
-            PdfTool("Page Adjust/Rotate/Delete", "✎", 0xFF13A6D8.toInt()) { showComingSoon("Page Adjust / Rotate / Delete") },
+            PdfTool("Page size / Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Rotate all pages", "✎", 0xFF13A6D8.toInt()) { rotatePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add Password", "▣", 0xFFED78A5.toInt()) { showComingSoon("Add Password") },
             PdfTool("Remove Password", "◉", 0xFF80516E.toInt()) { showComingSoon("Remove Password") },
             PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { showComingSoon("Signature") }
@@ -835,14 +839,14 @@ class MainActivity : AppCompatActivity() {
         addPdfSectionTitle(body, "PDF To Other Format")
         addPdfToolGrid(body, listOf(
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { showComingSoon("PDF to Image") },
-            PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { showComingSoon("PDF to Text") },
+            PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { pdfTextPicker.launch(arrayOf("application/pdf")) },
             PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { showComingSoon("PDF to ZIP") }
         ), ink, muted)
 
         addPdfSectionTitle(body, "Other Format To PDF")
         addPdfToolGrid(body, listOf(
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
-            PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { showComingSoon("Text to PDF") }
+            PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() }
         ), ink, muted)
 
         addPdfSectionTitle(body, "More")
@@ -855,7 +859,7 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent.createChooser(share, "Share PDF"))
                 } ?: pdfPicker.launch(arrayOf("application/pdf"))
             },
-            PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { showComingSoon("PDF Details") }
+            PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) }
         ), ink, muted)
 
         val scroll = ScrollView(this).apply {
@@ -933,6 +937,109 @@ class MainActivity : AppCompatActivity() {
         row.addView(View(this).apply { setBackgroundColor(lineColor) },
             LinearLayout.LayoutParams(0, dp(1), 1f))
         parent.addView(row)
+    }
+
+    private fun extractPdfText(uri: Uri) {
+        status.text = "Extracting PDF text…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val text = input.use { stream -> PDDocument.load(stream).use { doc -> PDFTextStripper().getText(doc) } }
+                runOnUiThread {
+                    status.text = "PDF text extracted"
+                    AlertDialog.Builder(this).setTitle("PDF To Text")
+                        .setMessage(text.ifBlank { "No selectable text found. For scanned image PDFs, use Image To Text (OCR)." })
+                        .setPositiveButton("Copy") { _, _ ->
+                            val clip = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clip.setPrimaryClip(android.content.ClipData.newPlainText("PDF text", text))
+                            Toast.makeText(this, "Text copied", Toast.LENGTH_SHORT).show()
+                        }.setNegativeButton("Close", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "PDF text extraction failed"; Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun showPdfDetails(uri: Uri) {
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val details = input.use { stream -> PDDocument.load(stream).use { doc ->
+                    val box = doc.getPage(0).mediaBox
+                    "Pages: ${doc.numberOfPages}\nPage 1 size: ${"%.1f".format(box.width)} × ${"%.1f".format(box.height)} pt\nTitle: ${doc.documentInformation.title ?: "—"}\nAuthor: ${doc.documentInformation.author ?: "—"}"
+                } }
+                runOnUiThread { AlertDialog.Builder(this).setTitle("PDF Details").setMessage(details).setPositiveButton("OK", null).show() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not read PDF details", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun rotatePdfPages(uri: Uri) {
+        status.text = "Rotating PDF pages…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val bytes = input.use { stream -> PDDocument.load(stream).use { doc ->
+                    for (page in doc.pages) page.rotation = (page.rotation + 90) % 360
+                    ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                } }
+                val saved = savePdfBytes(bytes, "Rotated")
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved
+                        buildScreen()
+                        status.text = "All pages rotated 90°"
+                        recent.text = "Latest: ${saved.lastPathSegment}"
+                        Toast.makeText(this, "Rotated PDF saved", Toast.LENGTH_LONG).show()
+                    } else status.text = "Could not save rotated PDF"
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Rotate failed"; Toast.makeText(this, e.localizedMessage ?: "Could not rotate PDF", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun createTextPdfDialog() {
+        val field = android.widget.EditText(this).apply { hint = "Type or paste text"; minLines = 5; gravity = Gravity.TOP }
+        AlertDialog.Builder(this).setTitle("Text To PDF").setView(field)
+            .setPositiveButton("Create PDF") { _, _ -> field.text.toString().trim().takeIf { it.isNotEmpty() }?.let { createPdfFromText(it) } }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun createPdfFromText(value: String) {
+        Thread {
+            try {
+                val doc = PdfDocument()
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f; color = android.graphics.Color.BLACK }
+                val lines = value.lines().flatMap { line ->
+                    val out = mutableListOf<String>(); var current = ""
+                    for (word in line.split(" ")) {
+                        val next = if (current.isEmpty()) word else "$current $word"
+                        if (paint.measureText(next) > 500 && current.isNotEmpty()) { out.add(current); current = word } else current = next
+                    }
+                    out.add(current); out
+                }
+                var pageNo = 1
+                var page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNo).create())
+                var y = 55f
+                for (line in lines) {
+                    if (y > 790f) { doc.finishPage(page); pageNo++; page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNo).create()); y = 55f }
+                    page.canvas.drawText(line, 48f, y, paint); y += 19f
+                }
+                doc.finishPage(page)
+                val saved = savePdf(doc); doc.close()
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved; buildScreen(); status.text = "Text PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
+                        Toast.makeText(this, "PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    } else Toast.makeText(this, "Could not save PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Text PDF failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun showComingSoon(feature: String) {
