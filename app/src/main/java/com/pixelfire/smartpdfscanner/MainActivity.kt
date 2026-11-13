@@ -30,6 +30,11 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.io.MemoryUsageSetting
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -62,6 +67,15 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) runOcr(uri)
     }
 
+    private val mergePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.size >= 2) mergePdfFiles(uris)
+        else if (uris.isNotEmpty()) Toast.makeText(this, "Select at least two PDF files", Toast.LENGTH_LONG).show()
+    }
+
+    private val splitPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) splitPdfFile(uri)
+    }
+
     private val pdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             lastPdf = uri
@@ -71,6 +85,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PDFBoxResourceLoader.init(applicationContext)
         buildScreen()
     }
 
@@ -238,8 +253,8 @@ class MainActivity : AppCompatActivity() {
             toolCard("OCR Text", "Extract text from images", "T", 0xFF7756D8.toInt()) {
                 ocrPicker.launch("image/*")
             },
-            toolCard("PDF Tools", "Convert • Merge • Compress", "PDF", 0xFF1A9B75.toInt()) {
-                imagePicker.launch(arrayOf("image/*"))
+            toolCard("PDF Tools", "Merge • Split • More", "PDF", 0xFF1A9B75.toInt()) {
+                showPdfTools()
             })
         content.addView(gap(21))
 
@@ -288,6 +303,118 @@ class MainActivity : AppCompatActivity() {
         row.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
         row.addView(second, LinearLayout.LayoutParams(0, dp(148), 1f))
         parent.addView(row)
+    }
+
+
+    private fun showPdfTools() {
+        val options = arrayOf("Merge PDF files", "Split PDF into two parts", "Create PDF from images")
+        AlertDialog.Builder(this).setTitle("PDF Tools")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> mergePicker.launch(arrayOf("application/pdf"))
+                    1 -> splitPicker.launch(arrayOf("application/pdf"))
+                    2 -> imagePicker.launch(arrayOf("image/*"))
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun mergePdfFiles(uris: List<Uri>) {
+        status.text = "Merging ${uris.size} PDF files…"
+        Thread {
+            try {
+                val merger = PDFMergerUtility()
+                val streams = mutableListOf<java.io.InputStream>()
+                try {
+                    uris.forEach { uri ->
+                        val stream = contentResolver.openInputStream(uri)
+                            ?: throw IllegalStateException("Could not open selected PDF")
+                        streams.add(stream)
+                        merger.addSource(stream)
+                    }
+                    val output = ByteArrayOutputStream()
+                    merger.destinationStream = output
+                    merger.mergeDocuments(MemoryUsageSetting.setupMainMemoryOnly())
+                    val saved = savePdfBytes(output.toByteArray(), "Merged")
+                    runOnUiThread {
+                        lastPdf = saved
+                        status.text = "PDF merge complete"
+                        recent.text = "Latest: ${saved?.lastPathSegment ?: "Merged PDF"}"
+                        Toast.makeText(this, "Merged PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    }
+                } finally {
+                    streams.forEach { try { it.close() } catch (_: Exception) {} }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "PDF merge failed"
+                    Toast.makeText(this, e.localizedMessage ?: "Could not merge PDFs", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun splitPdfFile(uri: Uri) {
+        status.text = "Splitting PDF…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Could not open selected PDF")
+                val source = input.use { PDDocument.load(it) }
+                val total = source.numberOfPages
+                if (total < 2) {
+                    source.close()
+                    throw IllegalArgumentException("PDF needs at least two pages to split")
+                }
+                val middle = (total + 1) / 2
+                val first = PDDocument()
+                val second = PDDocument()
+                try {
+                    for (i in 0 until middle) first.addPage(source.getPage(i))
+                    for (i in middle until total) second.addPage(source.getPage(i))
+                    val firstBytes = ByteArrayOutputStream().also { first.save(it) }.toByteArray()
+                    val secondBytes = ByteArrayOutputStream().also { second.save(it) }.toByteArray()
+                    val savedA = savePdfBytes(firstBytes, "Split_Part_1")
+                    val savedB = savePdfBytes(secondBytes, "Split_Part_2")
+                    runOnUiThread {
+                        status.text = "PDF split into two files"
+                        recent.text = "Saved: ${savedA?.lastPathSegment ?: "Part 1"} and ${savedB?.lastPathSegment ?: "Part 2"}"
+                        Toast.makeText(this, "Both parts saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    }
+                } finally {
+                    first.close()
+                    second.close()
+                    source.close()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "PDF split failed"
+                    Toast.makeText(this, e.localizedMessage ?: "Could not split PDF", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun savePdfBytes(bytes: ByteArray, prefix: String): Uri? {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val name = "${prefix}_${stamp}.pdf"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        contentResolver.openOutputStream(uri).use { output ->
+            if (output == null) throw IllegalStateException("Unable to save PDF")
+            output.write(bytes)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            contentResolver.update(uri, done, null, null)
+        }
+        return uri
     }
 
     private fun startDocumentScan() {
