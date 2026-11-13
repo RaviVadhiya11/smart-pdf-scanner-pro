@@ -41,6 +41,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.HorizontalScrollView
 import android.widget.TextView
+import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -326,6 +327,15 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), 0, dp(4), 0)
             setOnClickListener { showComingSoon("Search documents") }
         })
+        header.addView(TextView(this).apply {
+            text = "⋮"
+            textSize = 30f
+            gravity = Gravity.CENTER
+            setTextColor(navy)
+            setPadding(dp(10), 0, dp(2), 0)
+            contentDescription = "More options"
+            setOnClickListener { showHomeOverflowMenu(this) }
+        })
         // Keep the brand header outside the ScrollView so it stays fixed while content moves.
         root.addView(header, LinearLayout.LayoutParams(-1, -2).apply {
             leftMargin = dp(18)
@@ -531,6 +541,58 @@ class MainActivity : AppCompatActivity() {
 
         addBottomAdAndActions(root)
         setScreenContent(root)
+    }
+
+    private fun showHomeOverflowMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("PDF / JPG")
+                .setItems(arrayOf("Create PDF from images", "Open PDF file")) { _, which ->
+                    if (which == 0) imagePicker.launch(arrayOf("image/*"))
+                    else pdfPicker.launch(arrayOf("application/pdf"))
+                }.show()
+            true
+        }
+        val importMenu = popup.menu.addSubMenu("Import")
+        importMenu.add("Images / JPG").setOnMenuItemClickListener {
+            imagePicker.launch(arrayOf("image/*")); true
+        }
+        importMenu.add("PDF file").setOnMenuItemClickListener {
+            pdfPicker.launch(arrayOf("application/pdf")); true
+        }
+        popup.menu.add("PDF Tools").setOnMenuItemClickListener { showPdfTools(); true }
+        popup.menu.add("Sort By").setOnMenuItemClickListener {
+            AlertDialog.Builder(this).setTitle("Sort documents")
+                .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
+                    prefs.edit().putInt("document_sort_order", which).apply()
+                    buildScreen()
+                }.show()
+            true
+        }
+        popup.menu.add("Select").setOnMenuItemClickListener {
+            val docs = getSavedPdfs()
+            if (docs.isEmpty()) Toast.makeText(this, "No documents to select yet", Toast.LENGTH_SHORT).show()
+            else AlertDialog.Builder(this).setTitle("Select documents")
+                .setMultiChoiceItems(docs.map { it.first }.toTypedArray(), BooleanArray(docs.size)) { _, _, _ -> }
+                .setPositiveButton("Done", null).show()
+            true
+        }
+        popup.menu.add("Create Folder").setOnMenuItemClickListener { createFolderDialog(); true }
+        popup.menu.add("Sync now").setOnMenuItemClickListener {
+            Toast.makeText(this, "Your documents are saved on this device. Cloud sync is not connected.", Toast.LENGTH_LONG).show()
+            true
+        }
+        popup.menu.add("View Mode").setOnMenuItemClickListener {
+            AlertDialog.Builder(this).setTitle("View mode")
+                .setSingleChoiceItems(arrayOf("List view", "Grid view"), prefs.getInt("document_view_mode", 0)) { dialog, which ->
+                    prefs.edit().putInt("document_view_mode", which).apply()
+                    dialog.dismiss()
+                    buildScreen()
+                }.setNegativeButton("Cancel", null).show()
+            true
+        }
+        popup.show()
     }
 
     private fun addBottomAdAndActions(root: LinearLayout) {
