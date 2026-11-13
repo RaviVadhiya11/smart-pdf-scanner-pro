@@ -1178,7 +1178,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun openSignatureEditor() {
+    private fun openSignatureEditor(targetPdf: Uri? = null) {
         val canvas = SignatureCanvas(this)
         val typed = EditText(this).apply { hint = "Enter signature text"; textSize = 24f }
         val preview = TextView(this).apply {
@@ -1217,7 +1217,10 @@ class MainActivity : AppCompatActivity() {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                     signaturePng = out.toByteArray()
                     bitmap.recycle()
-                    pdfPicker.launch(arrayOf("application/pdf"))
+                    if (targetPdf != null) {
+                        val png = signaturePng
+                        if (png != null) applySignatureToPdf(targetPdf, png)
+                    } else pdfPicker.launch(arrayOf("application/pdf"))
                 }
             }
             .show()
@@ -1276,7 +1279,7 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> openPdf(uri)
                     1 -> addTextToPdfDialog(uri)
-                    2 -> { openSignatureEditor(); }
+                    2 -> openSignatureEditor(uri)
                     3 -> rotatePdfPages(uri)
                     4 -> splitPdfFile(uri)
                     5 -> extractPdfText(uri)
@@ -1669,6 +1672,7 @@ class MainActivity : AppCompatActivity() {
                     input.copyTo(output)
                 }
             }
+            assignPdf(dest)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
                 contentResolver.update(dest, done, null, null)
