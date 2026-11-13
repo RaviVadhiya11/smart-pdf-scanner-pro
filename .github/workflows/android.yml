@@ -13,6 +13,11 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+      - name: Render DocNexa launcher artwork
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          rsvg-convert -w 1024 -h 1024 branding/docnexa-icon.svg -o app/src/main/res/drawable-nodpi/docnexa_icon_art.png
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
