@@ -121,8 +121,9 @@ class MainActivity : AppCompatActivity() {
 
     private val pdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            lastPdf = uri
-            openPdf(uri)
+            val signature = signaturePng
+            if (signature != null) applySignatureToPdf(uri, signature)
+            else { lastPdf = uri; openPdf(uri) }
         }
     }
     private val pdfTextPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) extractPdfText(uri) }
@@ -1120,7 +1121,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSignaturePad() {
-        val canvas = SignatureCanvas()
+        val canvas = SignatureCanvas(this)
         val typed = EditText(this).apply { hint = "Enter signature text"; textSize = 24f }
         val preview = TextView(this).apply {
             text = "Draw your signature in the box"
