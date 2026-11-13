@@ -621,8 +621,8 @@ class MainActivity : AppCompatActivity() {
             true
         }
         popup.menu.add("Create Folder").setOnMenuItemClickListener { createFolderDialog(); true }
-        popup.menu.add("Sync now").setOnMenuItemClickListener {
-            if (cloudToken().isBlank()) showCloudLoginDialog() else syncCloudNow()
+        popup.menu.add("Account / Cloud Sync").setOnMenuItemClickListener {
+            if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
             true
         }
         popup.menu.add("View Mode").setOnMenuItemClickListener {
@@ -824,7 +824,7 @@ class MainActivity : AppCompatActivity() {
             .setView(box)
             .setPositiveButton("Sign In", null)
             .setNeutralButton("Create Account", null)
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Continue as Guest", null)
             .create().also { dialog ->
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
