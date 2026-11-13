@@ -902,19 +902,18 @@ class MainActivity : AppCompatActivity() {
         item("▦", "QR Generator") { showQrGenerator() }
         separator()
         section("Other")
-        item("?", "Help and FAQ") {
-            AlertDialog.Builder(this).setTitle("Help and FAQ")
-                .setMessage("Scan documents, import pictures, create PDFs, manage files and use PDF tools.")
-                .setPositiveButton("OK", null).show()
-        }
-        item("✉", "Contact us / Report a bug") { shareApp() }
-        item("ⓘ", "About us") {
-            AlertDialog.Builder(this).setTitle("About DocNexa")
-                .setMessage("DocNexa – PDF Scanner & Editor").setPositiveButton("OK", null).show()
-        }
+        item("?", "Help and FAQ") { showHelpAndFaq() }
+        item("✉", "Contact us") { openFeedbackEmail(false) }
+        item("⚑", "Report a bug") { openFeedbackEmail(true) }
+        item("ⓘ", "About us") { showAboutDocNexa() }
+        separator()
+        section("Privacy & Legal")
+        item("▣", "Privacy Policy") { showPrivacyPolicy() }
+        item("§", "Terms of Use") { showTermsOfUse() }
+        item("⌑", "Data and account help") { showDataHelp() }
         section("More")
         item("↗", "Share with friends") { shareApp() }
-        item("★", "Rate us") { Toast.makeText(this, "Thank you for supporting DocNexa!", Toast.LENGTH_SHORT).show() }
+        item("★", "Rate us") { openRateUs() }
 
         scroll.addView(menu)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -929,6 +928,143 @@ class MainActivity : AppCompatActivity() {
         }
         drawer.show()
         drawer.window?.setLayout((screenWidth * 0.86f).toInt(), -1)
+    }
+
+    private fun showHelpAndFaq() {
+        val topics = arrayOf(
+            "How do I scan a document?",
+            "How do I import photos?",
+            "Where are my PDFs saved?",
+            "How do I use cloud sync?",
+            "How do I reset my password?",
+            "How do I restore a deleted PDF?"
+        )
+        val answers = arrayOf(
+            "Tap Scan on the home screen, allow camera access if asked, capture your pages and save the PDF.",
+            "Tap Import and select one or more images. DocNexa will create a PDF from the selected images.",
+            "Scanned PDFs are saved in Downloads/DocumentScanner on your device.",
+            "Open the app drawer, choose Login or Create Account, verify your email if requested, then use Account / Cloud Sync. Cloud sync requires an internet connection.",
+            "Open Login, enter your account email and tap Forgot password. Follow the reset link sent by the authentication service. Check spam if you do not see it.",
+            "Open the app drawer, choose Trash, select a document and choose Restore. Permanent deletion cannot be undone."
+        )
+        AlertDialog.Builder(this).setTitle("Help and FAQ")
+            .setItems(topics) { _, which ->
+                AlertDialog.Builder(this).setTitle(topics[which]).setMessage(answers[which])
+                    .setPositiveButton("Got it", null)
+                    .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun openFeedbackEmail(reportBug: Boolean) {
+        val subject = if (reportBug) "DocNexa bug report" else "DocNexa support request"
+        val body = if (reportBug) {
+            "Please describe the problem below:\n\nApp version: ${BuildConfig.VERSION_NAME}\nAndroid: ${Build.VERSION.RELEASE}\nDevice: ${Build.MANUFACTURER} ${Build.MODEL}\n\nSteps to reproduce:\n\nExpected result:\n\nActual result:"
+        } else {
+            "Hello DocNexa team,\n\nI need help with:\n\nApp version: ${BuildConfig.VERSION_NAME}"
+        }
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:")
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+        }
+        try {
+            startActivity(Intent.createChooser(intent, if (reportBug) "Send bug report" else "Contact DocNexa"))
+        } catch (_: Exception) {
+            AlertDialog.Builder(this).setTitle("Email app not found")
+                .setMessage("Please install or set up an email app on your phone, then try again.")
+                .setPositiveButton("OK", null).show()
+        }
+    }
+
+    private fun showAboutDocNexa() {
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" }
+        AlertDialog.Builder(this).setTitle("About DocNexa")
+            .setMessage("DOCNEXA\nPDF Scanner & Editor\nVersion $version\n\nScan, organise and manage PDF documents from your Android device. Save PDFs locally and optionally use an account for cloud backup and sync.\n\nDocNexa is provided as a document productivity tool. Always keep a separate backup of important files.")
+            .setPositiveButton("OK", null).show()
+    }
+
+    private fun showPrivacyPolicy() {
+        val policy = """
+            DOCNEXA – PRIVACY POLICY
+            Last updated: 13 November 2026
+
+            1. Information you provide
+            If you create an account, your email address and the name you enter may be processed by the app's authentication service (Supabase). Your password is handled by that authentication service; do not share it with anyone.
+
+            2. Documents and files
+            PDFs created or imported in the app are saved on your device in Downloads/DocumentScanner. If you choose Cloud Sync while signed in, document files may be uploaded to the configured Supabase storage service so they can be restored on another device. Do not upload documents unless you are comfortable storing them with that service.
+
+            3. Camera, photos and files
+            Camera access is used for document scanning. Photo/file access is used only when you choose to import or open documents. The app processes the selected content to provide its scanner and PDF features.
+
+            4. Internet and service providers
+            Sign-in, email verification, password recovery and optional cloud storage require an internet connection and are provided through Supabase. Those services process data under their own terms and privacy policies.
+
+            5. Local storage and security
+            Local PDFs and app account session information may be stored on your device. Protect your device with a screen lock. No internet service can be guaranteed completely secure.
+
+            6. Sharing and deletion
+            The app does not send a document to another person unless you choose a share/export action or enable cloud sync. You can delete local PDFs from your device. Removing the app or signing out may not delete files already uploaded to cloud storage; cloud copies may need to be deleted separately.
+
+            7. Children
+            DocNexa is not designed to knowingly collect personal information from children.
+
+            8. Changes and contact
+            This policy may be updated as app features change. For privacy questions, use Contact us in the app and include “Privacy request” in your message.
+
+            Important: This in-app policy describes the current intended app behaviour. Before public release, the developer should publish a permanent public policy URL and verify the actual Supabase storage and retention settings.
+        """.trimIndent()
+        val view = TextView(this).apply {
+            text = policy
+            textSize = 13f
+            setTextColor(0xFF263957.toInt())
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+        val scroll = ScrollView(this).apply { addView(view) }
+        AlertDialog.Builder(this).setTitle("Privacy Policy")
+            .setView(scroll).setPositiveButton("Close", null)
+            .setNeutralButton("Privacy question") { _, _ -> openFeedbackEmail(false) }.show()
+    }
+
+    private fun showTermsOfUse() {
+        val terms = """
+            DOCNEXA – TERMS OF USE
+
+            • Use DocNexa only for documents and content you are authorised to access.
+            • You are responsible for checking the accuracy, readability and completeness of every scanned or generated PDF.
+            • Keep backups of important documents. The app and optional cloud services may be unavailable or interrupted.
+            • You are responsible for protecting your account credentials and your device.
+            • Do not use the app to store or share unlawful, harmful or unauthorised material.
+            • PDF conversion, OCR and scanning results may contain errors; review important information before relying on it.
+            • Optional cloud features depend on the configured third-party service and its availability.
+            • Features may change as the app is updated.
+
+            By using DocNexa, you agree to use it responsibly and understand these limitations.
+        """.trimIndent()
+        val view = TextView(this).apply {
+            text = terms; textSize = 13f; setTextColor(0xFF263957.toInt())
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+        AlertDialog.Builder(this).setTitle("Terms of Use")
+            .setView(ScrollView(this).apply { addView(view) })
+            .setPositiveButton("Close", null).show()
+    }
+
+    private fun showDataHelp() {
+        AlertDialog.Builder(this).setTitle("Your data and account")
+            .setMessage("Local PDFs are stored in Downloads/DocumentScanner. Cloud sync is optional and requires you to sign in. Signing out only removes the account session from this device; it does not automatically erase PDFs saved locally or cloud copies. To request help with account or privacy data, use Contact us and describe what you want removed. Never send your password.")
+            .setPositiveButton("OK", null)
+            .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
+    }
+
+    private fun openRateUs() {
+        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName"))
+        val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$packageName"))
+        try { startActivity(market) } catch (_: Exception) {
+            try { startActivity(web) } catch (_: Exception) {
+                Toast.makeText(this, "Thank you for supporting DocNexa!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
