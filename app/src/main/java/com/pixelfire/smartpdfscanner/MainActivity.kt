@@ -301,12 +301,14 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showAppDrawer() }
         })
         header.addView(TextView(this).apply {
-            text = "▣"
-            textSize = 25f
+            text = "▤"
+            textSize = 29f
+            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             setTextColor(0xFF1764DE.toInt())
-            background = rounded(0xFFFFFFFF.toInt(), 14)
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+            background = rounded(0xFFFFFFFF.toInt(), 15, 0xFFDCE8FF.toInt())
+            contentDescription = "DocNexa scanner logo"
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
         })
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -739,13 +741,52 @@ class MainActivity : AppCompatActivity() {
         accountText.addView(label("Sign in to sync documents", 13f, 0xFFE5EDF3.toInt()))
         accountText.removeAllViews()
         val signedInEmail = prefs.getString("cloud_email", null)
-        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign In (Cloud)" else signedInEmail, 18f, 0xFFFFFFFF.toInt(), true))
+        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "DocNexa Account" else signedInEmail, 18f, 0xFFFFFFFF.toInt(), true))
         accountText.addView(gap(5))
-        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign in to sync documents" else "Cloud account connected", 13f, 0xFFE5EDF3.toInt()))
-        account.addView(accountText)
-        account.isClickable = true
-        account.setOnClickListener { drawer.dismiss(); if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu() }
+        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Backup and sync your PDFs" else "Cloud account connected", 13f, 0xFFE5EDF3.toInt()))
+        account.addView(accountText, LinearLayout.LayoutParams(0, -2, 1f))
         menu.addView(account)
+
+        // Clearly visible Login and Signup actions in the drawer header area.
+        val authActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+            setBackgroundColor(0xFF1D3B4A.toInt())
+        }
+        val loginButton = TextView(this).apply {
+            text = if (signedInEmail.isNullOrBlank()) "LOGIN" else "ACCOUNT"
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(0xFF3478F6.toInt(), 10)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                drawer.dismiss()
+                if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
+            }
+        }
+        val signupButton = TextView(this).apply {
+            text = "SIGN UP"
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(0xFF17324D.toInt())
+            background = rounded(0xFFFFFFFF.toInt(), 10)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                drawer.dismiss()
+                if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
+            }
+        }
+        authActions.addView(loginButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(6) })
+        authActions.addView(signupButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(6) })
+        menu.addView(authActions)
 
         fun section(title: String) {
             menu.addView(TextView(this).apply {
