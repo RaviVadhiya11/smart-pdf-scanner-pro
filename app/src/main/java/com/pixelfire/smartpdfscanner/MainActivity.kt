@@ -860,14 +860,14 @@ class MainActivity : AppCompatActivity() {
         val email = EditText(this).apply {
             hint = "Email address"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            singleLine = true
+            setSingleLine(true)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
         }
         val password = EditText(this).apply {
             hint = "Password (minimum 6 characters)"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            singleLine = true
+            setSingleLine(true)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = rounded(0xFFF5F8FF.toInt(), 12, 0xFFD5E1F5.toInt())
         }
