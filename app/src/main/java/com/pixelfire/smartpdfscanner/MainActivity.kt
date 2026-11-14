@@ -898,8 +898,8 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
             })
             panel.addView(empty)
-            AlertDialog.Builder(this).setTitle("Trash").setView(panel)
-                .setPositiveButton("OK", null).show()
+            showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash").setView(panel)
+                .setPositiveButton("OK", null))
             return
         }
 
@@ -962,8 +962,8 @@ class MainActivity : AppCompatActivity() {
         }
         scroll.addView(list)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
-        AlertDialog.Builder(this).setTitle("Trash • ${trashed.size} item(s)")
-            .setView(panel).setPositiveButton("Close", null).show()
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash • ${trashed.size} item(s)")
+            .setView(panel).setPositiveButton("Close", null))
     }
 
     private fun showAppDrawer() {
