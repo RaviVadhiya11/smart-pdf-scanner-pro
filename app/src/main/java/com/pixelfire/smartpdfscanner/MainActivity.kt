@@ -292,6 +292,20 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) splitPdfFile(uri)
     }
 
+    private val allFilesPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            val mime = contentResolver.getType(uri).orEmpty().lowercase(Locale.ROOT)
+            when {
+                mime.startsWith("image/") -> showImageImportPreview(listOf(uri))
+                mime == "application/pdf" || uri.toString().lowercase(Locale.ROOT).endsWith(".pdf") -> {
+                    lastPdf = uri
+                    openPdf(uri)
+                }
+                else -> Toast.makeText(this, "File selected. Direct import currently supports images and PDF; this file type is not yet editable in DocNexa.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     private val importPdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             lastPdf = uri
@@ -5369,6 +5383,10 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Import File • DocNexa")
             .setView(panel)
             .setNegativeButton("Close", null))
+        option("Browse all files", "Show images, PDFs, documents, downloads and other file types", "ALL") {
+            dialog.dismiss()
+            allFilesPicker.launch(arrayOf("*/*"))
+        }
         option("Open a PDF", "Browse phone storage, Downloads or cloud files", "PDF") {
             dialog.dismiss()
             importPdfPicker.launch(arrayOf("application/pdf"))
