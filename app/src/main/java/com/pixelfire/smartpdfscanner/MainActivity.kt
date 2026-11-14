@@ -4572,94 +4572,123 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showImageImportPreview(uris: List<Uri>) {
+        val orderedUris = uris.toMutableList()
         val croppedBitmaps = MutableList<Bitmap?>(uris.size) { null }
-        val previewList = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        previewList.addView(label("${uris.size} image(s) selected • Crop images before creating PDF", 13f, 0xFF263957.toInt(), true))
+        val previewList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        val header = label("", 13f, 0xFF263957.toInt(), true)
+        previewList.addView(header)
         previewList.addView(gap(10))
+        val rows = mutableListOf<View>()
+        fun refreshHeader() { header.text = "${orderedUris.size} image(s) selected • Arrange pages before export" }
+        fun refreshRows() {
+            rows.forEachIndexed { index, view ->
+                val row = view as LinearLayout
+                (row.getChildAt(1) as TextView).text = "Page ${index + 1}"
+                val actions = row.getChildAt(2) as LinearLayout
+                actions.getChildAt(0).isEnabled = index > 0
+                actions.getChildAt(1).isEnabled = index < rows.lastIndex
+            }
+            refreshHeader()
+        }
+        fun movePage(from: Int, to: Int) {
+            if (from !in orderedUris.indices || to !in orderedUris.indices) return
+            val uri = orderedUris.removeAt(from); orderedUris.add(to, uri)
+            val bitmap = croppedBitmaps.removeAt(from); croppedBitmaps.add(to, bitmap)
+            val view = rows.removeAt(from); rows.add(to, view)
+            previewList.removeView(view)
+            previewList.addView(view, to + 2)
+            refreshRows()
+        }
+        refreshHeader()
         uris.forEachIndexed { index, uri ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 background = rounded(0xFFF7F9FD.toInt(), 14, 0xFFE2EAF5.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(258)).apply { bottomMargin = dp(12) }
+                layoutParams = LinearLayout.LayoutParams(-1, dp(278)).apply { bottomMargin = dp(12) }
             }
             val thumb = ImageView(this).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
+                scaleType = ImageView.ScaleType.FIT_CENTER
                 background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
                 clipToOutline = true
-                try {
-                    contentResolver.openInputStream(uri).use { input ->
-                        setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null)
-                    }
-                } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
-                layoutParams = LinearLayout.LayoutParams(dp(170), dp(174))
+                try { contentResolver.openInputStream(uri).use { input -> setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null) } }
+                catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
+                layoutParams = LinearLayout.LayoutParams(dp(170), dp(164))
             }
             row.addView(thumb)
-            row.addView(gap(6))
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
+            row.addView(label("Page ${index + 1}", 13f, 0xFF263957.toInt(), true))
+            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            fun action(caption: String, callback: () -> Unit) = Button(this@MainActivity).apply {
+                text = caption; isAllCaps = false; textSize = 10f; setPadding(dp(3), 0, dp(3), 0)
+                setOnClickListener { callback() }
             }
-            actions.addView(label("Page ${index + 1}", 13f, 0xFF263957.toInt(), true), LinearLayout.LayoutParams(0, dp(42), 1f))
-            val cropButton = Button(this).apply {
-                text = "Crop"
-                isAllCaps = false
-                setOnClickListener {
-                    try {
-                        val original = contentResolver.openInputStream(uri).use { input ->
-                            if (input != null) BitmapFactory.decodeStream(input) else null
-                        } ?: throw IllegalStateException("Could not open selected image")
-                        val cropView = ImageCropView(this@MainActivity, original)
-                        val cropPanel = LinearLayout(this@MainActivity).apply {
-                            orientation = LinearLayout.VERTICAL
-                            setPadding(dp(8), dp(8), dp(8), dp(8))
-                            addView(cropView, LinearLayout.LayoutParams(-1, dp(360)))
-                            addView(label("Drag the blue corner handles to select the area.", 12f, 0xFF53627A.toInt()))
-                        }
-                        val cropDialog = AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Crop image ${index + 1}")
-                            .setView(cropPanel)
-                            .setPositiveButton("Apply Crop", null)
-                            .setNeutralButton("Rotate", null)
-                            .setNegativeButton("Reset", null)
-                            .create()
-                        cropDialog.setOnShowListener {
-                            cropDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                                val cropped = cropView.getCroppedBitmap()
-                                croppedBitmaps[index] = cropped
-                                thumb.setImageBitmap(cropped)
-                                cropDialog.dismiss()
-                            }
-                            cropDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { cropView.rotateImage() }
-                            cropDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { cropView.resetCrop() }
-                        }
-                        cropDialog.show()
-                    } catch (e: Exception) {
-                        Toast.makeText(this@MainActivity, e.localizedMessage ?: "Could not open crop editor", Toast.LENGTH_LONG).show()
+            actions.addView(action("↑") { val p = rows.indexOf(row); movePage(p, p - 1) })
+            actions.addView(action("↓") { val p = rows.indexOf(row); movePage(p, p + 1) })
+            actions.addView(action("Rotate") {
+                val p = rows.indexOf(row)
+                try {
+                    val source = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input -> if (input != null) BitmapFactory.decodeStream(input) else null }
+                        ?: throw IllegalStateException("Could not read image")
+                    val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+                    val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+                    if (croppedBitmaps[p] != null && croppedBitmaps[p] !== rotated) source.recycle()
+                    croppedBitmaps[p] = rotated
+                    thumb.setImageBitmap(rotated)
+                } catch (e: Exception) { Toast.makeText(this@MainActivity, e.localizedMessage ?: "Rotate failed", Toast.LENGTH_LONG).show() }
+            })
+            actions.addView(action("Crop") {
+                val p = rows.indexOf(row)
+                try {
+                    val original = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input -> if (input != null) BitmapFactory.decodeStream(input) else null }
+                        ?: throw IllegalStateException("Could not open image")
+                    val cropView = ImageCropView(this@MainActivity, original)
+                    val panel = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
+                        addView(cropView, LinearLayout.LayoutParams(-1, dp(330)))
+                        addView(label("Drag the corner handles to select the crop area.", 12f, 0xFF53627A.toInt()))
                     }
+                    val cropDialog = AlertDialog.Builder(this@MainActivity).setTitle("Crop page ${p + 1}").setView(panel)
+                        .setPositiveButton("Apply crop", null).setNeutralButton("Rotate", null).setNegativeButton("Reset", null).create()
+                    cropDialog.setOnShowListener {
+                        cropDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            croppedBitmaps[p] = cropView.getCroppedBitmap()
+                            thumb.setImageBitmap(croppedBitmaps[p])
+                            cropDialog.dismiss()
+                        }
+                        cropDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { cropView.rotateImage() }
+                        cropDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { cropView.resetCrop() }
+                    }
+                    cropDialog.show()
+                } catch (e: Exception) { Toast.makeText(this@MainActivity, e.localizedMessage ?: "Crop failed", Toast.LENGTH_LONG).show() }
+            })
+            actions.addView(action("Remove") {
+                val p = rows.indexOf(row)
+                if (p >= 0) {
+                    orderedUris.removeAt(p)
+                    croppedBitmaps.removeAt(p)
+                    rows.removeAt(p)
+                    previewList.removeView(row)
+                    refreshRows()
                 }
-            }
-            actions.addView(cropButton)
+            })
             row.addView(actions)
+            rows.add(row)
             previewList.addView(row)
         }
-        val scroll = ScrollView(this).apply {
-            addView(previewList)
-            isFillViewport = false
+        previewList.addView(label("Use ↑ / ↓ to change page order. Crop, rotate or remove any image before making your PDF.", 11f, 0xFF718096.toInt()))
+        val scroll = ScrollView(this).apply { addView(previewList); isFillViewport = false }
+        val dialog = AlertDialog.Builder(this).setTitle("Image to PDF • Page manager").setView(scroll)
+            .setPositiveButton("Next: PDF settings", null)
+            .setNeutralButton("Share images") { _, _ -> shareSelectedImages(orderedUris) }
+            .setNegativeButton("Cancel", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (orderedUris.isEmpty()) Toast.makeText(this, "Select at least one image.", Toast.LENGTH_LONG).show()
+                else { dialog.dismiss(); showImagePdfSettings(orderedUris.toList(), croppedBitmaps.toList()) }
+            }
         }
-        val countLabel = label("You can crop each page before export. Images will be added in the selected order.", 11f, 0xFF718096.toInt())
-        previewList.addView(countLabel)
-        val previewDialog = AlertDialog.Builder(this).setTitle("Image to PDF • Preview")
-            .setView(scroll)
-            .setPositiveButton("Next: PDF settings") { _, _ -> showImagePdfSettings(uris, croppedBitmaps) }
-            .setNeutralButton("Share images") { _, _ -> shareSelectedImages(uris) }
-            .setNegativeButton("Cancel", null)
-            .create()
-        previewDialog.show()
+        dialog.show()
     }
 
     private fun showImagePdfSettings(uris: List<Uri>, croppedBitmaps: List<Bitmap?>) {
