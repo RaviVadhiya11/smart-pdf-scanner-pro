@@ -286,6 +286,26 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
+    private fun showPremiumDialog(builder: AlertDialog.Builder): AlertDialog {
+        val dialog = builder.create()
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 24, 0xFFE1E9F5.toInt()))
+            dialog.window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.90f).toInt(),
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT
+            )
+            listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
+                dialog.getButton(which)?.apply {
+                    isAllCaps = false
+                    textSize = 14f
+                    setTextColor(0xFF1764C0.toInt())
+                }
+            }
+        }
+        dialog.show()
+        return dialog
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun rounded(color: Int, radius: Int, stroke: Int = 0): GradientDrawable =
@@ -777,11 +797,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBottomAdAndActions(root: LinearLayout) {
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            elevation = dp(5).toFloat()
+        }
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(6), dp(16), dp(6))
-            setBackgroundColor(0xFFF5F8FF.toInt())
         }
         val camera = Button(this).apply {
             text = "▣  Scan"
@@ -801,17 +825,31 @@ class MainActivity : AppCompatActivity() {
             backgroundTintList = null
             setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
         }
-        bar.addView(camera, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
-        bar.addView(import, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
-        root.addView(bar)
-        root.addView(TextView(this).apply {
-            text = "ADVERTISEMENT  •  Ad space"
-            textSize = 10f
+        bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
+        bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
+        footer.addView(bar)
+        val share = TextView(this).apply {
+            text = "↗   Share DocNexa with friends"
+            textSize = 13f
             gravity = Gravity.CENTER
-            setTextColor(0xFF8994A5.toInt())
-            setBackgroundColor(0xFFFFFFFF.toInt())
-            layoutParams = LinearLayout.LayoutParams(-1, dp(48))
-        })
+            setTextColor(0xFF1557A8.toInt())
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            background = rounded(0xFFEAF2FF.toInt(), 14)
+            setPadding(dp(12), dp(11), dp(12), dp(11))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(7) }
+            setOnClickListener { shareApp() }
+        }
+        footer.addView(share)
+        val adCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            background = rounded(0xFFF7F9FC.toInt(), 10, 0xFFE8EDF5.toInt())
+            layoutParams = LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(7) }
+        }
+        adCard.addView(label("ADVERTISEMENT  •  Ad space", 10f, 0xFF8994A5.toInt(), true))
+        footer.addView(adCard)
+        root.addView(footer)
     }
 
     private fun moveToTrash(uri: Uri) {
@@ -1563,19 +1601,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsDialog() {
-        AlertDialog.Builder(this).setTitle("Settings")
-            .setItems(arrayOf("App information", "Storage location", "Share app")) { _, which ->
-                when (which) {
-                    0 -> AlertDialog.Builder(this).setMessage("Document Scanner Pro").setPositiveButton("OK", null).show()
-                    1 -> Toast.makeText(this, "PDFs are saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
-                    2 -> shareApp()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(10), dp(18), dp(6))
+            background = rounded(0xFFF5F8FF.toInt(), 18)
+        }
+        val options = listOf(
+            Triple("ⓘ", "App information", "DocNexa • PDF Scanner & Editor"),
+            Triple("▣", "Storage location", "Downloads/DocumentScanner"),
+            Triple("↗", "Share app", "Invite friends to try DocNexa")
+        )
+        options.forEachIndexed { index, item ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE4EAF3.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, dp(66)).apply { bottomMargin = dp(8) }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    when(index) {
+                        0 -> showPremiumDialog(AlertDialog.Builder(this@MainActivity)
+                            .setTitle("About DocNexa")
+                            .setMessage("DocNexa\nPDF Scanner & Editor\n\nScan, import, organize and manage PDF documents on your device.")
+                            .setPositiveButton("Done", null))
+                        1 -> showPremiumDialog(AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Storage location")
+                            .setMessage("Your PDFs are saved in Downloads/DocumentScanner.")
+                            .setPositiveButton("OK", null))
+                        2 -> shareApp()
+                    }
                 }
-            }.show()
+            }
+            row.addView(label(item.first, 23f, 0xFF1764C0.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
+            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            info.addView(label(item.second, 14f, 0xFF172B4D.toInt(), true))
+            info.addView(gap(3))
+            info.addView(label(item.third, 10.5f, 0xFF718096.toInt()))
+            row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 24f, 0xFF718096.toInt()))
+            panel.addView(row)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Settings • DocNexa").setView(panel).setNegativeButton("Close", null))
     }
 
     private fun shareApp() {
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "Try Document Scanner Pro.")
-        startActivity(Intent.createChooser(send, "Share app"))
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "Try DocNexa")
+            .putExtra(Intent.EXTRA_TEXT, "Try DocNexa – PDF Scanner & Editor.")
+        startActivity(Intent.createChooser(send, "Share DocNexa"))
     }
 
     private fun showDocsScreen() {
