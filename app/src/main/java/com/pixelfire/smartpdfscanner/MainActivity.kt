@@ -4951,6 +4951,27 @@ class MainActivity : AppCompatActivity() {
                 text = caption; isAllCaps = false; textSize = 10f; setPadding(dp(3), 0, dp(3), 0)
                 setOnClickListener { callback() }
             }
+            actions.addView(action("Preview") {
+                val p = rows.indexOf(row)
+                if (p >= 0) {
+                    try {
+                        val source = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input ->
+                            if (input != null) BitmapFactory.decodeStream(input) else null
+                        } ?: throw IllegalStateException("Preview unavailable")
+                        val large = ImageView(this@MainActivity).apply {
+                            setImageBitmap(source)
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                            setBackgroundColor(android.graphics.Color.WHITE)
+                            layoutParams = LinearLayout.LayoutParams(-1, dp(440))
+                        }
+                        showPremiumDialog(AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Page preview • ${p + 1}")
+                            .setView(large).setPositiveButton("Done", null))
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, e.localizedMessage ?: "Preview unavailable", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
             actions.addView(action("↑") { val p = rows.indexOf(row); movePage(p, p - 1) })
             actions.addView(action("↓") { val p = rows.indexOf(row); movePage(p, p + 1) })
             actions.addView(action("Rotate") {
@@ -4990,6 +5011,54 @@ class MainActivity : AppCompatActivity() {
                     cropDialog.show()
                 } catch (e: Exception) { Toast.makeText(this@MainActivity, e.localizedMessage ?: "Crop failed", Toast.LENGTH_LONG).show() }
             })
+            actions.addView(action("Duplicate") {
+                val p = rows.indexOf(row)
+                if (p >= 0) {
+                    orderedUris.add(p + 1, orderedUris[p])
+                    croppedBitmaps.add(p + 1, croppedBitmaps[p]?.copy(Bitmap.Config.ARGB_8888, true))
+                    val duplicateRow = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        setPadding(dp(10), dp(10), dp(10), dp(10))
+                        background = rounded(0xFFF7F9FD.toInt(), 14, 0xFFE2EAF5.toInt())
+                        layoutParams = LinearLayout.LayoutParams(-1, dp(278)).apply { bottomMargin = dp(12) }
+                    }
+                    val duplicateThumb = ImageView(this@MainActivity).apply {
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
+                        clipToOutline = true
+                        try {
+                            val preview = croppedBitmaps[p + 1] ?: contentResolver.openInputStream(orderedUris[p + 1]).use { input ->
+                                if (input != null) BitmapFactory.decodeStream(input) else null
+                            }
+                            setImageBitmap(preview)
+                        } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
+                        layoutParams = LinearLayout.LayoutParams(dp(170), dp(164))
+                    }
+                    duplicateRow.addView(duplicateThumb)
+                    duplicateRow.addView(label("Duplicated page", 13f, 0xFF263957.toInt(), true))
+                    val duplicateActions = LinearLayout(this@MainActivity).apply {
+                        gravity = Gravity.CENTER
+                        addView(Button(this@MainActivity).apply {
+                            text = "Remove duplicate"; isAllCaps = false; textSize = 10f
+                            setOnClickListener {
+                                val at = rows.indexOf(duplicateRow)
+                                if (at >= 0) {
+                                    orderedUris.removeAt(at)
+                                    croppedBitmaps.removeAt(at)
+                                    rows.removeAt(at)
+                                    previewList.removeView(duplicateRow)
+                                    refreshRows()
+                                }
+                            }
+                        })
+                    }
+                    duplicateRow.addView(duplicateActions)
+                    rows.add(p + 1, duplicateRow)
+                    previewList.addView(duplicateRow, p + 3)
+                    refreshRows()
+                }
+            })
             actions.addView(action("Remove") {
                 val p = rows.indexOf(row)
                 if (p >= 0) {
@@ -5004,7 +5073,7 @@ class MainActivity : AppCompatActivity() {
             rows.add(row)
             previewList.addView(row)
         }
-        previewList.addView(label("Use ↑ / ↓ to change page order. Crop, rotate or remove any image before making your PDF.", 11f, 0xFF718096.toInt()))
+        previewList.addView(label("Tip: Preview pages, change order, rotate, crop, duplicate or remove images. Your original gallery photos are not modified.", 11f, 0xFF718096.toInt()))
         val scroll = ScrollView(this).apply { addView(previewList); isFillViewport = false }
         val dialog = AlertDialog.Builder(this).setTitle("Image to PDF • Page manager").setView(scroll)
             .setPositiveButton("Next: PDF settings", null)
