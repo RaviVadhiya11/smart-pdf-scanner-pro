@@ -2413,6 +2413,7 @@ class MainActivity : AppCompatActivity() {
 
         addPdfSectionTitle(body, "PDF Tools")
         addPdfToolGrid(body, listOf(
+            PdfTool("Create PDF", "＋", 0xFF2563EB.toInt()) { showCreatePdfHub() },
             PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
@@ -2431,6 +2432,212 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setScreenContent(root)
+    }
+
+    private fun showCreatePdfHub() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(4))
+        }
+        fun option(title: String, subtitle: String, icon: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(10), dp(12))
+                background = rounded(0xFFF5F8FF.toInt(), 14, 0xFFE0E9F7.toInt())
+                isClickable = true
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+                setOnClickListener { action() }
+            }
+            row.addView(label(icon, 22f, 0xFF2563EB.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
+            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            copy.addView(label(title, 13f, 0xFF172B4D.toInt(), true))
+            copy.addView(gap(3))
+            copy.addView(label(subtitle, 10.5f, 0xFF718096.toInt()))
+            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 22f, 0xFF718096.toInt()))
+            panel.addView(row)
+        }
+        option("Images to PDF", "Select, preview and arrange photos", "▧") {
+            imagePicker.launch(arrayOf("image/*"))
+        }
+        option("Text to PDF", "Write notes and choose page formatting", "T") {
+            createTextPdfDialog()
+        }
+        option("Blank PDF", "Create blank pages with custom size", "□") {
+            showBlankPdfDialog()
+        }
+        option("Advanced PDF Design", "Create a formatted document with header and footer", "✎") {
+            showAdvancedPdfDesignDialog()
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Create PDF • DocNexa")
+            .setMessage("Choose how you want to create your PDF.")
+            .setView(panel).setNegativeButton("Close", null))
+    }
+
+    private fun showBlankPdfDialog() {
+        val fileName = EditText(this).apply { setSingleLine(true); setText("Blank_Document"); hint = "PDF file name" }
+        val pages = EditText(this).apply {
+            setSingleLine(true); inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("1"); hint = "Number of pages (1–50)"
+        }
+        val size = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("A4", "Letter", "A5"))
+        }
+        val orientationSpinner = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Portrait", "Landscape"))
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("File name", 11f, 0xFF263957.toInt(), true)); addView(fileName)
+            addView(gap(7)); addView(label("Number of pages", 11f, 0xFF263957.toInt(), true)); addView(pages)
+            addView(gap(7)); addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(size)
+            addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientationSpinner)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Blank PDF • Settings").setView(panel)
+            .setNegativeButton("Cancel", null).setPositiveButton("Create PDF") { _, _ ->
+                val count = pages.text.toString().toIntOrNull()
+                if (count == null || count !in 1..50) {
+                    Toast.makeText(this, "Enter between 1 and 50 pages", Toast.LENGTH_LONG).show()
+                } else {
+                    val dimensions = listOf(595 to 842, 612 to 792, 420 to 595)[size.selectedItemPosition.coerceIn(0, 2)]
+                    val landscape = orientationSpinner.selectedItemPosition == 1
+                    val width = if (landscape) dimensions.second else dimensions.first
+                    val height = if (landscape) dimensions.first else dimensions.second
+                    val name = fileName.text.toString().trim().replace(Regex("[^A-Za-z0-9_-]"), "_").take(60).ifBlank { "Blank_Document" }
+                    createBlankPdf(count, width, height, name)
+                }
+            })
+    }
+
+    private fun createBlankPdf(count: Int, width: Int, height: Int, name: String) {
+        status.text = "Creating blank PDF…"
+        Thread {
+            try {
+                val doc = PdfDocument()
+                repeat(count) { index ->
+                    val page = doc.startPage(PdfDocument.PageInfo.Builder(width, height, index + 1).create())
+                    page.canvas.drawColor(android.graphics.Color.WHITE)
+                    doc.finishPage(page)
+                }
+                val bytes = ByteArrayOutputStream().also { doc.writeTo(it) }.toByteArray()
+                doc.close()
+                val saved = savePdfBytes(bytes, name)
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved; status.text = "Blank PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
+                        buildScreen()
+                        AlertDialog.Builder(this).setTitle("Blank PDF created")
+                            .setMessage("${count} blank page(s) saved as ${saved.lastPathSegment}")
+                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
+                            .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
+                    } else Toast.makeText(this, "Could not save blank PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Blank PDF failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun showAdvancedPdfDesignDialog() {
+        val titleField = EditText(this).apply { setSingleLine(true); setText("My Document"); hint = "Document title" }
+        val bodyField = EditText(this).apply {
+            hint = "Write or paste document content"
+            minLines = 6; maxLines = 10; gravity = Gravity.TOP
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val header = EditText(this).apply { setSingleLine(true); hint = "Header (optional)" }
+        val footer = EditText(this).apply { setSingleLine(true); hint = "Footer (optional)" }
+        val size = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("A4", "Letter", "A5"))
+        }
+        val font = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("11 pt", "12 pt", "14 pt", "16 pt"))
+            setSelection(1)
+        }
+        val pageNumbers = android.widget.CheckBox(this).apply { text = "Show page numbers"; isChecked = true }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("Document title", 11f, 0xFF263957.toInt(), true)); addView(titleField)
+            addView(gap(6)); addView(label("Content", 11f, 0xFF263957.toInt(), true)); addView(bodyField, LinearLayout.LayoutParams(-1, dp(130)))
+            addView(gap(6)); addView(label("Header", 11f, 0xFF263957.toInt(), true)); addView(header)
+            addView(gap(6)); addView(label("Footer", 11f, 0xFF263957.toInt(), true)); addView(footer)
+            addView(gap(6)); addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(size)
+            addView(gap(6)); addView(label("Body font", 11f, 0xFF263957.toInt(), true)); addView(font)
+            addView(pageNumbers)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Advanced PDF Design").setView(ScrollView(this).apply { addView(panel) })
+            .setNegativeButton("Cancel", null).setPositiveButton("Create PDF") { _, _ ->
+                val content = bodyField.text.toString().trim()
+                if (content.isBlank()) Toast.makeText(this, "Enter document content first", Toast.LENGTH_LONG).show()
+                else {
+                    val dims = listOf(595 to 842, 612 to 792, 420 to 595)[size.selectedItemPosition.coerceIn(0, 2)]
+                    val fontSize = listOf(11f, 12f, 14f, 16f)[font.selectedItemPosition.coerceIn(0, 3)]
+                    createDesignedPdf(titleField.text.toString().ifBlank { "My Document" }, content, header.text.toString(), footer.text.toString(), dims.first, dims.second, fontSize, pageNumbers.isChecked)
+                }
+            })
+    }
+
+    private fun createDesignedPdf(title: String, content: String, header: String, footer: String, pageWidth: Int, pageHeight: Int, fontSize: Float, showPageNumbers: Boolean) {
+        status.text = "Designing PDF…"
+        Thread {
+            try {
+                val doc = PdfDocument()
+                val margin = 48f
+                val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 20f; color = 0xFF123B78.toInt(); typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD) }
+                val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = fontSize; color = 0xFF263447.toInt() }
+                val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f; color = 0xFF718096.toInt() }
+                val lineHeight = fontSize * 1.5f
+                val maxWidth = pageWidth - margin * 2
+                val lines = mutableListOf<String>()
+                content.replace("\r", "").split("\n").forEach { paragraph ->
+                    if (paragraph.isBlank()) { lines.add(""); return@forEach }
+                    var current = ""
+                    paragraph.split(Regex("\\s+")).forEach { word ->
+                        val candidate = if (current.isEmpty()) word else "$current $word"
+                        if (bodyPaint.measureText(candidate) > maxWidth && current.isNotEmpty()) { lines.add(current); current = word } else current = candidate
+                    }
+                    if (current.isNotEmpty()) lines.add(current)
+                }
+                var pageNumber = 1
+                var page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+                var y = margin
+                fun drawHeaderFooter(canvas: android.graphics.Canvas, number: Int) {
+                    if (header.isNotBlank()) canvas.drawText(header.take(90), margin, 25f, smallPaint)
+                    canvas.drawLine(margin, 34f, pageWidth - margin, 34f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD9E3F1.toInt(); strokeWidth = 1f })
+                    if (footer.isNotBlank()) canvas.drawText(footer.take(90), margin, pageHeight - 22f, smallPaint)
+                    if (showPageNumbers) canvas.drawText("Page $number", pageWidth - margin - 42f, pageHeight - 22f, smallPaint)
+                }
+                drawHeaderFooter(page.canvas, pageNumber)
+                page.canvas.drawText(title.take(90), margin, y + 18f, titlePaint)
+                y += 48f
+                for (line in lines) {
+                    if (y + lineHeight > pageHeight - margin - 12f) {
+                        doc.finishPage(page); pageNumber++
+                        page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+                        drawHeaderFooter(page.canvas, pageNumber); y = margin + 12f
+                    }
+                    if (line.isNotEmpty()) page.canvas.drawText(line, margin, y, bodyPaint)
+                    y += lineHeight
+                }
+                doc.finishPage(page)
+                val bytes = ByteArrayOutputStream().also { doc.writeTo(it) }.toByteArray(); doc.close()
+                val saved = savePdfBytes(bytes, title.replace(Regex("[^A-Za-z0-9_-]"), "_").take(50).ifBlank { "Designed_Document" })
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved; status.text = "Designed PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
+                        buildScreen()
+                        AlertDialog.Builder(this).setTitle("Designed PDF created")
+                            .setMessage("Saved as ${saved.lastPathSegment}")
+                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
+                            .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
+                    } else Toast.makeText(this, "Could not save designed PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF design failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private data class PdfTool(
@@ -2526,7 +2733,8 @@ class MainActivity : AppCompatActivity() {
                     "PDF To Text" to "Extract and copy text",
                     "PDF To ZIP" to "Package PDF for sharing",
                     "Text To PDF" to "Create a PDF from notes",
-                    "PDF Details" to "View pages and metadata"
+                    "PDF Details" to "View pages and metadata",
+                    "Create PDF" to "Images • Text • Blank • Design"
                 )
                 val sub = label(descriptions[tool.title] ?: "Open PDF utility", 9.5f, 0xFF718096.toInt())
                 sub.gravity = Gravity.CENTER
