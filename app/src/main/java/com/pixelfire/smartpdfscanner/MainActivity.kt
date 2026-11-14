@@ -106,6 +106,95 @@ private class SignatureCanvas(context: android.content.Context) : View(context) 
     }
 }
 
+private class ImageCropView(context: android.content.Context, private var source: Bitmap) : View(context) {
+    private val imageRect = android.graphics.RectF()
+    private val cropRect = android.graphics.RectF()
+    private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val shadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99000000.toInt() }
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF21B7E8.toInt(); style = Paint.Style.FILL }
+    private var activeCorner = -1
+    private val handleRadius = 26f
+
+    init { setLayerType(View.LAYER_TYPE_SOFTWARE, null) }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        canvas.drawColor(0xFF111827.toInt())
+        val scale = minOf(width.toFloat() / source.width, height.toFloat() / source.height)
+        val w = source.width * scale
+        val h = source.height * scale
+        imageRect.set((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
+        if (cropRect.isEmpty) {
+            cropRect.set(imageRect.left + w * 0.08f, imageRect.top + h * 0.08f, imageRect.right - w * 0.08f, imageRect.bottom - h * 0.08f)
+        }
+        canvas.drawBitmap(source, null, imageRect, imagePaint)
+        canvas.drawRect(imageRect.left, imageRect.top, imageRect.right, cropRect.top, shadePaint)
+        canvas.drawRect(imageRect.left, cropRect.bottom, imageRect.right, imageRect.bottom, shadePaint)
+        canvas.drawRect(imageRect.left, cropRect.top, cropRect.left, cropRect.bottom, shadePaint)
+        canvas.drawRect(cropRect.right, cropRect.top, imageRect.right, cropRect.bottom, shadePaint)
+        canvas.drawRect(cropRect, borderPaint)
+        val corners = floatArrayOf(cropRect.left, cropRect.top, cropRect.right, cropRect.top, cropRect.left, cropRect.bottom, cropRect.right, cropRect.bottom)
+        for (i in corners.indices step 2) canvas.drawCircle(corners[i], corners[i + 1], handleRadius / 2f, handlePaint)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                val corners = arrayOf(
+                    cropRect.left to cropRect.top, cropRect.right to cropRect.top,
+                    cropRect.left to cropRect.bottom, cropRect.right to cropRect.bottom
+                )
+                activeCorner = corners.indices.minByOrNull { i ->
+                    val dx = event.x - corners[i].first
+                    val dy = event.y - corners[i].second
+                    dx * dx + dy * dy
+                } ?: -1
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val minSize = 48f
+                when (activeCorner) {
+                    0 -> { cropRect.left = event.x.coerceIn(imageRect.left, cropRect.right - minSize); cropRect.top = event.y.coerceIn(imageRect.top, cropRect.bottom - minSize) }
+                    1 -> { cropRect.right = event.x.coerceIn(cropRect.left + minSize, imageRect.right); cropRect.top = event.y.coerceIn(imageRect.top, cropRect.bottom - minSize) }
+                    2 -> { cropRect.left = event.x.coerceIn(imageRect.left, cropRect.right - minSize); cropRect.bottom = event.y.coerceIn(cropRect.top + minSize, imageRect.bottom) }
+                    3 -> { cropRect.right = event.x.coerceIn(cropRect.left + minSize, imageRect.right); cropRect.bottom = event.y.coerceIn(cropRect.top + minSize, imageRect.bottom) }
+                }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { activeCorner = -1; return true }
+        }
+        return true
+    }
+
+    fun resetCrop() {
+        cropRect.setEmpty()
+        invalidate()
+    }
+
+    fun rotateImage() {
+        val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+        source = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        cropRect.setEmpty()
+        invalidate()
+    }
+
+    fun getCroppedBitmap(): Bitmap {
+        val sx = source.width / imageRect.width()
+        val sy = source.height / imageRect.height()
+        val left = ((cropRect.left - imageRect.left) * sx).toInt().coerceIn(0, source.width - 1)
+        val top = ((cropRect.top - imageRect.top) * sy).toInt().coerceIn(0, source.height - 1)
+        val right = ((cropRect.right - imageRect.left) * sx).toInt().coerceIn(left + 1, source.width)
+        val bottom = ((cropRect.bottom - imageRect.top) * sy).toInt().coerceIn(top + 1, source.height)
+        return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
+    }
+}
+
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var recent: TextView
@@ -2955,11 +3044,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showImageImportPreview(uris: List<Uri>) {
+        val croppedBitmaps = MutableList<Bitmap?>(uris.size) { null }
         val previewList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
-        previewList.addView(label("${uris.size} image(s) selected • Preview before creating PDF", 13f, 0xFF263957.toInt(), true))
+        previewList.addView(label("${uris.size} image(s) selected • Crop images before creating PDF", 13f, 0xFF263957.toInt(), true))
         previewList.addView(gap(10))
         uris.forEachIndexed { index, uri ->
             val row = LinearLayout(this).apply {
@@ -2967,11 +3057,10 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 background = rounded(0xFFF7F9FD.toInt(), 14, 0xFFE2EAF5.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(222)).apply { bottomMargin = dp(12) }
+                layoutParams = LinearLayout.LayoutParams(-1, dp(258)).apply { bottomMargin = dp(12) }
             }
             val thumb = ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                adjustViewBounds = false
                 background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
                 clipToOutline = true
                 try {
@@ -2979,12 +3068,55 @@ class MainActivity : AppCompatActivity() {
                         setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null)
                     }
                 } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
-                contentDescription = "Cropped preview of selected image ${index + 1}"
                 layoutParams = LinearLayout.LayoutParams(dp(170), dp(174))
             }
             row.addView(thumb)
-            row.addView(gap(8))
-            row.addView(label("Page ${index + 1} • Fit preview with crop", 13f, 0xFF263957.toInt(), true))
+            row.addView(gap(6))
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            actions.addView(label("Page ${index + 1}", 13f, 0xFF263957.toInt(), true), LinearLayout.LayoutParams(0, dp(42), 1f))
+            val cropButton = Button(this).apply {
+                text = "Crop"
+                isAllCaps = false
+                setOnClickListener {
+                    try {
+                        val original = contentResolver.openInputStream(uri).use { input ->
+                            if (input != null) BitmapFactory.decodeStream(input) else null
+                        } ?: throw IllegalStateException("Could not open selected image")
+                        val cropView = ImageCropView(this@MainActivity, original)
+                        val cropPanel = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(8), dp(8), dp(8), dp(8))
+                            addView(cropView, LinearLayout.LayoutParams(-1, dp(360)))
+                            addView(label("Drag the blue corner handles to select the area.", 12f, 0xFF53627A.toInt()))
+                        }
+                        val cropDialog = AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Crop image ${index + 1}")
+                            .setView(cropPanel)
+                            .setPositiveButton("Apply Crop", null)
+                            .setNeutralButton("Rotate", null)
+                            .setNegativeButton("Reset", null)
+                            .create()
+                        cropDialog.setOnShowListener {
+                            cropDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                                val cropped = cropView.getCroppedBitmap()
+                                croppedBitmaps[index] = cropped
+                                thumb.setImageBitmap(cropped)
+                                cropDialog.dismiss()
+                            }
+                            cropDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { cropView.rotateImage() }
+                            cropDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { cropView.resetCrop() }
+                        }
+                        cropDialog.show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, e.localizedMessage ?: "Could not open crop editor", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            actions.addView(cropButton)
+            row.addView(actions)
             previewList.addView(row)
         }
         val scroll = ScrollView(this).apply {
@@ -2993,7 +3125,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this).setTitle("Preview selected images")
             .setView(scroll)
-            .setPositiveButton("Create PDF") { _, _ -> createPdfFromImages(uris) }
+            .setPositiveButton("Create PDF") { _, _ -> createPdfFromImages(uris, croppedBitmaps) }
             .setNeutralButton("Share images") { _, _ -> shareSelectedImages(uris) }
             .setNegativeButton("Cancel", null)
             .show()
@@ -3012,16 +3144,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createPdfFromImages(uris: List<Uri>) {
+    private fun createPdfFromImages(uris: List<Uri>, croppedBitmaps: List<Bitmap?> = emptyList()) {
         status.text = "Creating PDF from ${uris.size} image(s)…"
         Thread {
             var document: PdfDocument? = null
             try {
                 document = PdfDocument()
                 uris.forEachIndexed { index, uri ->
-                    val bitmap = contentResolver.openInputStream(uri).use { input ->
+                    val bitmap = croppedBitmaps.getOrNull(index) ?: (contentResolver.openInputStream(uri).use { input ->
                         if (input == null) null else BitmapFactory.decodeStream(input)
-                    } ?: throw IllegalStateException("Could not read selected image")
+                    }) ?: throw IllegalStateException("Could not read selected image")
                     val pageInfo = PdfDocument.PageInfo.Builder(595, 842, index + 1).create()
                     val page = document.startPage(pageInfo)
                     val bounds = fitRect(bitmap.width, bitmap.height, 515, 762, 40, 40)
