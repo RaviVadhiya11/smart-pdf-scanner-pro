@@ -56,6 +56,11 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.AdLoader
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.nativead.NativeAd
+import com.google.android.gms.ads.nativead.NativeAdView
+import com.google.android.gms.ads.nativead.MediaView
 import com.google.android.gms.ads.MobileAds
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -221,6 +226,7 @@ private class ImageCropView(context: android.content.Context, private var source
 class MainActivity : AppCompatActivity() {
     private var bannerAdView: AdView? = null
     private var tagDialogAdView: AdView? = null
+    private val loadedNativeAds = mutableListOf<NativeAd>()
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
@@ -952,6 +958,8 @@ class MainActivity : AppCompatActivity() {
         bannerAdView = null
         tagDialogAdView?.destroy()
         tagDialogAdView = null
+        loadedNativeAds.forEach { it.destroy() }
+        loadedNativeAds.clear()
         super.onDestroy()
     }
 
@@ -2586,6 +2594,7 @@ class MainActivity : AppCompatActivity() {
             }
         ))
 
+        addNativeAdCard(body)
         addPdfSectionTitle(body, "PDF Tools")
         addPdfToolGrid(body, listOf(
             PdfTool("Create PDF", "＋", 0xFF2563EB.toInt()) { showCreatePdfHub() },
@@ -2607,6 +2616,105 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setScreenContent(root)
+    }
+
+
+    /**
+     * Loads and renders a Google Native Advanced ad using registered native assets.
+     * The ad is inserted between Quick Access and the PDF Tools grid.
+     */
+    private fun addNativeAdCard(parent: LinearLayout) {
+        val slot = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFDCE6F5.toInt())
+            elevation = dp(2).toFloat()
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(12)
+                bottomMargin = dp(16)
+            }
+        }
+        slot.addView(label("SPONSORED", 9f, 0xFF718096.toInt(), true))
+        slot.addView(gap(6))
+        val loading = label("Loading recommended content…", 12f, 0xFF718096.toInt())
+        slot.addView(loading)
+        parent.addView(slot)
+
+        val loader = AdLoader.Builder(this, "ca-app-pub-3940256099942544/2247696110")
+            .forNativeAd { nativeAd ->
+                if (isFinishing || isDestroyed) {
+                    nativeAd.destroy()
+                    return@forNativeAd
+                }
+                loadedNativeAds.add(nativeAd)
+                runOnUiThread {
+                    slot.removeAllViews()
+                    val adView = NativeAdView(this).apply {
+                        setBackgroundColor(0xFFFFFFFF.toInt())
+                    }
+                    val top = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    val icon = ImageView(this).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = rounded(0xFFF0F4FA.toInt(), 10)
+                    }
+                    nativeAd.icon?.drawable?.let { icon.setImageDrawable(it) }
+                    top.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
+                    val titleBlock = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(10), 0, 0, 0)
+                    }
+                    val headline = label(nativeAd.headline ?: "Sponsored", 14f, 0xFF172B4D.toInt(), true)
+                    titleBlock.addView(headline)
+                    val advertiser = label(nativeAd.advertiser ?: "Advertiser", 10f, 0xFF718096.toInt())
+                    titleBlock.addView(advertiser)
+                    top.addView(titleBlock, LinearLayout.LayoutParams(0, -2, 1f))
+                    adView.iconView = icon
+                    adView.headlineView = headline
+                    adView.advertiserView = advertiser
+                    adView.addView(top)
+                    nativeAd.body?.takeIf { it.isNotBlank() }?.let { bodyText ->
+                        val bodyView = label(bodyText, 11f, 0xFF52627A.toInt())
+                        bodyView.setPadding(0, dp(8), 0, dp(8))
+                        adView.bodyView = bodyView
+                        adView.addView(bodyView)
+                    }
+                    nativeAd.mediaContent?.let {
+                        val media = MediaView(this)
+                        media.setMediaContent(it)
+                        adView.mediaView = media
+                        adView.addView(media, LinearLayout.LayoutParams(-1, dp(150)).apply {
+                            topMargin = dp(8)
+                            bottomMargin = dp(8)
+                        })
+                    }
+                    val cta = Button(this).apply {
+                        text = nativeAd.callToAction ?: "Learn more"
+                        isAllCaps = false
+                        textSize = 12f
+                        setTextColor(0xFFFFFFFF.toInt())
+                        background = rounded(0xFF1764DE.toInt(), 12)
+                        backgroundTintList = null
+                    }
+                    adView.callToActionView = cta
+                    adView.addView(cta, LinearLayout.LayoutParams(-1, dp(42)).apply {
+                        topMargin = dp(8)
+                    })
+                    adView.setNativeAd(nativeAd)
+                    slot.addView(adView)
+                }
+            }
+            .withAdListener(object : AdListener() {
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    runOnUiThread {
+                        parent.removeView(slot)
+                    }
+                }
+            })
+            .build()
+        loader.loadAd(AdRequest.Builder().build())
     }
 
     private fun showCreatePdfHub() {
