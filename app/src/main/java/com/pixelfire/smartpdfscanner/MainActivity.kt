@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -228,6 +229,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
+    private fun privateDocumentsDir(): java.io.File = java.io.File(filesDir, "documents").apply { if (!exists()) mkdirs() }
+    private fun privateDocumentUri(file: java.io.File): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+    private fun privateDocumentFile(uri: Uri): java.io.File? {
+        if (uri.authority != "$packageName.fileprovider") return null
+        val name = uri.lastPathSegment ?: return null
+        return java.io.File(privateDocumentsDir(), name).takeIf { it.exists() }
+    }
+    private fun saveBytesPrivately(bytes: ByteArray, name: String): Uri? {
+        return try {
+            val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100).ifBlank { "Document_${System.currentTimeMillis()}" }
+            val target = java.io.File(privateDocumentsDir(), safeName)
+            java.io.FileOutputStream(target).use { it.write(bytes) }
+            val uri = privateDocumentUri(target)
+            if (safeName.endsWith(".pdf", true)) assignPdf(uri)
+            uri
+        } catch (e: Exception) { null }
+    }
     private var pendingImagePdfSaveAs: Uri? = null
     private var signaturePng: ByteArray? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -245,8 +263,7 @@ class MainActivity : AppCompatActivity() {
                 lastPdf = copyPdfToDownloads(pdf.uri)
                 if (lastPdf != null) {
                     prefs.edit().putBoolean("has_completed_first_scan", true).apply()
-                    Toast.makeText(this, "Saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
-                    // Rebuild the home screen immediately so the new PDF appears without restarting.
+                    showExportSuccess(lastPdf!!, lastPdf!!.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
                     buildScreen()
                 } else {
                     Toast.makeText(this, "PDF could not be saved. Please scan again.", Toast.LENGTH_LONG).show()
@@ -2458,30 +2475,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun getSavedPdfs(): List<Pair<String, Uri>> {
         val trashed = prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()
-        return try {
-            val results = mutableListOf<Pair<String, Uri>>()
+        val results = mutableListOf<Pair<String, Uri>>()
+        try {
+            privateDocumentsDir().listFiles()?.filter { it.isFile && it.extension.equals("pdf", true) }?.forEach { file ->
+                val uri = privateDocumentUri(file)
+                if (!trashed.contains(uri.toString())) results.add(file.name to uri)
+            }
+            // Keep documents created by earlier app versions visible during migration.
             val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external")
             val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
             val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?" else "${MediaStore.MediaColumns.MIME_TYPE} = ?"
             val args = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) arrayOf("Download/DocumentScanner/", "application/pdf") else arrayOf("application/pdf")
-            val sortOrder = when (prefs.getInt("document_sort_order", 2)) {
-                0 -> "${MediaStore.MediaColumns.DISPLAY_NAME} ASC"
-                1 -> "${MediaStore.MediaColumns.DISPLAY_NAME} DESC"
-                3 -> "${MediaStore.MediaColumns.DATE_ADDED} ASC"
-                else -> "${MediaStore.MediaColumns.DATE_ADDED} DESC"
-            }
-            contentResolver.query(collection, projection, selection, args, sortOrder)?.use { cursor ->
+            contentResolver.query(collection, projection, selection, args, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                 val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
                 while (cursor.moveToNext() && results.size < 100) {
                     val id = cursor.getLong(idIndex)
                     val name = cursor.getString(nameIndex) ?: "Document.pdf"
                     val itemUri = Uri.withAppendedPath(collection, id.toString())
-                    if (!trashed.contains(itemUri.toString())) results.add(name to itemUri)
+                    if (!trashed.contains(itemUri.toString()) && results.none { it.second == itemUri }) results.add(name to itemUri)
                 }
             }
-            results
-        } catch (_: Exception) { emptyList() }
+        } catch (_: Exception) { }
+        return when (prefs.getInt("document_sort_order", 2)) {
+            0 -> results.sortedBy { it.first.lowercase(Locale.ROOT) }
+            1 -> results.sortedByDescending { it.first.lowercase(Locale.ROOT) }
+            3 -> results.reversed()
+            else -> results
+        }.take(100)
     }
     private fun createFolderDialog() {
         val field = android.widget.EditText(this).apply { hint = "Folder name" }
@@ -4154,7 +4175,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Shared success screen for exported files. Files are already saved to Downloads/DocumentScanner.
+    // Shared result screen. The original file remains inside DocNexa until the user exports it.
     private fun showExportSuccess(uri: Uri, fileName: String, mime: String) {
         runOnUiThread {
             window.decorView.post {
@@ -4171,10 +4192,10 @@ class MainActivity : AppCompatActivity() {
                         setBackgroundColor(0xFF159F5A.toInt())
                     }
                     header.addView(label("✓", 54f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
-                    header.addView(label("Saved Successfully", 25f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
+                    header.addView(label("Ready Successfully", 25f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
                     header.addView(gap(14))
                     header.addView(label(fileName, 15f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
-                    header.addView(label("Saved in Downloads/DocumentScanner", 12f, 0xFFE8FFF1.toInt()).apply { gravity = android.view.Gravity.CENTER })
+                    header.addView(label("Stored securely inside DocNexa", 12f, 0xFFE8FFF1.toInt()).apply { gravity = android.view.Gravity.CENTER })
                     root.addView(header)
                     val details = LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
@@ -4202,20 +4223,54 @@ class MainActivity : AppCompatActivity() {
                         }
                         actions.addView(b, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
                     }
+                    actionButton("Save to Storage") {
+                        try {
+                            val sourceFile = privateDocumentFile(uri) ?: error("Private file is unavailable")
+                            val values = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/DocNexa")
+                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                                }
+                            }
+                            val target = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                ?: error("Could not create Downloads file")
+                            sourceFile.inputStream().use { input ->
+                                contentResolver.openOutputStream(target).use { output ->
+                                    if (output == null) error("Could not write exported file")
+                                    input.copyTo(output)
+                                }
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                            }
+                            Toast.makeText(this, "Saved to Downloads/DocNexa", Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, e.localizedMessage ?: "Storage save failed", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     if (mime.startsWith("image/")) actionButton("Save to Gallery") {
                         try {
+                            val sourceFile = privateDocumentFile(uri) ?: error("Private image is unavailable")
                             val values = ContentValues().apply {
                                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                                 put(MediaStore.Images.Media.MIME_TYPE, mime)
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+                                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                                }
                             }
                             val target = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                                ?: error("Could not create Gallery file")
-                            contentResolver.openInputStream(uri).use { input ->
+                                ?: error("Could not create Gallery image")
+                            sourceFile.inputStream().use { input ->
                                 contentResolver.openOutputStream(target).use { output ->
-                                    if (input == null || output == null) error("Could not copy file")
+                                    if (output == null) error("Could not copy image")
                                     input.copyTo(output)
                                 }
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                contentResolver.update(target, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
                             }
                             Toast.makeText(this, "Saved to Pictures/DocNexa", Toast.LENGTH_LONG).show()
                         } catch (e: Exception) {
@@ -4239,7 +4294,7 @@ class MainActivity : AppCompatActivity() {
                             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                         } catch (_: Exception) {
-                            Toast.makeText(this, "No app found to open this file. It is saved in Downloads/DocumentScanner.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "No compatible app found to open this file.", Toast.LENGTH_LONG).show()
                         }
                     }
                     actionButton("DONE") { dialog.dismiss(); buildScreen() }
@@ -4251,7 +4306,7 @@ class MainActivity : AppCompatActivity() {
                     dialog.show()
                     dialog.window?.setLayout(-1, -1)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "File saved successfully", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "File created inside DocNexa", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -4259,23 +4314,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, "${prefix}_${stamp}.${extension}")
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        contentResolver.openOutputStream(uri).use { output ->
-            if (output == null) throw IllegalStateException("Unable to save document")
-            output.write(bytes)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            contentResolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-        }
-        showExportSuccess(uri, "${prefix}_${stamp}.${extension}", mime)
+        val name = "${prefix}_${stamp}.${extension}"
+        val uri = saveBytesPrivately(bytes, name) ?: return null
+        showExportSuccess(uri, name, mime)
         return uri
     }
 
@@ -4906,24 +4947,7 @@ class MainActivity : AppCompatActivity() {
     private fun savePdfBytes(bytes: ByteArray, prefix: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "${prefix}_${stamp}.pdf"
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        contentResolver.openOutputStream(uri).use { output ->
-            if (output == null) throw IllegalStateException("Unable to save PDF")
-            output.write(bytes)
-        }
-        assignPdf(uri)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-            contentResolver.update(uri, done, null, null)
-        }
+        val uri = saveBytesPrivately(bytes, name) ?: return null
         showExportSuccess(uri, name, "application/pdf")
         return uri
     }
@@ -5522,51 +5546,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun savePdf(document: PdfDocument): Uri? {
         val name = "Document_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        contentResolver.openOutputStream(uri).use { out ->
-            if (out == null) throw IllegalStateException("Unable to save PDF")
-            document.writeTo(out)
-        }
-        assignPdf(uri)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-            contentResolver.update(uri, done, null, null)
-        }
-        return uri
+        return try {
+            val bytes = ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray()
+            saveBytesPrivately(bytes, name)
+        } catch (_: Exception) { null }
     }
 
     private fun copyPdfToDownloads(source: Uri): Uri? {
         return try {
             val name = "Document_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, name)
-                put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-            }
-            val dest = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-            contentResolver.openInputStream(source).use { input ->
-                contentResolver.openOutputStream(dest).use { output ->
-                    if (input == null || output == null) throw IllegalStateException("Unable to copy PDF")
-                    input.copyTo(output)
-                }
-            }
-            assignPdf(dest)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-                contentResolver.update(dest, done, null, null)
-            }
-            dest
+            val bytes = contentResolver.openInputStream(source)?.use { it.readBytes() } ?: error("Unable to read scanned PDF")
+            saveBytesPrivately(bytes, name)
         } catch (e: Exception) {
             Toast.makeText(this, "Save failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
             null
