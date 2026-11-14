@@ -937,7 +937,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBottomAdAndActions(root: LinearLayout) {
-        bannerAdView?.destroy()
         val footer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
