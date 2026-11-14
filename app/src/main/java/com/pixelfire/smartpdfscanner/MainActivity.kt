@@ -940,8 +940,9 @@ class MainActivity : AppCompatActivity() {
             loadAd(AdRequest.Builder().build())
         }
         bannerAdView = adView
-        footer.addView(adView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        // Keep Scan and Import controls above the banner; anchor the ad at the bottom.
         footer.addView(bar)
+        footer.addView(adView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         root.addView(footer)
     }
 
