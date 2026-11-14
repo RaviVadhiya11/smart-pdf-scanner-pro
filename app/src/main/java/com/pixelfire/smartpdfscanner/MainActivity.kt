@@ -77,31 +77,49 @@ import java.util.Locale
 
 
 private class SignatureCanvas(context: android.content.Context) : View(context) {
-    private val path = Path()
+    private val strokes = mutableListOf<Path>()
+    private var activePath: Path? = null
+    private var inkColor: Int = android.graphics.Color.BLACK
+    private var inkWidth: Float = 7f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.BLACK
+        color = inkColor
         style = Paint.Style.STROKE
-        strokeWidth = 7f
+        strokeWidth = inkWidth
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    fun clear() { path.reset(); invalidate() }
+    fun setInk(color: Int) { inkColor = color; invalidate() }
+    fun setInkWidth(value: Float) { inkWidth = value.coerceIn(2f, 18f); invalidate() }
+    fun undo() { if (strokes.isNotEmpty()) strokes.removeAt(strokes.lastIndex); invalidate() }
+    fun clear() { strokes.clear(); activePath = null; invalidate() }
+    fun hasSignature(): Boolean = strokes.isNotEmpty()
     fun toBitmap(): Bitmap {
         val w = width.coerceAtLeast(1); val h = height.coerceAtLeast(1)
-        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
-            val c = Canvas(it); c.drawColor(android.graphics.Color.WHITE); c.drawPath(path, paint)
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val c = Canvas(bitmap)
+            strokes.forEach { path ->
+                paint.color = inkColor
+                paint.strokeWidth = inkWidth
+                c.drawPath(path, paint)
+            }
         }
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(android.graphics.Color.WHITE)
-        canvas.drawPath(path, paint)
+        paint.color = inkColor
+        paint.strokeWidth = inkWidth
+        strokes.forEach { canvas.drawPath(it, paint) }
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
-            MotionEvent.ACTION_DOWN -> { path.moveTo(event.x, event.y); invalidate(); return true }
-            MotionEvent.ACTION_MOVE -> { path.lineTo(event.x, event.y); invalidate(); return true }
-            MotionEvent.ACTION_UP -> { path.lineTo(event.x, event.y); invalidate(); return true }
+            MotionEvent.ACTION_DOWN -> {
+                activePath = Path().apply { moveTo(event.x, event.y) }
+                activePath?.let { strokes.add(it) }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> { activePath?.lineTo(event.x, event.y); invalidate(); return true }
+            MotionEvent.ACTION_UP -> { activePath?.lineTo(event.x, event.y); activePath = null; invalidate(); return true }
         }
         return true
     }
@@ -3084,52 +3102,123 @@ class MainActivity : AppCompatActivity() {
 
     private fun openSignatureEditor(targetPdf: Uri? = null) {
         val canvas = SignatureCanvas(this)
-        val typed = EditText(this).apply { hint = "Enter signature text"; textSize = 24f }
+        val typed = EditText(this).apply { hint = "Type your name / signature"; textSize = 23f }
         val preview = TextView(this).apply {
-            text = "Draw your signature in the box"
-            textSize = 13f
+            text = "Draw with your finger • Transparent background"
+            textSize = 12f
             setTextColor(0xFF64748B.toInt())
             gravity = Gravity.CENTER
         }
         val drawArea = FrameLayout(this).apply {
-            background = rounded(0xFFF8FBFF.toInt(), 16, 0xFFB8D0F5.toInt())
-            setPadding(dp(6), dp(6), dp(6), dp(6))
-            addView(canvas, FrameLayout.LayoutParams(-1, dp(230)))
+            background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFB8D0F5.toInt())
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            addView(canvas, FrameLayout.LayoutParams(-1, dp(190)))
         }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("CREATE YOUR SIGNATURE", 12f, 0xFF2865B5.toInt(), true))
+            addView(gap(8))
             addView(drawArea)
             addView(preview)
+            val colors = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            listOf(0xFF111827.toInt(), 0xFF1457C5.toInt(), 0xFFB42318.toInt(), 0xFF16845B.toInt()).forEach { color ->
+                val swatch = TextView(this@MainActivity).apply {
+                    text = "●"; textSize = 26f; gravity = Gravity.CENTER
+                    setTextColor(color); setPadding(dp(8), 0, dp(8), 0)
+                    setOnClickListener { canvas.setInk(color); preview.text = "Ink color changed" }
+                }
+                colors.addView(swatch)
+            }
+            addView(colors)
+            addView(label("Pen thickness", 12f, 0xFF64748B.toInt()))
+            addView(SeekBar(this@MainActivity).apply {
+                max = 16; progress = 5
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { canvas.setInkWidth((progress + 2).toFloat()) }
+                    override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                })
+            })
             addView(typed, LinearLayout.LayoutParams(-1, -2))
+            addView(label("Tip: Use Undo to remove the last stroke, or Clear to start again.", 11f, 0xFF64748B.toInt()))
         }
-        val tabs = arrayOf("Draw", "Text")
-        var textMode = false
-        showPremiumDialog(AlertDialog.Builder(this)
-            .setTitle("DocNexa • Create Signature")
-            .setView(layout)
-            .setNeutralButton("Clear") { _, _ -> canvas.clear(); typed.setText("") }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("DocNexa • Signature Studio")
+            .setView(ScrollView(this).apply { addView(layout) })
+            .setNeutralButton("Save Signature PDF", null)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Use Signature") { _, _ ->
-                val bitmap = if (textMode || typed.text.toString().isNotBlank()) {
-                    val value = typed.text.toString().trim()
-                    if (value.isBlank()) null else renderTypedSignature(value)
-                } else canvas.toBitmap()
+            .setPositiveButton(if (targetPdf != null) "Apply to PDF" else "Sign a PDF", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val bitmap = buildSignatureBitmap(canvas, typed.text.toString())
                 if (bitmap == null) {
-                    Toast.makeText(this, "Please draw or type your signature", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Please draw or type a signature first.", Toast.LENGTH_LONG).show()
+                } else {
+                    saveSignatureOnlyPdf(bitmap)
+                    bitmap.recycle()
+                    dialog.dismiss()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val bitmap = buildSignatureBitmap(canvas, typed.text.toString())
+                if (bitmap == null) {
+                    Toast.makeText(this, "Please draw or type a signature first.", Toast.LENGTH_LONG).show()
                 } else {
                     val out = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                     signaturePng = out.toByteArray()
                     bitmap.recycle()
-                    if (targetPdf != null) {
-                        val png = signaturePng
-                        if (png != null) applySignatureToPdf(targetPdf, png)
-                    } else pdfPicker.launch(arrayOf("application/pdf"))
+                    dialog.dismiss()
+                    if (targetPdf != null) applySignatureToPdf(targetPdf, signaturePng!!)
+                    else pdfPicker.launch(arrayOf("application/pdf"))
                 }
-            })
-        // The user can draw directly; entering text switches to a typed signature.
-        typed.setOnFocusChangeListener { _, hasFocus -> textMode = hasFocus }
+            }
+        }
+        // Small quick actions below the dialog are exposed through a compact toolbar.
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(Button(this@MainActivity).apply { text = "Undo"; setOnClickListener { canvas.undo() } })
+            addView(Button(this@MainActivity).apply { text = "Clear"; setOnClickListener { canvas.clear(); typed.setText("") } })
+        }
+        layout.addView(toolbar)
+        dialog.show()
+    }
+
+    private fun buildSignatureBitmap(canvas: SignatureCanvas, text: String): Bitmap? {
+        val value = text.trim()
+        return if (value.isNotEmpty()) renderTypedSignature(value)
+        else if (canvas.hasSignature()) canvas.toBitmap()
+        else null
+    }
+
+    private fun saveSignatureOnlyPdf(signature: Bitmap) {
+        try {
+            val document = PdfDocument()
+            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
+            val page = document.startPage(pageInfo)
+            val pageCanvas = page.canvas
+            pageCanvas.drawColor(android.graphics.Color.WHITE)
+            val maxW = 440f
+            val maxH = 170f
+            val scale = minOf(maxW / signature.width.coerceAtLeast(1), maxH / signature.height.coerceAtLeast(1))
+            val w = signature.width * scale
+            val h = signature.height * scale
+            val left = (595f - w) / 2f
+            val top = (842f - h) / 2f
+            pageCanvas.drawBitmap(signature, null, Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + h).toInt()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            document.finishPage(page)
+            val output = ByteArrayOutputStream()
+            document.writeTo(output)
+            document.close()
+            val saved = savePdfBytes(output.toByteArray(), "Signature")
+            Toast.makeText(this, if (saved != null) "Signature-only PDF saved in Downloads/DocumentScanner" else "Could not save signature PDF", Toast.LENGTH_LONG).show()
+            buildScreen()
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Signature PDF creation failed", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun renderTypedSignature(value: String): Bitmap {
