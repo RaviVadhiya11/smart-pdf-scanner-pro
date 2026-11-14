@@ -3785,38 +3785,81 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mergePdfFiles(uris: List<Uri>) {
-        status.text = "Merging ${uris.size} PDF files…"
-        Thread {
-            try {
-                val merger = PDFMergerUtility()
-                val streams = mutableListOf<java.io.InputStream>()
-                try {
-                    uris.forEach { uri ->
-                        val stream = contentResolver.openInputStream(uri)
-                            ?: throw IllegalStateException("Could not open selected PDF")
-                        streams.add(stream)
-                        merger.addSource(stream)
-                    }
-                    val output = ByteArrayOutputStream()
-                    merger.destinationStream = output
-                    merger.mergeDocuments(MemoryUsageSetting.setupMainMemoryOnly())
-                    val saved = savePdfBytes(output.toByteArray(), "Merged")
-                    runOnUiThread {
-                        lastPdf = saved
-                        status.text = "PDF merge complete"
-                        recent.text = "Latest: ${saved?.lastPathSegment ?: "Merged PDF"}"
-                        Toast.makeText(this, "Merged PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
-                    }
-                } finally {
-                    streams.forEach { try { it.close() } catch (_: Exception) {} }
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "PDF merge failed"
-                    Toast.makeText(this, e.localizedMessage ?: "Could not merge PDFs", Toast.LENGTH_LONG).show()
-                }
+        if (uris.size < 2) {
+            Toast.makeText(this, "Select at least two PDF files", Toast.LENGTH_LONG).show()
+            return
+        }
+        val nameField = EditText(this).apply {
+            hint = "Merged PDF file name"
+            setSingleLine(true)
+            setText("DocNexa_Merged")
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("${uris.size} PDFs selected. They will be merged in the order returned by the file picker.", 12f, 0xFF718096.toInt()))
+            addView(gap(8))
+            uris.forEachIndexed { index, uri ->
+                val display = try {
+                    contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    } ?: "PDF ${index + 1}"
+                } catch (_: Exception) { "PDF ${index + 1}" }
+                addView(label("${index + 1}. ${display.take(48)}", 11f, 0xFF263957.toInt()))
             }
-        }.start()
+            addView(gap(10))
+            addView(label("Output file name", 11f, 0xFF263957.toInt(), true))
+            addView(nameField)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Merge PDFs • Review")
+            .setView(ScrollView(this).apply { addView(panel) })
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Merge & Save") { _, _ ->
+                val outputName = nameField.text.toString().trim()
+                    .replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60)
+                    .ifBlank { "DocNexa_Merged" }
+                status.text = "Merging ${uris.size} PDF files…"
+                Thread {
+                    try {
+                        val merger = PDFMergerUtility()
+                        val streams = mutableListOf<java.io.InputStream>()
+                        try {
+                            uris.forEach { uri ->
+                                val stream = contentResolver.openInputStream(uri)
+                                    ?: throw IllegalStateException("Could not open selected PDF")
+                                streams.add(stream)
+                                merger.addSource(stream)
+                            }
+                            val output = ByteArrayOutputStream()
+                            merger.destinationStream = output
+                            merger.mergeDocuments(MemoryUsageSetting.setupMainMemoryOnly())
+                            val saved = savePdfBytes(output.toByteArray(), outputName)
+                            runOnUiThread {
+                                lastPdf = saved
+                                status.text = if (saved != null) "PDF merge complete" else "PDF merge failed"
+                                recent.text = "Latest: ${saved?.lastPathSegment ?: "Merged PDF"}"
+                                if (saved != null) {
+                                    buildScreen()
+                                    AlertDialog.Builder(this)
+                                        .setTitle("PDFs merged successfully")
+                                        .setMessage("${uris.size} files combined into ${saved.lastPathSegment}")
+                                        .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
+                                        .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
+                                        .setNegativeButton("Done", null)
+                                        .show()
+                                } else Toast.makeText(this, "Could not save merged PDF", Toast.LENGTH_LONG).show()
+                            }
+                        } finally {
+                            streams.forEach { try { it.close() } catch (_: Exception) {} }
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            status.text = "PDF merge failed"
+                            Toast.makeText(this, e.localizedMessage ?: "Could not merge PDFs", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            })
     }
 
     private fun splitPdfFile(uri: Uri) {
@@ -4307,12 +4350,56 @@ class MainActivity : AppCompatActivity() {
             addView(previewList)
             isFillViewport = false
         }
-        AlertDialog.Builder(this).setTitle("Preview selected images")
+        val countLabel = label("You can crop each page before export. Images will be added in the selected order.", 11f, 0xFF718096.toInt())
+        previewList.addView(countLabel)
+        val previewDialog = AlertDialog.Builder(this).setTitle("Image to PDF • Preview")
             .setView(scroll)
-            .setPositiveButton("Create PDF") { _, _ -> createPdfFromImages(uris, croppedBitmaps) }
+            .setPositiveButton("Next: PDF settings") { _, _ -> showImagePdfSettings(uris, croppedBitmaps) }
             .setNeutralButton("Share images") { _, _ -> shareSelectedImages(uris) }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        previewDialog.show()
+    }
+
+    private fun showImagePdfSettings(uris: List<Uri>, croppedBitmaps: List<Bitmap?>) {
+        val fileName = EditText(this).apply { hint = "PDF file name"; setSingleLine(true); setText("Images_to_PDF") }
+        val pageSize = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("A4", "Letter", "A5"))
+        }
+        val orientation = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Portrait", "Landscape", "Auto fit image"))
+        }
+        val fit = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Fit entire image", "Fill page (may crop edges)"))
+        }
+        val margin = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Small", "Normal", "Large"))
+            setSelection(1)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("${uris.size} image(s) • one image per PDF page", 11f, 0xFF718096.toInt()))
+            addView(gap(8)); addView(label("File name", 11f, 0xFF263957.toInt(), true)); addView(fileName)
+            addView(gap(7)); addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(pageSize)
+            addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientation)
+            addView(gap(7)); addView(label("Image placement", 11f, 0xFF263957.toInt(), true)); addView(fit)
+            addView(gap(7)); addView(label("Page margins", 11f, 0xFF263957.toInt(), true)); addView(margin)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Image to PDF • Export settings")
+            .setView(panel)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Create PDF") { _, _ ->
+                val base = fileName.text.toString().trim().replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60).ifBlank { "Images_to_PDF" }
+                val sizes = listOf(595 to 842, 612 to 792, 420 to 595)
+                val selected = sizes[pageSize.selectedItemPosition.coerceIn(0, 2)]
+                val landscape = orientation.selectedItemPosition == 1
+                val autoFit = orientation.selectedItemPosition == 2
+                val width = if (landscape) selected.second else selected.first
+                val height = if (landscape) selected.first else selected.second
+                val margins = listOf(20, 40, 64)[margin.selectedItemPosition.coerceIn(0, 2)]
+                createPdfFromImages(uris, croppedBitmaps, base, width, height, margins, fit.selectedItemPosition == 1, autoFit)
+            })
     }
 
     private fun shareSelectedImages(uris: List<Uri>) {
@@ -4328,7 +4415,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createPdfFromImages(uris: List<Uri>, croppedBitmaps: List<Bitmap?> = emptyList()) {
+    private fun createPdfFromImages(
+        uris: List<Uri>,
+        croppedBitmaps: List<Bitmap?> = emptyList(),
+        fileName: String = "Images_to_PDF",
+        pageWidth: Int = 595,
+        pageHeight: Int = 842,
+        margin: Int = 40,
+        fillPage: Boolean = false,
+        autoFit: Boolean = false
+    ) {
         status.text = "Creating PDF from ${uris.size} image(s)…"
         Thread {
             var document: PdfDocument? = null
@@ -4338,15 +4434,26 @@ class MainActivity : AppCompatActivity() {
                     val bitmap = croppedBitmaps.getOrNull(index) ?: (contentResolver.openInputStream(uri).use { input ->
                         if (input == null) null else BitmapFactory.decodeStream(input)
                     }) ?: throw IllegalStateException("Could not read selected image")
-                    val pageInfo = PdfDocument.PageInfo.Builder(595, 842, index + 1).create()
+                    val w = if (autoFit && bitmap.width > bitmap.height) pageHeight else pageWidth
+                    val h = if (autoFit && bitmap.width > bitmap.height) pageWidth else pageHeight
+                    val pageInfo = PdfDocument.PageInfo.Builder(w, h, index + 1).create()
                     val page = document.startPage(pageInfo)
-                    val bounds = fitRect(bitmap.width, bitmap.height, 515, 762, 40, 40)
                     page.canvas.drawColor(android.graphics.Color.WHITE)
+                    val availableW = (w - margin * 2).coerceAtLeast(1)
+                    val availableH = (h - margin * 2).coerceAtLeast(1)
+                    val bounds = if (fillPage) {
+                        val scale = maxOf(availableW.toFloat() / bitmap.width, availableH.toFloat() / bitmap.height)
+                        val outW = (bitmap.width * scale).toInt()
+                        val outH = (bitmap.height * scale).toInt()
+                        val left = (w - outW) / 2
+                        val top = (h - outH) / 2
+                        Rect(left, top, left + outW, top + outH)
+                    } else fitRect(bitmap.width, bitmap.height, availableW, availableH, margin, margin)
                     page.canvas.drawBitmap(bitmap, null, bounds, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                     document.finishPage(page)
                     bitmap.recycle()
                 }
-                val output = savePdf(document)
+                val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
                     lastPdf = output
                     status.text = if (output != null) "PDF created • ${uris.size} page(s)" else "PDF save failed"
@@ -4355,14 +4462,12 @@ class MainActivity : AppCompatActivity() {
                         buildScreen()
                         AlertDialog.Builder(this)
                             .setTitle("PDF created successfully")
-                            .setMessage("${uris.size} page(s) saved to Downloads/DocumentScanner.")
+                            .setMessage("${uris.size} image page(s) saved as ${output.lastPathSegment}.")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(output) }
                             .setNeutralButton("Share PDF") { _, _ -> sharePdf(output) }
                             .setNegativeButton("Done", null)
                             .show()
-                    } else {
-                        Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
-                    }
+                    } else Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
