@@ -1789,22 +1789,173 @@ class MainActivity : AppCompatActivity() {
             textSize = 18f
             setTextColor(0xFF777777.toInt())
             setPadding(dp(8), 0, dp(4), 0)
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setTitle(name)
-                    .setItems(arrayOf("Open PDF", "Edit PDF", "Share PDF", "Save to Google Drive", "Open with Google Docs", "Add/Remove Favourite", "Move to Trash")) { _, which ->
-                        when (which) {
-                            0 -> openPdf(uri)
-                            1 -> showPdfEditor(uri)
-                            2 -> sharePdf(uri)
-                            3 -> sharePdfToGoogleDrive(uri)
-                            4 -> openPdfWithGoogleDocs(uri)
-                            5 -> toggleFavourite(uri)
-                            6 -> moveToTrash(uri)
-                        }
-                    }.show()
-            }
+            setOnClickListener { showDocumentActions(name, uri) }
         })
         return card
+    }
+
+    private fun showDocumentActions(name: String, uri: Uri) {
+        val actions = arrayOf(
+            "Open PDF", "PDF / JPG", "Share", "Send to Email",
+            "Compress", "Lock PDF", "Delete", "Save to Cloud",
+            "Save to Gallery", "Edit PDF", "Move to Folder", "More"
+        )
+        AlertDialog.Builder(this).setTitle(name).setItems(actions) { _, which ->
+            when (which) {
+                0 -> openPdf(uri)
+                1 -> savePdfPageAsJpg(uri)
+                2 -> sharePdf(uri)
+                3 -> emailPdf(uri)
+                4 -> compressPdf(uri)
+                5 -> passwordDialog(uri, false)
+                6 -> AlertDialog.Builder(this).setMessage("Move this PDF to Trash?")
+                    .setPositiveButton("Delete") { _, _ -> moveToTrash(uri) }
+                    .setNegativeButton("Cancel", null).show()
+                7 -> sharePdfToGoogleDrive(uri)
+                8 -> savePdfPageAsJpg(uri)
+                9 -> showPdfEditor(uri)
+                10 -> movePdfToFolder(uri)
+                11 -> showMoreDocumentActions(name, uri)
+            }
+        }.show()
+    }
+
+    private fun showMoreDocumentActions(name: String, uri: Uri) {
+        val more = arrayOf(
+            "Favourite / Unfavourite", "Pin Document", "OCR Text",
+            "Copy PDF", "Split PDF", "Rename", "Tags",
+            "Date and Time setting", "Open with Google Docs", "MultiSide Doc / Collage"
+        )
+        AlertDialog.Builder(this).setTitle("More • $name").setItems(more) { _, which ->
+            when (which) {
+                0 -> toggleFavourite(uri)
+                1 -> {
+                    toggleFavourite(uri)
+                    Toast.makeText(this, "Pinned in DocNexa Favourite documents", Toast.LENGTH_LONG).show()
+                }
+                2 -> extractPdfText(uri)
+                3 -> copyPdfDocument(uri)
+                4 -> splitPdfFile(uri)
+                5 -> renamePdfDocument(uri, name)
+                6 -> documentTagDialog(uri)
+                7 -> documentDateTimeDialog(uri)
+                8 -> openPdfWithGoogleDocs(uri)
+                9 -> Toast.makeText(this, "MultiSide Doc / Collage is not available yet.", Toast.LENGTH_LONG).show()
+            }
+        }.show()
+    }
+
+    private fun emailPdf(uri: Uri) {
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Send PDF by email"))
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "No email app available", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun savePdfPageAsJpg(uri: Uri) {
+        Thread {
+            try {
+                val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
+                val bitmap = descriptor.use { pfd ->
+                    PdfRenderer(pfd).use { renderer ->
+                        if (renderer.pageCount == 0) error("PDF has no pages")
+                        renderer.openPage(0).use { page ->
+                            val scale = 2f
+                            Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888).also {
+                                Canvas(it).apply { drawColor(android.graphics.Color.WHITE) }
+                                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            }
+                        }
+                    }
+                }
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, "DocNexa_${System.currentTimeMillis()}.jpg")
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+                }
+                val imageUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("Could not create Gallery image")
+                contentResolver.openOutputStream(imageUri).use { output ->
+                    if (output == null) error("Could not save JPG")
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
+                }
+                bitmap.recycle()
+                runOnUiThread { Toast.makeText(this, "First PDF page saved as JPG in Gallery", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to JPG failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun copyPdfDocument(uri: Uri) {
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot read PDF")
+                val copied = savePdfBytes(bytes, "Copy")
+                runOnUiThread { Toast.makeText(this, if (copied != null) "PDF copy saved in Downloads/DocumentScanner" else "Copy failed", Toast.LENGTH_LONG).show(); buildScreen() }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Copy failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun renamePdfDocument(uri: Uri, oldName: String) {
+        val field = EditText(this).apply { setText(oldName.removeSuffix(".pdf")); selectAll() }
+        AlertDialog.Builder(this).setTitle("Rename PDF").setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                val value = field.text.toString().trim()
+                if (value.isBlank()) {
+                    Toast.makeText(this, "Enter a file name", Toast.LENGTH_SHORT).show()
+                } else {
+                    try {
+                        val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, if (value.endsWith(".pdf", true)) value else "$value.pdf") }
+                        val changed = contentResolver.update(uri, values, null, null)
+                        if (changed > 0) { Toast.makeText(this, "PDF renamed", Toast.LENGTH_SHORT).show(); buildScreen() }
+                        else Toast.makeText(this, "Rename is not supported for this file", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, e.localizedMessage ?: "Rename failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun movePdfToFolder(uri: Uri) {
+        if (homeFolders.isEmpty()) loadFolders()
+        val folders = homeFolders.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Move to Folder").setItems(folders) { _, which ->
+            folderAssignments[uri.toString()] = folders[which]
+            prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+            Toast.makeText(this, "Moved to ${folders[which]}", Toast.LENGTH_SHORT).show()
+            buildScreen()
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun documentTagDialog(uri: Uri) {
+        val key = "document_tag_" + uri.toString().hashCode()
+        val field = EditText(this).apply { hint = "Enter tags separated by commas"; setText(prefs.getString(key, "")) }
+        AlertDialog.Builder(this).setTitle("Document Tags").setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putString(key, field.text.toString().trim()).apply()
+                Toast.makeText(this, "Tags saved", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun documentDateTimeDialog(uri: Uri) {
+        val field = EditText(this).apply {
+            hint = "Document title"
+            setText(prefs.getString("document_datetime_" + uri.toString().hashCode(), ""))
+        }
+        AlertDialog.Builder(this).setTitle("Document date / time label").setMessage("Add a custom date or time note for this document.")
+            .setView(field)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putString("document_datetime_" + uri.toString().hashCode(), field.text.toString().trim()).apply()
+                Toast.makeText(this, "Date/time note saved", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun createPdfThumbnail(uri: Uri): Bitmap? {
