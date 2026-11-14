@@ -3997,42 +3997,112 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Select at least two PDF files", Toast.LENGTH_LONG).show()
             return
         }
+        val orderedUris = uris.toMutableList()
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val nameField = EditText(this).apply {
             hint = "Merged PDF file name"
             setSingleLine(true)
             setText("DocNexa_Merged")
         }
+        fun displayName(uri: Uri, index: Int): String = try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "PDF ${index + 1}"
+        } catch (_: Exception) { "PDF ${index + 1}" }
+
+        fun refreshRows() {
+            rows.removeAllViews()
+            orderedUris.forEachIndexed { index, uri ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(9), dp(8), dp(7), dp(8))
+                    background = rounded(0xFFF5F8FF.toInt(), 13, 0xFFDCE6F4.toInt())
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+                }
+                val thumb = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    background = rounded(0xFFE8EFFB.toInt(), 8)
+                    layoutParams = LinearLayout.LayoutParams(dp(62), dp(78))
+                    setImageResource(android.R.drawable.ic_menu_gallery)
+                    contentDescription = "First page preview"
+                }
+                row.addView(thumb)
+                val details = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(9), 0, dp(4), 0)
+                }
+                details.addView(label("PDF ${index + 1}", 10f, 0xFF3478F6.toInt(), true))
+                details.addView(gap(3))
+                details.addView(label(displayName(uri, index).take(32), 11f, 0xFF263957.toInt(), true))
+                details.addView(gap(3))
+                details.addView(label("Position ${index + 1} of ${orderedUris.size}", 10f, 0xFF718096.toInt()))
+                row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+                val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+                val up = android.widget.Button(this).apply {
+                    text = "↑"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(36)
+                    isEnabled = index > 0
+                    setOnClickListener {
+                        java.util.Collections.swap(orderedUris, index, index - 1)
+                        refreshRows()
+                    }
+                }
+                val down = android.widget.Button(this).apply {
+                    text = "↓"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(36)
+                    isEnabled = index < orderedUris.lastIndex
+                    setOnClickListener {
+                        java.util.Collections.swap(orderedUris, index, index + 1)
+                        refreshRows()
+                    }
+                }
+                controls.addView(up); controls.addView(down); row.addView(controls)
+                rows.addView(row)
+                Thread {
+                    try {
+                        val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: return@Thread
+                        val bitmap = descriptor.use { pfd ->
+                            android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
+                                if (renderer.pageCount == 0) null else renderer.openPage(0).use { page ->
+                                    Bitmap.createBitmap(180, 230, Bitmap.Config.ARGB_8888).also { bmp ->
+                                        android.graphics.Canvas(bmp).drawColor(android.graphics.Color.WHITE)
+                                        page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    }
+                                }
+                            }
+                        }
+                        if (bitmap != null) runOnUiThread { if (!isFinishing && thumb.parent != null) thumb.setImageBitmap(bitmap) }
+                    } catch (_: Exception) { }
+                }.start()
+            }
+        }
+        refreshRows()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(4))
-            addView(label("${uris.size} PDFs selected. They will be merged in the order returned by the file picker.", 12f, 0xFF718096.toInt()))
+            setPadding(dp(14), dp(8), dp(14), dp(4))
+            addView(label("PREVIEW & REORDER", 11f, 0xFF3478F6.toInt(), true))
+            addView(gap(4))
+            addView(label("Use the up/down arrows to choose the exact page order in the merged PDF.", 10.5f, 0xFF718096.toInt()))
+            addView(gap(9))
+            addView(rows)
             addView(gap(8))
-            uris.forEachIndexed { index, uri ->
-                val display = try {
-                    contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) cursor.getString(0) else null
-                    } ?: "PDF ${index + 1}"
-                } catch (_: Exception) { "PDF ${index + 1}" }
-                addView(label("${index + 1}. ${display.take(48)}", 11f, 0xFF263957.toInt()))
-            }
-            addView(gap(10))
-            addView(label("Output file name", 11f, 0xFF263957.toInt(), true))
+            addView(label("Output PDF name", 11f, 0xFF263957.toInt(), true))
             addView(nameField)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Merge PDFs • Review")
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Merge PDFs • Preview")
             .setView(ScrollView(this).apply { addView(panel) })
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Merge & Save") { _, _ ->
+            .setPositiveButton("Merge in this order") { _, _ ->
                 val outputName = nameField.text.toString().trim()
                     .replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60)
                     .ifBlank { "DocNexa_Merged" }
-                status.text = "Merging ${uris.size} PDF files…"
+                val mergeOrder = orderedUris.toList()
+                status.text = "Merging ${mergeOrder.size} PDF files…"
                 Thread {
                     try {
                         val merger = PDFMergerUtility()
                         val streams = mutableListOf<java.io.InputStream>()
                         try {
-                            uris.forEach { uri ->
+                            mergeOrder.forEach { uri ->
                                 val stream = contentResolver.openInputStream(uri)
                                     ?: throw IllegalStateException("Could not open selected PDF")
                                 streams.add(stream)
@@ -4050,7 +4120,7 @@ class MainActivity : AppCompatActivity() {
                                     buildScreen()
                                     AlertDialog.Builder(this)
                                         .setTitle("PDFs merged successfully")
-                                        .setMessage("${uris.size} files combined into ${saved.lastPathSegment}")
+                                        .setMessage("${mergeOrder.size} files combined in your selected order into ${saved.lastPathSegment}")
                                         .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
                                         .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
                                         .setNegativeButton("Done", null)
