@@ -42,6 +42,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.HorizontalScrollView
 import android.widget.TextView
 import android.widget.PopupMenu
@@ -2758,22 +2759,81 @@ class MainActivity : AppCompatActivity() {
                 val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open selected PDF")
                 val pages = PdfRenderer(pfd).use { it.pageCount }
                 runOnUiThread {
-                    val details = "Selected PDF\nPages: $pages\nOriginal size: ${formatFileSize(size)}\n\nChoose compression level:"
+                    val details = "PDF details\nPages: $pages\nOriginal size: ${formatFileSize(size)}\n\nChoose a preset or open Custom settings.\n\nNote: Image-based compression converts pages to images; selectable text, links, forms and annotations may not be preserved."
                     var selected = 1
-                    AlertDialog.Builder(this)
-                        .setTitle("Advanced PDF Compressor")
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle("DocNexa • Compression Studio")
                         .setMessage(details)
                         .setSingleChoiceItems(compressionPresets.map { "${it.title}\n${it.detail}" }.toTypedArray(), selected) { _, which ->
                             selected = which
                         }
                         .setPositiveButton("Compress PDF") { _, _ -> runPdfCompression(uri, compressionPresets[selected], size) }
-                        .setNeutralButton("Cancel", null)
-                        .show()
+                        .setNeutralButton("Custom settings", null)
+                        .setNegativeButton("Cancel", null)
+                        .create()
+                    dialog.setOnShowListener {
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                            dialog.dismiss()
+                            showCustomCompressionDialog(uri, size, compressionPresets[selected])
+                        }
+                    }
+                    dialog.show()
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show() }
             }
         }.start()
+    }
+
+    private fun showCustomCompressionDialog(uri: Uri, originalSize: Long, base: CompressionPreset) {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        var dpi = base.dpi
+        var quality = base.quality
+        val dpiLabel = label("Resolution: $dpi DPI", 14f, 0xFF17243A.toInt(), true)
+        val qualityLabel = label("JPEG quality: $quality%", 14f, 0xFF17243A.toInt(), true)
+        panel.addView(dpiLabel)
+        val dpiSeek = SeekBar(this).apply {
+            max = 228
+            progress = (dpi - 72).coerceIn(0, 228)
+        }
+        panel.addView(dpiSeek)
+        panel.addView(gap(12))
+        panel.addView(qualityLabel)
+        val qualitySeek = SeekBar(this).apply {
+            max = 65
+            progress = (quality - 35).coerceIn(0, 65)
+        }
+        panel.addView(qualitySeek)
+        panel.addView(gap(8))
+        panel.addView(label("Lower DPI and JPEG quality usually reduce file size but can make small text harder to read.", 12f, 0xFF64748B.toInt()))
+        dpiSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                dpi = 72 + progress
+                dpiLabel.text = "Resolution: $dpi DPI"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        qualitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                quality = 35 + progress
+                qualityLabel.text = "JPEG quality: $quality%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        AlertDialog.Builder(this)
+            .setTitle("Custom compression")
+            .setView(panel)
+            .setPositiveButton("Preview compression") { _, _ ->
+                val custom = CompressionPreset("Custom", dpi, quality, "$dpi DPI • JPEG $quality%")
+                runPdfCompression(uri, custom, originalSize)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun runPdfCompression(uri: Uri, preset: CompressionPreset, originalSize: Long) {
