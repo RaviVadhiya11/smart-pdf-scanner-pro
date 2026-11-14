@@ -7,7 +7,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.pixelfire.smartpdfscanner"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
         versionCode = 4
         versionName = "1.3.0"
@@ -39,4 +39,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("com.google.android.gms:play-services-ads:25.5.0")
 }
