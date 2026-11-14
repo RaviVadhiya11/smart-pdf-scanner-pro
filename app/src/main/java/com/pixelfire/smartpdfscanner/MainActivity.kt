@@ -1814,7 +1814,7 @@ class MainActivity : AppCompatActivity() {
                 1 -> savePdfPageAsJpg(uri)
                 2 -> sharePdf(uri)
                 3 -> emailPdf(uri)
-                4 -> compressPdf(uri)
+                4 -> showCompressionOptions(uri)
                 5 -> passwordDialog(uri, false)
                 6 -> AlertDialog.Builder(this).setMessage("Move this PDF to Trash?")
                     .setPositiveButton("Delete") { _, _ -> moveToTrash(uri) }
@@ -2814,7 +2814,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         status.text = "Compression preview ready"
                         val savedPercent = if (originalSize > 0) (((originalSize - compressedBytes.size).toDouble() / originalSize) * 100).toInt() else 0
-                        val summary = "Preset: ${preset.title}\nOriginal: ${formatFileSize(originalSize)}\nCompressed: ${formatFileSize(compressedBytes.size)}\n" +
+                        val summary = "Preset: ${preset.title}\nOriginal: ${formatFileSize(originalSize)}\nCompressed: ${formatFileSize(compressedBytes.size.toLong())}\n" +
                             if (originalSize > 0) (if (reduced) "Size reduced by $savedPercent%" else "This PDF did not become smaller with this preset.") else "Compression complete."
                         AlertDialog.Builder(this)
                             .setTitle("Compression Preview")
