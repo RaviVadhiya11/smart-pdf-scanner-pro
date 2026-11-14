@@ -3191,7 +3191,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val bitmap = buildSignatureBitmap(canvas, typed.text.toString())
+                val bitmap = buildSignatureBitmap(canvas, typed.text.toString(), selectedSignatureFont)
                 if (bitmap == null) {
                     Toast.makeText(this, "Please draw or type a signature first.", Toast.LENGTH_LONG).show()
                 } else {
