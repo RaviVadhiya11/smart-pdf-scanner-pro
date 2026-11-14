@@ -1723,47 +1723,96 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsDialog() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(10), dp(18), dp(6))
-            background = rounded(0xFFF5F8FF.toInt(), 18)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = rounded(0xFFF3F7FF.toInt(), 18)
         }
-        val options = listOf(
-            Triple("ⓘ", "App information", "DocNexa • PDF Scanner & Editor"),
-            Triple("▣", "Storage location", "Downloads/DocumentScanner"),
-            Triple("↗", "Share app", "Invite friends to try DocNexa")
-        )
-        options.forEachIndexed { index, item ->
+        val currentSort = prefs.getInt("document_sort_order", 2).coerceIn(0, 3)
+        val sortNames = arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")
+        val docs = getSavedPdfs()
+        val appVersion = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0"
+        } catch (_: Exception) { "1.0" }
+
+        fun section(title: String) {
+            panel.addView(label(title, 12f, 0xFF3478D8.toInt(), true).apply {
+                setPadding(dp(5), dp(12), 0, dp(7))
+            })
+        }
+        fun setting(icon: String, title: String, subtitle: String, action: () -> Unit) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE4EAF3.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(66)).apply { bottomMargin = dp(8) }
+                setPadding(dp(12), dp(11), dp(12), dp(11))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE0E8F4.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
                 isClickable = true
                 isFocusable = true
-                setOnClickListener {
-                    when(index) {
-                        0 -> showPremiumDialog(AlertDialog.Builder(this@MainActivity)
-                            .setTitle("About DocNexa")
-                            .setMessage("DocNexa\nPDF Scanner & Editor\n\nScan, import, organize and manage PDF documents on your device.")
-                            .setPositiveButton("Done", null))
-                        1 -> showPremiumDialog(AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Storage location")
-                            .setMessage("Your PDFs are saved in Downloads/DocumentScanner.")
-                            .setPositiveButton("OK", null))
-                        2 -> shareApp()
-                    }
-                }
+                setOnClickListener { action() }
             }
-            row.addView(label(item.first, 23f, 0xFF1764C0.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
-            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            info.addView(label(item.second, 14f, 0xFF172B4D.toInt(), true))
+            row.addView(label(icon, 20f, 0xFF2878C8.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                background = rounded(0xFFEAF2FF.toInt(), 12)
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            })
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, dp(6), 0)
+            }
+            info.addView(label(title, 13f, 0xFF1D3557.toInt(), true))
             info.addView(gap(3))
-            info.addView(label(item.third, 10.5f, 0xFF718096.toInt()))
+            info.addView(label(subtitle, 10.5f, 0xFF718096.toInt()))
             row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(label("›", 24f, 0xFF718096.toInt()))
+            row.addView(label("›", 23f, 0xFF718096.toInt()))
             panel.addView(row)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Settings • DocNexa").setView(panel).setNegativeButton("Close", null))
+
+        section("DOCUMENT PREFERENCES")
+        setting("⇅", "Default sort order", sortNames[currentSort]) {
+            AlertDialog.Builder(this).setTitle("Sort documents")
+                .setSingleChoiceItems(sortNames, currentSort) { dialog, which ->
+                    prefs.edit().putInt("document_sort_order", which).apply()
+                    dialog.dismiss()
+                    showDocsScreen()
+                }.setNegativeButton("Cancel", null).show()
+        }
+        setting("▤", "Storage location", "Downloads/DocumentScanner • ${docs.size} saved PDF(s)") {
+            showPremiumDialog(AlertDialog.Builder(this)
+                .setTitle("DocNexa storage")
+                .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nInternal storage / Download / DocumentScanner\n\nCurrently indexed: ${docs.size} PDF(s).\n\nYou can open this folder from your phone's Files app.")
+                .setPositiveButton("OK", null))
+        }
+
+        section("APP & SUPPORT")
+        setting("ⓘ", "App information", "DocNexa • Version $appVersion") {
+            showPremiumDialog(AlertDialog.Builder(this)
+                .setTitle("About DocNexa")
+                .setMessage("DocNexa\nPDF Scanner & Editor\nVersion $appVersion\n\nScan, create, organize and manage PDF documents on your device.")
+                .setPositiveButton("Done", null))
+        }
+        setting("↗", "Share DocNexa", "Invite friends to try the app") { shareApp() }
+        setting("✉", "Contact support", "Send feedback or report a problem") { openFeedbackEmail(false) }
+
+        section("MAINTENANCE")
+        setting("♲", "Clear temporary files", "Remove temporary app cache; saved PDFs are not deleted") {
+            AlertDialog.Builder(this).setTitle("Clear temporary files?")
+                .setMessage("This removes temporary cache files only. Your saved PDFs, folders and account data will remain untouched.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    val cleared = try { cacheDir.deleteRecursively() } catch (_: Exception) { false }
+                    Toast.makeText(this, if (cleared) "Temporary cache cleared" else "Cache could not be fully cleared", Toast.LENGTH_LONG).show()
+                }.show()
+        }
+        setting("↻", "Refresh document list", "Rescan the saved PDF folder") {
+            showDocsScreen()
+            Toast.makeText(this, "Document list refreshed", Toast.LENGTH_SHORT).show()
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(panel)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Settings • DocNexa")
+            .setView(scroll).setNegativeButton("Close", null))
     }
 
     private fun shareApp() {
