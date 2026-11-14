@@ -200,6 +200,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
+    private var pendingImagePdfSaveAs: Uri? = null
     private var signaturePng: ByteArray? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val qrAlreadyRead = AtomicBoolean(false)
@@ -229,6 +230,28 @@ class MainActivity : AppCompatActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) showImageImportPreview(uris)
     }
+
+    private val imagePdfSaveAsPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { destination ->
+        val source = pendingImagePdfSaveAs
+        pendingImagePdfSaveAs = null
+        if (destination != null && source != null) {
+            Thread {
+                try {
+                    contentResolver.openInputStream(source).use { input ->
+                        requireNotNull(input) { "Could not read generated PDF" }
+                        contentResolver.openOutputStream(destination, "w").use { output ->
+                            requireNotNull(output) { "Could not write to selected location" }
+                            input.copyTo(output)
+                        }
+                    }
+                    runOnUiThread { Toast.makeText(this, "PDF saved to your selected folder", Toast.LENGTH_LONG).show() }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Save As failed", Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        }
+    }
+
 
     private val idCardPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) showIdCardImportPreview(uris.take(2))
@@ -4743,7 +4766,10 @@ class MainActivity : AppCompatActivity() {
                             .setMessage("${uris.size} image page(s) saved as ${output.lastPathSegment}.")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(output) }
                             .setNeutralButton("Share PDF") { _, _ -> sharePdf(output) }
-                            .setNegativeButton("Done", null)
+                            .setNegativeButton("Save As") { _, _ ->
+                                pendingImagePdfSaveAs = output
+                                imagePdfSaveAsPicker.launch(output.lastPathSegment ?: "Images_to_PDF.pdf")
+                            }
                             .show()
                     } else Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
                 }
