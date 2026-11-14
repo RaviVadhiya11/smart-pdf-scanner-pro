@@ -1842,7 +1842,6 @@ class MainActivity : AppCompatActivity() {
         body.addView(gap(8))
         homeFolders.forEach { body.addView(folderCard(it)) }
         body.addView(gap(8))
-        val documents = getSavedPdfs()
         body.addView(label("Documents (${documents.size})", 15f, navy, true))
         body.addView(gap(8))
         if (documents.isEmpty()) {
