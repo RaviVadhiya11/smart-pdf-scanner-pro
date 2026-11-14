@@ -1114,7 +1114,10 @@ class MainActivity : AppCompatActivity() {
                                     .setMessage("This PDF will be removed from your device.")
                                     .setNegativeButton("Cancel", null)
                                     .setPositiveButton("Delete") { _, _ ->
-                                        try { contentResolver.delete(target, null, null) } catch (_: Exception) {}
+                                        try {
+                                            val privateFile = privateDocumentFile(target)
+                                            if (privateFile != null) privateFile.delete() else contentResolver.delete(target, null, null)
+                                        } catch (_: Exception) {}
                                         val updated = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
                                         updated.remove(target.toString())
                                         prefs.edit().putStringSet("trash_uris", updated).apply()
@@ -2374,10 +2377,22 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Enter a file name", Toast.LENGTH_SHORT).show()
                 } else {
                     try {
-                        val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, if (value.endsWith(".pdf", true)) value else "$value.pdf") }
-                        val changed = contentResolver.update(uri, values, null, null)
-                        if (changed > 0) { Toast.makeText(this, "PDF renamed", Toast.LENGTH_SHORT).show(); buildScreen() }
-                        else Toast.makeText(this, "Rename is not supported for this file", Toast.LENGTH_LONG).show()
+                        val newName = if (value.endsWith(".pdf", true)) value else "$value.pdf"
+                        val privateFile = privateDocumentFile(uri)
+                        val changed = if (privateFile != null) {
+                            privateFile.renameTo(java.io.File(privateDocumentsDir(), newName))
+                        } else {
+                            val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, newName) }
+                            contentResolver.update(uri, values, null, null) > 0
+                        }
+                        if (changed) {
+                            val assignments = folderAssignments.remove(uri.toString())
+                            val renamedFile = privateFile?.let { java.io.File(privateDocumentsDir(), newName) }
+                            if (assignments != null && renamedFile != null) folderAssignments[privateDocumentUri(renamedFile).toString()] = assignments
+                            prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+                            Toast.makeText(this, "PDF renamed", Toast.LENGTH_SHORT).show()
+                            buildScreen()
+                        } else Toast.makeText(this, "Rename failed", Toast.LENGTH_LONG).show()
                     } catch (e: Exception) {
                         Toast.makeText(this, e.localizedMessage ?: "Rename failed", Toast.LENGTH_LONG).show()
                     }
@@ -3385,7 +3400,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (saved != null) {
                         lastPdf = saved; buildScreen(); status.text = "Text PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
-                        Toast.makeText(this, "PDF created with $pageNo page(s) and saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "PDF created with $pageNo page(s) and saved inside DocNexa", Toast.LENGTH_LONG).show()
                     } else Toast.makeText(this, "Could not save PDF", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -5548,7 +5563,9 @@ class MainActivity : AppCompatActivity() {
         val name = "Document_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
         return try {
             val bytes = ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray()
-            saveBytesPrivately(bytes, name)
+            saveBytesPrivately(bytes, name)?.also { uri ->
+                showExportSuccess(uri, name, "application/pdf")
+            }
         } catch (_: Exception) { null }
     }
 
