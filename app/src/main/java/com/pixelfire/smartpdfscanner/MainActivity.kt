@@ -1396,9 +1396,9 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(12), dp(18), dp(12))
         }
         val scroll = ScrollView(this).apply { addView(view) }
-        AlertDialog.Builder(this).setTitle("Privacy Policy")
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Privacy Policy")
             .setView(scroll).setPositiveButton("Close", null)
-            .setNeutralButton("Privacy question") { _, _ -> openFeedbackEmail(false) }.show()
+            .setNeutralButton("Privacy question") { _, _ -> openFeedbackEmail(false) })
     }
 
     private fun showTermsOfUse() {
@@ -1420,9 +1420,9 @@ class MainActivity : AppCompatActivity() {
             text = terms; textSize = 13f; setTextColor(0xFF263957.toInt())
             setPadding(dp(18), dp(12), dp(18), dp(12))
         }
-        AlertDialog.Builder(this).setTitle("Terms of Use")
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Terms of Use")
             .setView(ScrollView(this).apply { addView(view) })
-            .setPositiveButton("Close", null).show()
+            .setPositiveButton("Close", null))
     }
 
     private fun showDataHelp() {
@@ -3473,6 +3473,7 @@ class MainActivity : AppCompatActivity() {
             addView(Button(this@MainActivity).apply { text = "Clear"; setOnClickListener { canvas.clear(); typed.setText("") } })
         }
         layout.addView(toolbar)
+        addNativeAdCard(layout)
         dialog.show()
     }
 
@@ -4938,7 +4939,8 @@ class MainActivity : AppCompatActivity() {
             panel.addView(gap(6))
         }
         val scroll = ScrollView(this).apply { addView(panel) }
-        AlertDialog.Builder(this).setTitle("ID Card Preview").setView(scroll)
+        addNativeAdCard(panel)
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("ID Card Preview").setView(scroll)
             .setPositiveButton("Create ID PDF") { _, _ -> createPdfFromBitmaps(originals, "ID_Card") }
             .setNeutralButton("Share Images") { _, _ ->
                 val share = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
@@ -4948,7 +4950,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 startActivity(Intent.createChooser(share, "Share ID images"))
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton("Cancel", null))
     }
 
     private fun showPassportPhotoEditor(uri: Uri) {
@@ -4965,6 +4967,7 @@ class MainActivity : AppCompatActivity() {
                 addView(cropView, LinearLayout.LayoutParams(-1, dp(390)))
                 addView(label("Drag crop handles. Choose a print size below.", 12f, 0xFF53627A.toInt()))
             }
+            addNativeAdCard(panel)
             AlertDialog.Builder(this).setTitle("Passport Photo Maker")
                 .setView(panel)
                 .setSingleChoiceItems(sizeOptions, 0) { _, which -> selectedSize = which }
@@ -5266,6 +5269,7 @@ class MainActivity : AppCompatActivity() {
             previewList.addView(row)
         }
         previewList.addView(label("Tip: Preview pages, change order, rotate, crop, duplicate or remove images. Your original gallery photos are not modified.", 11f, 0xFF718096.toInt()))
+        addNativeAdCard(previewList)
         val scroll = ScrollView(this).apply { addView(previewList); isFillViewport = false }
         val dialog = AlertDialog.Builder(this).setTitle("Image to PDF • Page manager").setView(scroll)
             .setPositiveButton("Next: PDF settings", null)
