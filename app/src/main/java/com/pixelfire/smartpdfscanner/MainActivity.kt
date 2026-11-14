@@ -1062,9 +1062,19 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(28), dp(16), dp(24))
             setBackgroundColor(0xFF1D3B4A.toInt())
         }
-        account.addView(TextView(this).apply {
-            text = "◉"; textSize = 42f; setTextColor(0xFFFFFFFF.toInt()); gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(dp(62), dp(62)))
+        val accountAvatar = FrameLayout(this).apply {
+            background = rounded(0xFF3478F6.toInt(), 22, 0xFF75B8FF.toInt())
+            elevation = dp(3).toFloat()
+            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
+        }
+        accountAvatar.addView(ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_myplaces)
+            setColorFilter(0xFFFFFFFF.toInt())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "DocNexa account profile"
+            layoutParams = FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER)
+        })
+        account.addView(accountAvatar)
         val accountText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
         accountText.addView(label("Sign In (Cloud)", 18f, 0xFFFFFFFF.toInt(), true))
         accountText.addView(gap(5))
