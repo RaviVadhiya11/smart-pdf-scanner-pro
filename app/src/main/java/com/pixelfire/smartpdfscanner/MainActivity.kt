@@ -568,29 +568,73 @@ class MainActivity : AppCompatActivity() {
         content.addView(quickAccessScroll)
         content.addView(gap(16))
 
-        // Large scan hero card.
+        // Premium scan hero: compact copy, custom scanner artwork and clear primary action.
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(20))
-            background = rounded(0xFFE5EFFF.toInt(), 22)
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = gradient(0xFFEAF2FF.toInt(), 0xFFDCEAFF.toInt(), 24)
+            elevation = dp(2).toFloat()
         }
-        hero.addView(label("SMART DOCUMENT WORKSPACE", 11f, blue, true))
-        hero.addView(gap(10))
-        hero.addView(label("Scan documents.\nKeep everything organized.", 25f, navy, true))
-        hero.addView(gap(8))
-        hero.addView(label("Auto capture • Crop • Enhance • PDF export", 12f, muted))
-        hero.addView(gap(16))
+        val heroTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val heroCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        heroCopy.addView(label("DOCNEXA • SMART SCAN", 10f, blue, true))
+        heroCopy.addView(gap(8))
+        heroCopy.addView(label("Your documents.\nClear, secure,\norganized.", 22f, navy, true))
+        heroCopy.addView(gap(7))
+        heroCopy.addView(label("Scan • Enhance • Save as PDF", 10.5f, muted))
+        heroTop.addView(heroCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        val heroArt = object : View(this) {
+            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                super.onDraw(canvas)
+                val w = width.toFloat()
+                val h = height.toFloat()
+                val cx = w * .50f
+                val cy = h * .50f
+                paint.style = android.graphics.Paint.Style.FILL
+                paint.color = 0xFFBBD5FF.toInt()
+                canvas.drawCircle(cx, cy, minOf(w, h) * .48f, paint)
+                val rect = android.graphics.RectF(w*.25f, h*.13f, w*.75f, h*.87f)
+                paint.color = 0xFFFFFFFF.toInt()
+                canvas.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), paint)
+                paint.style = android.graphics.Paint.Style.STROKE
+                paint.strokeWidth = dp(3).toFloat()
+                paint.strokeCap = android.graphics.Paint.Cap.ROUND
+                paint.color = 0xFF2164C5.toInt()
+                val l=rect.left-dp(5); val t=rect.top+dp(8); val r=rect.right+dp(5); val b=rect.bottom-dp(8); val k=dp(11).toFloat()
+                canvas.drawLine(l+k,t,l,t,paint); canvas.drawLine(l,t,l,t+k,paint)
+                canvas.drawLine(r-k,t,r,t,paint); canvas.drawLine(r,t,r,t+k,paint)
+                canvas.drawLine(l,b-k,l,b,paint); canvas.drawLine(l,b,l+k,b,paint)
+                canvas.drawLine(r-k,b,r,b,paint); canvas.drawLine(r,b,r,b-k,paint)
+                paint.color = 0xFF18A9D5.toInt()
+                paint.strokeWidth = dp(4).toFloat()
+                canvas.drawLine(w*.17f,cy,w*.83f,cy,paint)
+                paint.color = 0xFF2164C5.toInt()
+                paint.strokeWidth = dp(2).toFloat()
+                canvas.drawLine(rect.left+dp(8),rect.top+dp(22),rect.right-dp(8),rect.top+dp(22),paint)
+                canvas.drawLine(rect.left+dp(8),rect.bottom-dp(22),rect.right-dp(8),rect.bottom-dp(22),paint)
+            }
+        }.apply { contentDescription = "Document scanner illustration" }
+        heroTop.addView(heroArt, LinearLayout.LayoutParams(dp(94), dp(112)).apply { leftMargin = dp(8) })
+        hero.addView(heroTop)
+        hero.addView(gap(14))
         val scanButton = Button(this).apply {
-            text = "▣   Scan Document"
+            text = "▣   Scan a Document"
             isAllCaps = false
-            textSize = 16f
+            textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
             background = gradient(0xFF4285F4.toInt(), 0xFF1764DE.toInt(), 16)
             backgroundTintList = null
+            minHeight = dp(54)
             setOnClickListener { startDocumentScan() }
         }
-        hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(56)))
+        hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
         content.addView(hero)
         content.addView(gap(20))
 
