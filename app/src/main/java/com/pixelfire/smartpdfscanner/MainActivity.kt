@@ -137,7 +137,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) createPdfFromImages(uris)
+        if (uris.isNotEmpty()) showImageImportPreview(uris)
     }
 
     private val ocrPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -2916,6 +2916,59 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun showImageImportPreview(uris: List<Uri>) {
+        val previewList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        previewList.addView(label("${uris.size} image(s) selected • Preview before creating PDF", 13f, 0xFF263957.toInt(), true))
+        previewList.addView(gap(10))
+        uris.forEachIndexed { index, uri ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(7), dp(8), dp(7))
+                background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE2EAF5.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, dp(104)).apply { bottomMargin = dp(8) }
+            }
+            val thumb = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                try {
+                    contentResolver.openInputStream(uri).use { input ->
+                        setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null)
+                    }
+                } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
+                layoutParams = LinearLayout.LayoutParams(dp(82), dp(88))
+            }
+            row.addView(thumb)
+            row.addView(label("  Page ${index + 1}", 13f, 0xFF263957.toInt(), true))
+            previewList.addView(row)
+        }
+        val scroll = ScrollView(this).apply {
+            addView(previewList)
+            isFillViewport = false
+        }
+        AlertDialog.Builder(this).setTitle("Preview selected images")
+            .setView(scroll)
+            .setPositiveButton("Create PDF") { _, _ -> createPdfFromImages(uris) }
+            .setNeutralButton("Share images") { _, _ -> shareSelectedImages(uris) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun shareSelectedImages(uris: List<Uri>) {
+        try {
+            val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Share selected images"))
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Unable to share selected images", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun createPdfFromImages(uris: List<Uri>) {
         status.text = "Creating PDF from ${uris.size} image(s)…"
         Thread {
@@ -2937,10 +2990,20 @@ class MainActivity : AppCompatActivity() {
                 val output = savePdf(document)
                 runOnUiThread {
                     lastPdf = output
-                    status.text = "PDF created • ${uris.size} page(s)"
+                    status.text = if (output != null) "PDF created • ${uris.size} page(s)" else "PDF save failed"
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
-                    if (output != null) buildScreen()
-                    Toast.makeText(this, "PDF saved to Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    if (output != null) {
+                        buildScreen()
+                        AlertDialog.Builder(this)
+                            .setTitle("PDF created successfully")
+                            .setMessage("${uris.size} page(s) saved to Downloads/DocumentScanner.")
+                            .setPositiveButton("Open PDF") { _, _ -> openPdf(output) }
+                            .setNeutralButton("Share PDF") { _, _ -> sharePdf(output) }
+                            .setNegativeButton("Done", null)
+                            .show()
+                    } else {
+                        Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
