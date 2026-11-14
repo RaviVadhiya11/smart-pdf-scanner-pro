@@ -292,6 +292,16 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) splitPdfFile(uri)
     }
 
+    private val importPdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            lastPdf = uri
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) { }
+            openPdf(uri)
+        }
+    }
+
     private val pdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val signature = signaturePng
@@ -719,7 +729,7 @@ class MainActivity : AppCompatActivity() {
                     0 -> ({ startDocumentScan() })
                     1 -> ({ showPdfTools() })
                     2 -> ({ imagePicker.launch(arrayOf("image/*")) })
-                    3 -> ({ pdfPicker.launch(arrayOf("application/pdf")) })
+                    3 -> ({ showImportFileHub() })
                     4 -> ({ compressPicker.launch(arrayOf("application/pdf")) })
                     5 -> ({ ocrPicker.launch("image/*") })
                     6 -> ({ pdfToWordPicker.launch(arrayOf("application/pdf")) })
@@ -5189,6 +5199,71 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             status.text = "Could not read selected image"
             Toast.makeText(this, e.localizedMessage ?: "Image error", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showImportFileHub() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(10), dp(18), dp(4))
+            background = rounded(0xFFF5F8FF.toInt(), 18)
+        }
+        panel.addView(label("Choose what you want to bring into DocNexa. Your selected source file is not modified.", 12f, 0xFF64748B.toInt()))
+        panel.addView(gap(12))
+        fun option(title: String, detail: String, symbol: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(11), dp(12), dp(11))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE0E8F5.toInt())
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { action() }
+            }
+            row.addView(label(symbol, 20f, 0xFF2674D9.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                background = rounded(0xFFEAF2FF.toInt(), 12)
+                layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
+            })
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+            }
+            texts.addView(label(title, 14f, 0xFF1D3557.toInt(), true))
+            texts.addView(gap(2))
+            texts.addView(label(detail, 10.5f, 0xFF718096.toInt()))
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 23f, 0xFF718096.toInt()))
+            panel.addView(row)
+            panel.addView(gap(8))
+        }
+        val dialog = showPremiumDialog(AlertDialog.Builder(this)
+            .setTitle("Import File • DocNexa")
+            .setView(panel)
+            .setNegativeButton("Close", null))
+        option("Open a PDF", "Browse phone storage, Downloads or cloud files", "PDF") {
+            dialog.dismiss()
+            importPdfPicker.launch(arrayOf("application/pdf"))
+        }
+        option("Merge multiple PDFs", "Select two or more PDFs and arrange them in one file", "⇄") {
+            dialog.dismiss()
+            mergePicker.launch(arrayOf("application/pdf"))
+        }
+        option("Compress a PDF", "Choose a PDF and select compression quality", "↓") {
+            dialog.dismiss()
+            compressPicker.launch(arrayOf("application/pdf"))
+        }
+        option("Convert PDF to Word", "Create an editable DOCX copy", "W") {
+            dialog.dismiss()
+            pdfToWordPicker.launch(arrayOf("application/pdf"))
+        }
+        option("View PDF details", "Check pages, file size and document metadata", "ⓘ") {
+            dialog.dismiss()
+            detailsPicker.launch(arrayOf("application/pdf"))
+        }
+        option("Split PDF", "Extract selected page ranges into a new PDF", "✂") {
+            dialog.dismiss()
+            splitPicker.launch(arrayOf("application/pdf"))
         }
     }
 
