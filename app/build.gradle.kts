@@ -40,4 +40,5 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("com.google.android.gms:play-services-ads:25.5.0")
+    implementation("com.google.guava:listenablefuture:1.0")
 }
