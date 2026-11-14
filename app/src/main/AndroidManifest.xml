@@ -9,6 +9,9 @@
         android:label="DocNexa - PDF Scanner &amp; Editor"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-9813341758678162~2064738083" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
