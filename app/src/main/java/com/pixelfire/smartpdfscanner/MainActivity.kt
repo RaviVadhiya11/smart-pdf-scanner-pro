@@ -56,6 +56,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.AdListener
 import com.google.android.gms.ads.AdLoader
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.nativead.NativeAd
@@ -1764,7 +1765,7 @@ class MainActivity : AppCompatActivity() {
         tagDialogAdView?.destroy()
         val dialogAd = AdView(this).apply {
             adUnitId = "ca-app-pub-3940256099942544/9214589741" // Google test banner during development.
-            setAdSize(AdSize.getBannerAdSize(this@MainActivity, 320, 50))
+            setAdSize(AdSize.BANNER)
             loadAd(AdRequest.Builder().build())
         }
         tagDialogAdView = dialogAd
