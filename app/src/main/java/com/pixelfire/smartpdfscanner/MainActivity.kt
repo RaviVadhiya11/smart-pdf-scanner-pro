@@ -1983,29 +1983,84 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDocumentActions(name: String, uri: Uri) {
-        val actions = arrayOf(
-            "Open PDF", "PDF / JPG", "Share", "Send to Email",
-            "Compress", "Lock PDF", "Delete", "Save to Cloud",
-            "Save to Gallery", "Edit PDF", "Move to Folder", "More"
-        )
-        AlertDialog.Builder(this).setTitle(name).setItems(actions) { _, which ->
-            when (which) {
-                0 -> openPdf(uri)
-                1 -> savePdfPageAsJpg(uri)
-                2 -> sharePdf(uri)
-                3 -> emailPdf(uri)
-                4 -> showCompressionOptions(uri)
-                5 -> passwordDialog(uri, false)
-                6 -> AlertDialog.Builder(this).setMessage("Move this PDF to Trash?")
-                    .setPositiveButton("Delete") { _, _ -> moveToTrash(uri) }
-                    .setNegativeButton("Cancel", null).show()
-                7 -> sharePdfToGoogleDrive(uri)
-                8 -> savePdfPageAsJpg(uri)
-                9 -> showPdfEditor(uri)
-                10 -> movePdfToFolder(uri)
-                11 -> showMoreDocumentActions(name, uri)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(6), dp(14), dp(8))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(panel)
+        }
+        fun section(title: String) {
+            panel.addView(label(title.uppercase(Locale.US), 10f, 0xFF3478F6.toInt(), true).apply {
+                setPadding(dp(4), dp(12), dp(4), dp(6))
+            })
+        }
+        fun action(title: String, detail: String, symbol: String, run: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(9), dp(8), dp(9))
+                background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE6ECF5.toInt())
+                isClickable = true
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) }
+                setOnClickListener { run() }
             }
-        }.show()
+            row.addView(label(symbol, 20f, 0xFF3478F6.toInt(), true), LinearLayout.LayoutParams(dp(38), -2))
+            val textBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            textBox.addView(label(title, 13f, 0xFF263957.toInt(), true))
+            textBox.addView(gap(2))
+            textBox.addView(label(detail, 10f, 0xFF718096.toInt()))
+            row.addView(textBox, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 22f, 0xFF718096.toInt()))
+            panel.addView(row)
+        }
+
+        section("Open and share")
+        action("Open PDF", "View this document", "▤") { openPdf(uri) }
+        action("Share PDF", "Send to another app", "↗") { sharePdf(uri) }
+        action("Send to Email", "Attach this PDF to an email", "✉") { emailPdf(uri) }
+        action("Open with Google Docs", "Open using a compatible app", "G") { openPdfWithGoogleDocs(uri) }
+
+        section("Convert and export")
+        action("Export first page as JPG", "Save only page 1 to Gallery", "▧") { savePdfPageAsJpg(uri) }
+        action("Export all pages as images", "Save every page as a separate image", "▧") { convertPdfToImages(uri) }
+        action("Create ZIP archive", "Package this PDF into a ZIP file", "ZIP") { zipPdf(uri) }
+        action("Extract PDF text", "Read and copy selectable text", "T") { extractPdfText(uri) }
+        action("PDF details", "View page count, size and metadata", "ⓘ") { showPdfDetails(uri) }
+
+        section("Edit and organize")
+        action("Edit PDF", "Add text, signature and annotations", "✎") { showPdfEditor(uri) }
+        action("Compress PDF", "Reduce file size with quality options", "⇩") { showCompressionOptions(uri) }
+        action("Split PDF", "Extract selected pages into a new PDF", "↔") { splitPdfFile(uri) }
+        action("Rotate pages", "Rotate all or selected pages", "⟳") { rotatePdfPages(uri) }
+        action("Move to Folder", "Organize this document", "▰") { movePdfToFolder(uri) }
+        action("Rename PDF", "Change the document filename", "Aa") { renamePdfDocument(uri, name) }
+        action("Copy PDF", "Create another copy in Downloads", "▣") { copyPdfDocument(uri) }
+        action("Tags and notes", "Add searchable labels or a date note", "⌑") {
+            AlertDialog.Builder(this).setTitle("Document details")
+                .setItems(arrayOf("Edit tags", "Add date / time note")) { _, which ->
+                    if (which == 0) documentTagDialog(uri) else documentDateTimeDialog(uri)
+                }.show()
+        }
+
+        section("Security and document management")
+        val favourites = prefs.getStringSet("favourite_uris", emptySet()) ?: emptySet()
+        val isFavourite = favourites.contains(uri.toString())
+        action(if (isFavourite) "Remove Favourite" else "Add to Favourite", "Keep this PDF in your favourites", "★") { toggleFavourite(uri) }
+        action("Lock PDF", "Protect this PDF with a password", "▣") { passwordDialog(uri, false) }
+        action("Remove PDF password", "Unlock a PDF when you know its password", "◉") { passwordDialog(uri, true) }
+        action("Save to Cloud", "Upload using your connected cloud account", "☁") { sharePdfToGoogleDrive(uri) }
+        action("Move to Trash", "Delete later or restore from Trash", "⌫") {
+            AlertDialog.Builder(this).setTitle("Move to Trash?")
+                .setMessage("This PDF will be moved to DocNexa Trash. You can restore it later.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Move to Trash") { _, _ -> moveToTrash(uri) }.show()
+        }
+
+        showPremiumDialog(AlertDialog.Builder(this).setTitle(name).setView(scroll)
+            .setNegativeButton("Close", null))
     }
 
     private fun showMoreDocumentActions(name: String, uri: Uri) {
