@@ -31,6 +31,8 @@ import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -823,6 +825,25 @@ class MainActivity : AppCompatActivity() {
         accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Backup and sync your PDFs" else "Cloud account connected", 13f, 0xFFE5EDF3.toInt()))
         account.addView(accountText, LinearLayout.LayoutParams(0, -2, 1f))
         menu.addView(account)
+        val onlineState = isInternetAvailable()
+        menu.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(22), dp(10), dp(16), dp(10))
+            setBackgroundColor(0xFFF4F7FC.toInt())
+            addView(TextView(this@MainActivity).apply {
+                text = if (onlineState) "●" else "●"
+                textSize = 15f
+                setTextColor(if (onlineState) 0xFF159B68.toInt() else 0xFFD65A5A.toInt())
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = if (onlineState) "ONLINE MODE  •  Internet connected" else "OFFLINE MODE  •  No internet"
+                textSize = 11f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF34445E.toInt())
+                setPadding(dp(8), 0, 0, 0)
+            })
+        })
 
         // Clearly visible Login and Signup actions in the drawer header area.
         val authActions = LinearLayout(this).apply {
@@ -1308,7 +1329,30 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun isInternetAvailable(): Boolean {
+        val manager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val network = manager.activeNetwork ?: return false
+            val capabilities = manager.getNetworkCapabilities(network) ?: return false
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } else {
+            @Suppress("DEPRECATION")
+            manager.activeNetworkInfo?.isConnected == true
+        }
+    }
+
+    private fun requireInternet(feature: String): Boolean {
+        if (isInternetAvailable()) return true
+        AlertDialog.Builder(this)
+            .setTitle("Internet connection required")
+            .setMessage("$feature is available in Online Mode. Connect to Wi-Fi or mobile data and try again. Your offline scan and PDF files remain available.")
+            .setPositiveButton("OK", null).show()
+        return false
+    }
+
     private fun cloudAccountMenu() {
+        if (!requireInternet("DocNexa Cloud account")) return
         AlertDialog.Builder(this).setTitle("DocNexa Cloud")
             .setMessage("Connected: ${prefs.getString("cloud_email", "")}")
             .setItems(arrayOf("Sync now", "Sign out")) { _, which ->
@@ -1333,6 +1377,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncCloudNow() {
+        if (!requireInternet("Manual Cloud Sync")) return
         val token = cloudToken()
         val userId = prefs.getString("cloud_user_id", "") ?: ""
         if (token.isBlank() || userId.isBlank()) { showCloudLoginDialog(); return }
@@ -2205,6 +2250,7 @@ class MainActivity : AppCompatActivity() {
     // Google Drive receives the PDF through Android's secure share sheet.
     // This does not store Google passwords or request broad Drive access.
     private fun sharePdfToGoogleDrive(uri: Uri) {
+        if (!requireInternet("Google Drive upload")) return
         val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
             .putExtra(Intent.EXTRA_STREAM, uri)
             .putExtra(Intent.EXTRA_TITLE, "Save PDF to Google Drive")
@@ -2218,6 +2264,7 @@ class MainActivity : AppCompatActivity() {
 
     // Google Docs import/conversion support depends on the installed Google app version.
     private fun openPdfWithGoogleDocs(uri: Uri) {
+        if (!requireInternet("Google Docs online features")) return
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
