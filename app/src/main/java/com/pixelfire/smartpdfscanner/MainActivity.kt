@@ -2834,25 +2834,66 @@ class MainActivity : AppCompatActivity() {
                 val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open selected PDF")
                 val pages = PdfRenderer(pfd).use { it.pageCount }
                 runOnUiThread {
-                    val details = "PDF details\nPages: $pages\nOriginal size: ${formatFileSize(size)}\n\nChoose a preset or open Custom settings.\n\nNote: Image-based compression converts pages to images; selectable text, links, forms and annotations may not be preserved."
                     var selected = 1
-                    val dialog = AlertDialog.Builder(this)
-                        .setTitle("DocNexa • Compression Studio")
-                        .setMessage(details)
-                        .setSingleChoiceItems(compressionPresets.map { "${it.title}\n${it.detail}" }.toTypedArray(), selected) { _, which ->
-                            selected = which
+                    val panel = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(16), dp(8), dp(16), dp(8))
+                        background = rounded(0xFFF5F8FF.toInt(), 18)
+                    }
+                    val summary = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(14), dp(12), dp(14), dp(12))
+                        background = rounded(0xFFEAF2FF.toInt(), 14)
+                    }
+                    summary.addView(label("SOURCE PDF", 10f, 0xFF3478F6.toInt(), true))
+                    summary.addView(gap(5))
+                    summary.addView(label("\$pages page(s)   •   \$size bytes", 15f, 0xFF172B4D.toInt(), true))
+                    summary.addView(gap(3))
+                    summary.addView(label("Choose how much you want to reduce the file size.", 11f, 0xFF64748B.toInt()))
+                    panel.addView(summary)
+                    panel.addView(gap(12))
+                    panel.addView(label("COMPRESSION PRESETS", 10f, 0xFF64748B.toInt(), true))
+                    panel.addView(gap(7))
+                    val presetRows = mutableListOf<LinearLayout>()
+                    compressionPresets.forEachIndexed { index, preset ->
+                        val row = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            setPadding(dp(12), dp(10), dp(12), dp(10))
+                            background = rounded(if (index == selected) 0xFFEAF2FF.toInt() else 0xFFFFFFFF.toInt(), 13,
+                                if (index == selected) 0xFF3478F6.toInt() else 0xFFE2EAF5.toInt())
+                            layoutParams = LinearLayout.LayoutParams(-1, dp(62)).apply { bottomMargin = dp(7) }
+                            setOnClickListener {
+                                selected = index
+                                presetRows.forEachIndexed { rowIndex, item ->
+                                    item.background = rounded(if (rowIndex == selected) 0xFFEAF2FF.toInt() else 0xFFFFFFFF.toInt(), 13,
+                                        if (rowIndex == selected) 0xFF3478F6.toInt() else 0xFFE2EAF5.toInt())
+                                }
+                            }
                         }
+                        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                        info.addView(label(preset.title, 13f, 0xFF172B4D.toInt(), true))
+                        info.addView(gap(3))
+                        info.addView(label(preset.detail, 10f, 0xFF718096.toInt()))
+                        row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+                        row.addView(label(if (index == selected) "●" else "○", 18f, 0xFF3478F6.toInt(), true))
+                        presetRows.add(row)
+                        panel.addView(row)
+                    }
+                    panel.addView(label("Note: Pages are converted to images. Searchable text, links, forms and annotations may not be preserved.", 10.5f, 0xFF718096.toInt()))
+                    val scroll = ScrollView(this).apply { isFillViewport = true; addView(panel) }
+                    showPremiumDialog(AlertDialog.Builder(this)
+                        .setTitle("DocNexa • Compression Studio")
+                        .setView(scroll)
                         .setPositiveButton("Compress PDF") { _, _ -> runPdfCompression(uri, compressionPresets[selected], size) }
                         .setNeutralButton("Custom settings", null)
                         .setNegativeButton("Cancel", null)
-                        .create()
-                    dialog.setOnShowListener {
-                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                            dialog.dismiss()
+                    ).apply {
+                        getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                            dismiss()
                             showCustomCompressionDialog(uri, size, compressionPresets[selected])
                         }
                     }
-                    dialog.show()
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show() }
@@ -2863,52 +2904,38 @@ class MainActivity : AppCompatActivity() {
     private fun showCustomCompressionDialog(uri: Uri, originalSize: Long, base: CompressionPreset) {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), dp(4))
+            setPadding(dp(18), dp(10), dp(18), dp(8))
+            background = rounded(0xFFF5F8FF.toInt(), 16)
         }
         var dpi = base.dpi
         var quality = base.quality
-        val dpiLabel = label("Resolution: $dpi DPI", 14f, 0xFF17243A.toInt(), true)
-        val qualityLabel = label("JPEG quality: $quality%", 14f, 0xFF17243A.toInt(), true)
+        val dpiLabel = label("Resolution: \$dpi DPI", 14f, 0xFF17243A.toInt(), true)
+        val qualityLabel = label("Image quality: \$quality%", 14f, 0xFF17243A.toInt(), true)
         panel.addView(dpiLabel)
-        val dpiSeek = SeekBar(this).apply {
-            max = 228
-            progress = (dpi - 72).coerceIn(0, 228)
-        }
+        val dpiSeek = SeekBar(this).apply { max = 228; progress = (dpi - 72).coerceIn(0, 228) }
         panel.addView(dpiSeek)
         panel.addView(gap(12))
         panel.addView(qualityLabel)
-        val qualitySeek = SeekBar(this).apply {
-            max = 65
-            progress = (quality - 35).coerceIn(0, 65)
-        }
+        val qualitySeek = SeekBar(this).apply { max = 65; progress = (quality - 35).coerceIn(0, 65) }
         panel.addView(qualitySeek)
         panel.addView(gap(8))
-        panel.addView(label("Lower DPI and JPEG quality usually reduce file size but can make small text harder to read.", 12f, 0xFF64748B.toInt()))
+        panel.addView(label("Lower values create smaller files but may reduce text clarity.", 11f, 0xFF64748B.toInt()))
         dpiSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                dpi = 72 + progress
-                dpiLabel.text = "Resolution: $dpi DPI"
-            }
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { dpi = 72 + progress; dpiLabel.text = "Resolution: \$dpi DPI" }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
         qualitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                quality = 35 + progress
-                qualityLabel.text = "JPEG quality: $quality%"
-            }
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { quality = 35 + progress; qualityLabel.text = "Image quality: \$quality%" }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        AlertDialog.Builder(this)
-            .setTitle("Custom compression")
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Custom compression")
             .setView(panel)
-            .setPositiveButton("Preview compression") { _, _ ->
-                val custom = CompressionPreset("Custom", dpi, quality, "$dpi DPI • JPEG $quality%")
-                runPdfCompression(uri, custom, originalSize)
+            .setPositiveButton("Compress with custom settings") { _, _ ->
+                runPdfCompression(uri, CompressionPreset("Custom", dpi, quality, "\$dpi DPI • JPEG \$quality%"), originalSize)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNegativeButton("Cancel", null))
     }
 
     private fun runPdfCompression(uri: Uri, preset: CompressionPreset, originalSize: Long) {
@@ -3896,16 +3923,44 @@ class MainActivity : AppCompatActivity() {
                 .addOnSuccessListener { result ->
                     status.text = "OCR complete"
                     val extracted = result.text.ifBlank { "No readable text found." }
-                    AlertDialog.Builder(this)
-                        .setTitle("Extracted text")
-                        .setMessage(extracted)
-                        .setPositiveButton("Copy") { _, _ ->
+                    val textPanel = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(14), dp(10), dp(14), dp(10))
+                        background = rounded(0xFFF5F8FF.toInt(), 16)
+                    }
+                    textPanel.addView(label("TEXT RECOGNITION RESULT", 10f, 0xFF3478F6.toInt(), true))
+                    textPanel.addView(gap(8))
+                    val resultView = TextView(this).apply {
+                        text = extracted
+                        textSize = 14f
+                        setTextColor(0xFF172B4D.toInt())
+                        setTextIsSelectable(true)
+                        setPadding(dp(12), dp(12), dp(12), dp(12))
+                        background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFE2EAF5.toInt())
+                    }
+                    val resultScroll = ScrollView(this).apply {
+                        addView(resultView)
+                        layoutParams = LinearLayout.LayoutParams(-1, dp(330))
+                    }
+                    textPanel.addView(resultScroll)
+                    showPremiumDialog(AlertDialog.Builder(this)
+                        .setTitle("DocNexa • Extracted Text")
+                        .setView(textPanel)
+                        .setPositiveButton("Copy text") { _, _ ->
                             val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("OCR text", extracted))
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DocNexa OCR text", extracted))
                             Toast.makeText(this, "Text copied", Toast.LENGTH_SHORT).show()
                         }
+                        .setNeutralButton("Share text", null)
                         .setNegativeButton("Close", null)
-                        .show()
+                    ).apply {
+                        getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                            val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(Intent.EXTRA_SUBJECT, "Text extracted with DocNexa")
+                                .putExtra(Intent.EXTRA_TEXT, extracted)
+                            startActivity(Intent.createChooser(send, "Share extracted text"))
+                        }
+                    }
                 }
                 .addOnFailureListener { e ->
                     status.text = "OCR failed"
