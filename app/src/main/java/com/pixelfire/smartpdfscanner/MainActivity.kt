@@ -2329,7 +2329,7 @@ class MainActivity : AppCompatActivity() {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
                 }
                 bitmap.recycle()
-                runOnUiThread { Toast.makeText(this, "First PDF page saved as JPG in Gallery", Toast.LENGTH_LONG).show() }
+                showExportSuccess(imageUri, "DocNexa_${System.currentTimeMillis()}.jpg", "image/jpeg")
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to JPG failed", Toast.LENGTH_LONG).show() }
             }
