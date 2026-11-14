@@ -4256,7 +4256,7 @@ class MainActivity : AppCompatActivity() {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
                             }
-                            Toast.makeText(this, "Saved to Downloads/DocNexa", Toast.LENGTH_LONG).show()
+                            showStorageSavedConfirmation(fileName, "Downloads/DocNexa")
                         } catch (e: Exception) {
                             Toast.makeText(this, e.localizedMessage ?: "Storage save failed", Toast.LENGTH_LONG).show()
                         }
@@ -4323,6 +4323,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showStorageSavedConfirmation(fileName: String, destination: String) {
+        if (isFinishing || isDestroyed) return
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+            background = rounded(0xFFFFFFFF.toInt(), 18)
+        }
+        panel.addView(label("✓  Saved Successfully!", 21f, 0xFF159F5A.toInt(), true))
+        panel.addView(gap(8))
+        panel.addView(label(fileName, 14f, 0xFF243247.toInt(), true))
+        panel.addView(label("Your file is now available in $destination.", 12f, 0xFF667085.toInt()))
+        panel.addView(gap(8))
+        addNativeAdCard(panel)
+        AlertDialog.Builder(this).setTitle("DocNexa").setView(panel).setPositiveButton("OK", null).show()
+    }
     private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "${prefix}_${stamp}.${extension}"
