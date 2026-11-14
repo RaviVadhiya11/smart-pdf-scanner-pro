@@ -303,14 +303,14 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { showAppDrawer() }
         })
         header.addView(object : View(this) {
-            private val blue = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            private val scannerInk = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF1557A8.toInt()
                 style = android.graphics.Paint.Style.STROKE
                 strokeWidth = dp(3).toFloat()
                 strokeCap = android.graphics.Paint.Cap.ROUND
                 strokeJoin = android.graphics.Paint.Join.ROUND
             }
-            private val beam = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            private val scanBeam = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF18BFEA.toInt()
                 style = android.graphics.Paint.Style.STROKE
                 strokeWidth = dp(3).toFloat()
@@ -332,17 +332,17 @@ class MainActivity : AppCompatActivity() {
                     moveTo(left, bottom - corner); lineTo(left, bottom); lineTo(left + corner, bottom)
                     moveTo(right - corner, bottom); lineTo(right, bottom); lineTo(right, bottom - corner)
                 }
-                canvas.drawPath(path, blue)
+                canvas.drawPath(path, scannerInk)
                 val doc = android.graphics.RectF(w * 0.34f, h * 0.31f, w * 0.66f, h * 0.69f)
-                blue.style = android.graphics.Paint.Style.FILL
-                blue.alpha = 30
-                canvas.drawRoundRect(doc, dp(3).toFloat(), dp(3).toFloat(), blue)
-                blue.alpha = 255
-                blue.style = android.graphics.Paint.Style.STROKE
-                canvas.drawLine(doc.left + dp(3), doc.top + dp(7), doc.right - dp(3), doc.top + dp(7), blue)
-                canvas.drawLine(doc.left + dp(3), doc.centerY(), doc.right - dp(3), doc.centerY(), blue)
-                canvas.drawLine(doc.left + dp(3), doc.bottom - dp(7), doc.right - dp(3), doc.bottom - dp(7), blue)
-                canvas.drawLine(w * 0.18f, h * 0.50f, w * 0.82f, h * 0.50f, beam)
+                scannerInk.style = android.graphics.Paint.Style.FILL
+                scannerInk.alpha = 30
+                canvas.drawRoundRect(doc, dp(3).toFloat(), dp(3).toFloat(), scannerInk)
+                scannerInk.alpha = 255
+                scannerInk.style = android.graphics.Paint.Style.STROKE
+                canvas.drawLine(doc.left + dp(3), doc.top + dp(7), doc.right - dp(3), doc.top + dp(7), scannerInk)
+                canvas.drawLine(doc.left + dp(3), doc.centerY(), doc.right - dp(3), doc.centerY(), scannerInk)
+                canvas.drawLine(doc.left + dp(3), doc.bottom - dp(7), doc.right - dp(3), doc.bottom - dp(7), scannerInk)
+                canvas.drawLine(w * 0.18f, h * 0.50f, w * 0.82f, h * 0.50f, scanBeam)
             }
         }.apply {
             background = rounded(0xFFFFFFFF.toInt(), 15, 0xFFDCE8FF.toInt())
