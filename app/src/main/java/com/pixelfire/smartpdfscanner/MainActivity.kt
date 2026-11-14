@@ -3283,7 +3283,7 @@ class MainActivity : AppCompatActivity() {
                 if (input != null) BitmapFactory.decodeStream(input) else null
             } ?: throw IllegalStateException("Could not open selected photo")
             val cropView = ImageCropView(this, source)
-            val sizeOptions = arrayOf("35 × 45 mm (Passport)", "2 × 2 inch (Square)", "Wallet 25 × เป็น35 mm")
+            val sizeOptions = arrayOf("35 × 45 mm (Passport)", "2 × 2 inch (Square)", "25 × 35 mm (Wallet)")
             var selectedSize = 0
             val panel = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -3347,6 +3347,14 @@ class MainActivity : AppCompatActivity() {
             try {
                 val mmWidth = when (sizeChoice) { 1 -> 50f; 2 -> 25f; else -> 35f }
                 val mmHeight = when (sizeChoice) { 1 -> 50f; 2 -> 35f; else -> 45f }
+                val targetAspect = mmWidth / mmHeight
+                val passportPhoto = if (photo.width.toFloat() / photo.height.toFloat() > targetAspect) {
+                    val cropWidth = (photo.height * targetAspect).toInt().coerceIn(1, photo.width)
+                    Bitmap.createBitmap(photo, (photo.width - cropWidth) / 2, 0, cropWidth, photo.height)
+                } else {
+                    val cropHeight = (photo.width / targetAspect).toInt().coerceIn(1, photo.height)
+                    Bitmap.createBitmap(photo, 0, (photo.height - cropHeight) / 2, photo.width, cropHeight)
+                }
                 val pageWidth = 595
                 val pageHeight = 842
                 val margin = 24f
@@ -3363,7 +3371,7 @@ class MainActivity : AppCompatActivity() {
                 for (row in 0 until rows) for (col in 0 until cols) {
                     val left = m + col * (w + g)
                     val top = m + row * (h + g)
-                    canvas.drawBitmap(photo, null, android.graphics.RectF(left, top, left + w, top + h), paint)
+                    canvas.drawBitmap(passportPhoto, null, android.graphics.RectF(left, top, left + w, top + h), paint)
                     paint.style = Paint.Style.STROKE
                     paint.strokeWidth = 1f
                     paint.color = 0xFF999999.toInt()
