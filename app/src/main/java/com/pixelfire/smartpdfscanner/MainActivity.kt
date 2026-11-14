@@ -38,6 +38,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ImageView
@@ -54,8 +55,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.AdListener
 import com.google.android.gms.ads.AdLoader
 import com.google.android.gms.ads.LoadAdError
@@ -225,8 +224,6 @@ private class ImageCropView(context: android.content.Context, private var source
 }
 
 class MainActivity : AppCompatActivity() {
-    private var bannerAdView: AdView? = null
-    private var tagDialogAdView: AdView? = null
     private val loadedNativeAds = mutableListOf<NativeAd>()
     private lateinit var status: TextView
     private lateinit var recent: TextView
@@ -382,7 +379,34 @@ class MainActivity : AppCompatActivity() {
             }
         }
         dialog.show()
+        attachNativeAdToDialog(dialog)
         return dialog
+    }
+
+    /**
+     * Adds a responsive Native Ad inside the standard AlertDialog content area,
+     * above the action buttons. Dialogs that already contain an ad card are left alone.
+     */
+    private fun attachNativeAdToDialog(dialog: AlertDialog) {
+        if (dialog.isShowing.not()) return
+        val parentId = resources.getIdentifier("parentPanel", "id", "android")
+        val parent = if (parentId != 0) dialog.window?.decorView?.findViewById<LinearLayout>(parentId) else null
+        if (parent != null && !containsNativeAdSlot(parent)) {
+            val buttonId = resources.getIdentifier("buttonPanel", "id", "android")
+            val buttonPanel = if (buttonId != 0) parent.findViewById<View>(buttonId) else null
+            val insertAt = if (buttonPanel != null) parent.indexOfChild(buttonPanel).coerceAtLeast(0) else parent.childCount
+            addNativeAdCard(parent, insertAt)
+        }
+    }
+
+    private fun containsNativeAdSlot(view: View): Boolean {
+        if (view.tag == "docnexa_native_ad_slot") return true
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (containsNativeAdSlot(view.getChildAt(i))) return true
+            }
+        }
+        return false
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -944,23 +968,13 @@ class MainActivity : AppCompatActivity() {
         }
         bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
-        val adView = AdView(this).apply {
-            adUnitId = "ca-app-pub-3940256099942544/9214589741" // Google test banner; replace with production unit before release.
-            setAdSize(AdSize.getLargeAnchoredAdaptiveBannerAdSize(this@MainActivity, 360))
-            loadAd(AdRequest.Builder().build())
-        }
-        bannerAdView = adView
-        // Keep Scan and Import controls above the banner; anchor the ad at the bottom.
+        // Keep Scan and Import controls above the responsive horizontal Native Ad.
         footer.addView(bar)
-        footer.addView(adView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        addNativeAdCard(footer)
         root.addView(footer)
     }
 
     override fun onDestroy() {
-        bannerAdView?.destroy()
-        bannerAdView = null
-        tagDialogAdView?.destroy()
-        tagDialogAdView = null
         loadedNativeAds.forEach { it.destroy() }
         loadedNativeAds.clear()
         super.onDestroy()
@@ -2616,94 +2630,107 @@ class MainActivity : AppCompatActivity() {
      * Loads and renders a Google Native Advanced ad using registered native assets.
      * The ad is inserted between Quick Access and the PDF Tools grid.
      */
-    private fun addNativeAdCard(parent: LinearLayout) {
+    private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount) {
         val slot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFDCE6F5.toInt())
+            setPadding(dp(9), dp(8), dp(9), dp(8))
+            background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFDCE6F5.toInt())
             elevation = dp(2).toFloat()
+            tag = "docnexa_native_ad_slot"
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                topMargin = dp(12)
-                bottomMargin = dp(16)
+                topMargin = dp(10)
+                bottomMargin = dp(10)
             }
         }
         slot.addView(label("SPONSORED", 9f, 0xFF718096.toInt(), true))
-        slot.addView(gap(6))
-        val loading = label("Loading recommended content…", 12f, 0xFF718096.toInt())
-        slot.addView(loading)
-        parent.addView(slot)
+        slot.addView(gap(5))
+        slot.addView(label("Loading advertisement…", 11f, 0xFF718096.toInt()))
+        parent.addView(slot, insertIndex.coerceIn(0, parent.childCount))
 
         val loader = AdLoader.Builder(this, "ca-app-pub-3940256099942544/2247696110")
             .forNativeAd { nativeAd ->
-                if (isFinishing || isDestroyed) {
+                if (isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                     nativeAd.destroy()
                     return@forNativeAd
                 }
                 loadedNativeAds.add(nativeAd)
                 runOnUiThread {
+                    if (!slot.isAttachedToWindow) {
+                        loadedNativeAds.remove(nativeAd)
+                        nativeAd.destroy()
+                        return@runOnUiThread
+                    }
                     slot.removeAllViews()
+                    slot.addView(label("SPONSORED", 9f, 0xFF718096.toInt(), true))
+                    slot.addView(gap(5))
                     val adView = NativeAdView(this).apply {
                         setBackgroundColor(0xFFFFFFFF.toInt())
                     }
-                    val top = LinearLayout(this).apply {
+                    val media = MediaView(this).apply {
+                        setBackgroundColor(0xFFF1F5F9.toInt())
+                    }
+                    nativeAd.mediaContent?.let { media.setMediaContent(it) }
+                    adView.mediaView = media
+                    adView.addView(media, LinearLayout.LayoutParams(-1, dp(88)))
+
+                    val details = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
+                        setPadding(0, dp(7), 0, 0)
                     }
                     val icon = ImageView(this).apply {
                         scaleType = ImageView.ScaleType.CENTER_CROP
-                        background = rounded(0xFFF0F4FA.toInt(), 10)
+                        background = rounded(0xFFF0F4FA.toInt(), 8)
                     }
                     nativeAd.icon?.drawable?.let { icon.setImageDrawable(it) }
-                    top.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
+                    adView.iconView = icon
+                    details.addView(icon, LinearLayout.LayoutParams(dp(40), dp(40)))
+
                     val titleBlock = LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
-                        setPadding(dp(10), 0, 0, 0)
+                        setPadding(dp(8), 0, dp(6), 0)
                     }
-                    val headline = label(nativeAd.headline ?: "Sponsored", 14f, 0xFF172B4D.toInt(), true)
+                    val headline = label(nativeAd.headline ?: "Sponsored", 12.5f, 0xFF172B4D.toInt(), true).apply {
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
                     titleBlock.addView(headline)
-                    val advertiser = label(nativeAd.advertiser ?: "Advertiser", 10f, 0xFF718096.toInt())
-                    titleBlock.addView(advertiser)
-                    top.addView(titleBlock, LinearLayout.LayoutParams(0, -2, 1f))
-                    adView.iconView = icon
                     adView.headlineView = headline
+                    val advertiser = label(nativeAd.advertiser ?: "Advertiser", 9.5f, 0xFF718096.toInt())
+                    titleBlock.addView(advertiser)
                     adView.advertiserView = advertiser
-                    adView.addView(top)
-                    nativeAd.body?.takeIf { it.isNotBlank() }?.let { bodyText ->
-                        val bodyView = label(bodyText, 11f, 0xFF52627A.toInt())
-                        bodyView.setPadding(0, dp(8), 0, dp(8))
-                        adView.bodyView = bodyView
-                        adView.addView(bodyView)
-                    }
-                    nativeAd.mediaContent?.let {
-                        val media = MediaView(this)
-                        media.setMediaContent(it)
-                        adView.mediaView = media
-                        adView.addView(media, LinearLayout.LayoutParams(-1, dp(150)).apply {
-                            topMargin = dp(8)
-                            bottomMargin = dp(8)
-                        })
-                    }
+                    details.addView(titleBlock, LinearLayout.LayoutParams(0, -2, 1f))
+
                     val cta = Button(this).apply {
-                        text = nativeAd.callToAction ?: "Learn more"
+                        text = nativeAd.callToAction ?: "Open"
                         isAllCaps = false
-                        textSize = 12f
+                        textSize = 10.5f
+                        minHeight = dp(36)
+                        setPadding(dp(10), 0, dp(10), 0)
                         setTextColor(0xFFFFFFFF.toInt())
-                        background = rounded(0xFF1764DE.toInt(), 12)
+                        background = rounded(0xFF087EC2.toInt(), 10)
                         backgroundTintList = null
                     }
                     adView.callToActionView = cta
-                    adView.addView(cta, LinearLayout.LayoutParams(-1, dp(42)).apply {
-                        topMargin = dp(8)
-                    })
+                    details.addView(cta, LinearLayout.LayoutParams(-2, dp(36)))
+                    adView.addView(details)
+
+                    nativeAd.body?.takeIf { it.isNotBlank() }?.let { bodyText ->
+                        val bodyView = label(bodyText, 10f, 0xFF52627A.toInt()).apply {
+                            maxLines = 2
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            setPadding(0, dp(5), 0, 0)
+                        }
+                        adView.bodyView = bodyView
+                        adView.addView(bodyView)
+                    }
                     adView.setNativeAd(nativeAd)
                     slot.addView(adView)
                 }
             }
             .withAdListener(object : AdListener() {
                 override fun onAdFailedToLoad(error: LoadAdError) {
-                    runOnUiThread {
-                        parent.removeView(slot)
-                    }
+                    runOnUiThread { (slot.parent as? ViewGroup)?.removeView(slot) }
                 }
             })
             .build()
