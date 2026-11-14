@@ -302,14 +302,51 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, dp(10), 0)
             setOnClickListener { showAppDrawer() }
         })
-        header.addView(TextView(this).apply {
-            text = "▤"
-            textSize = 29f
-            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setTextColor(0xFF1764DE.toInt())
+        header.addView(object : View(this) {
+            private val blue = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF1557A8.toInt()
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = dp(3).toFloat()
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            private val beam = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF18BFEA.toInt()
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = dp(3).toFloat()
+                strokeCap = android.graphics.Paint.Cap.ROUND
+            }
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                super.onDraw(canvas)
+                val w = width.toFloat()
+                val h = height.toFloat()
+                val left = w * 0.25f
+                val top = h * 0.20f
+                val right = w * 0.75f
+                val bottom = h * 0.80f
+                val corner = dp(8).toFloat()
+                // Four viewfinder corners make the mark read as a document scanner.
+                val path = android.graphics.Path().apply {
+                    moveTo(left + corner, top); lineTo(left, top); lineTo(left, top + corner)
+                    moveTo(right - corner, top); lineTo(right, top); lineTo(right, top + corner)
+                    moveTo(left, bottom - corner); lineTo(left, bottom); lineTo(left + corner, bottom)
+                    moveTo(right - corner, bottom); lineTo(right, bottom); lineTo(right, bottom - corner)
+                }
+                canvas.drawPath(path, blue)
+                val doc = android.graphics.RectF(w * 0.34f, h * 0.31f, w * 0.66f, h * 0.69f)
+                blue.style = android.graphics.Paint.Style.FILL
+                blue.alpha = 30
+                canvas.drawRoundRect(doc, dp(3).toFloat(), dp(3).toFloat(), blue)
+                blue.alpha = 255
+                blue.style = android.graphics.Paint.Style.STROKE
+                canvas.drawLine(doc.left + dp(3), doc.top + dp(7), doc.right - dp(3), doc.top + dp(7), blue)
+                canvas.drawLine(doc.left + dp(3), doc.centerY(), doc.right - dp(3), doc.centerY(), blue)
+                canvas.drawLine(doc.left + dp(3), doc.bottom - dp(7), doc.right - dp(3), doc.bottom - dp(7), blue)
+                canvas.drawLine(w * 0.18f, h * 0.50f, w * 0.82f, h * 0.50f, beam)
+            }
+        }.apply {
             background = rounded(0xFFFFFFFF.toInt(), 15, 0xFFDCE8FF.toInt())
-            contentDescription = "DocNexa scanner logo"
+            contentDescription = "DocNexa document scanner icon"
             layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
         })
         val brand = LinearLayout(this).apply {
