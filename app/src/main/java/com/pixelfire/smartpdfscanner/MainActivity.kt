@@ -1033,6 +1033,8 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
             })
             panel.addView(empty)
+            // Keep the native ad inside the Trash popup, above its action button.
+            addNativeAdCard(panel)
             showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash").setView(panel)
                 .setPositiveButton("OK", null))
             return
@@ -1110,6 +1112,8 @@ class MainActivity : AppCompatActivity() {
         }
         scroll.addView(list)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
+        // Keep the native ad inside the Trash popup, above its action button.
+        addNativeAdCard(panel)
         showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash • ${trashed.size} item(s)")
             .setView(panel).setPositiveButton("Close", null))
     }
