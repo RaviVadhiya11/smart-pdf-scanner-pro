@@ -53,6 +53,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -215,6 +219,7 @@ private class ImageCropView(context: android.content.Context, private var source
 }
 
 class MainActivity : AppCompatActivity() {
+    private var bannerAdView: AdView? = null
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
@@ -338,6 +343,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
+        MobileAds.initialize(this) {}
         buildScreen()
     }
 
@@ -897,6 +903,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addBottomAdAndActions(root: LinearLayout) {
+        bannerAdView?.destroy()
         val footer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
@@ -927,8 +934,21 @@ class MainActivity : AppCompatActivity() {
         }
         bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
+        val adView = AdView(this).apply {
+            adUnitId = "ca-app-pub-3940256099942544/9214589741" // Google test banner; replace with production unit before release.
+            setAdSize(AdSize.getLargeAnchoredAdaptiveBannerAdSize(this@MainActivity, 360))
+            loadAd(AdRequest.Builder().build())
+        }
+        bannerAdView = adView
+        footer.addView(adView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         footer.addView(bar)
         root.addView(footer)
+    }
+
+    override fun onDestroy() {
+        bannerAdView?.destroy()
+        bannerAdView = null
+        super.onDestroy()
     }
 
     private fun moveToTrash(uri: Uri) {
