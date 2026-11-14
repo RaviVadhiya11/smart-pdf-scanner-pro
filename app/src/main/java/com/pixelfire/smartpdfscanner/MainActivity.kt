@@ -2717,18 +2717,43 @@ class MainActivity : AppCompatActivity() {
                         for (x in 0 until 900) for (y in 0 until 900) {
                             bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
                         }
-                        val bytes = ByteArrayOutputStream().also { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }.toByteArray()
-                        val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
-                        if (saved != null) {
-                            val preview = ImageView(this).apply {
-                                setImageBitmap(bitmap)
-                                adjustViewBounds = true
-                                setPadding(dp(12), dp(12), dp(12), dp(12))
+                        val bytes = ByteArrayOutputStream().also { out ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }.toByteArray()
+                        val preview = ImageView(this).apply {
+                            setImageBitmap(bitmap)
+                            adjustViewBounds = true
+                            setPadding(dp(12), dp(12), dp(12), dp(12))
+                        }
+                        AlertDialog.Builder(this).setTitle("QR Code Ready").setView(preview)
+                            .setMessage("Your QR code is ready. Download it to your phone or share it directly.")
+                            .setPositiveButton("Download") { _, _ ->
+                                val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
+                                Toast.makeText(
+                                    this,
+                                    if (saved != null) "QR PNG downloaded to Downloads/DocumentScanner" else "Could not save QR image",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
-                            AlertDialog.Builder(this).setTitle("QR Code Ready").setView(preview)
-                                .setMessage("Saved to Downloads. You can share the PNG from your file manager.")
-                                .setPositiveButton("Done", null).show()
-                        } else Toast.makeText(this, "Could not save QR image", Toast.LENGTH_LONG).show()
+                            .setNeutralButton("Share") { _, _ ->
+                                try {
+                                    val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
+                                    if (saved == null) {
+                                        Toast.makeText(this, "Could not prepare QR image for sharing", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "image/png"
+                                            putExtra(Intent.EXTRA_STREAM, saved)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        startActivity(Intent.createChooser(shareIntent, "Share DocNexa QR Code"))
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(this, e.localizedMessage ?: "Unable to share QR image", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            .setNegativeButton("Done", null)
+                            .show()
                     } catch (e: Exception) {
                         Toast.makeText(this, e.localizedMessage ?: "QR generation failed", Toast.LENGTH_LONG).show()
                     }
