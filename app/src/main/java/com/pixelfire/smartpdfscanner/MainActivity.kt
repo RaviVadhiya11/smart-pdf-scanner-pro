@@ -388,14 +388,22 @@ class MainActivity : AppCompatActivity() {
      * above the action buttons. Dialogs that already contain an ad card are left alone.
      */
     private fun attachNativeAdToDialog(dialog: AlertDialog) {
-        if (dialog.isShowing.not()) return
+        if (!dialog.isShowing) return
+        val decor = dialog.window?.decorView ?: return
         val parentId = resources.getIdentifier("parentPanel", "id", "android")
-        val parent = if (parentId != 0) dialog.window?.decorView?.findViewById<LinearLayout>(parentId) else null
+        val parent = if (parentId != 0) decor.findViewById<ViewGroup>(parentId) else null
         if (parent != null && !containsNativeAdSlot(parent)) {
+            // Use a dedicated LinearLayout host: Android's internal parentPanel is not
+            // guaranteed to be a LinearLayout on every device / Android version.
+            val host = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = ViewGroup.LayoutParams(-1, -2)
+            }
             val buttonId = resources.getIdentifier("buttonPanel", "id", "android")
             val buttonPanel = if (buttonId != 0) parent.findViewById<View>(buttonId) else null
             val insertAt = if (buttonPanel != null) parent.indexOfChild(buttonPanel).coerceAtLeast(0) else parent.childCount
-            addNativeAdCard(parent, insertAt)
+            parent.addView(host, insertAt, ViewGroup.LayoutParams(-1, -2))
+            addNativeAdCard(host)
         }
     }
 
