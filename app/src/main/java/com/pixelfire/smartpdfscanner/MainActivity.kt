@@ -3103,6 +3103,19 @@ class MainActivity : AppCompatActivity() {
     private fun openSignatureEditor(targetPdf: Uri? = null) {
         val canvas = SignatureCanvas(this)
         val typed = EditText(this).apply { hint = "Type your name / signature"; textSize = 23f }
+        var selectedSignatureFont = "Cursive"
+        val fontButton = Button(this).apply { text = "Font: $selectedSignatureFont" }
+        fontButton.setOnClickListener { anchor ->
+            val menu = PopupMenu(this, anchor)
+            listOf("Cursive", "Serif", "Sans Serif", "Monospace", "Elegant", "Bold", "Italic").forEach { menu.menu.add(it) }
+            menu.setOnMenuItemClickListener { item ->
+                selectedSignatureFont = item.title.toString()
+                fontButton.text = "Font: $selectedSignatureFont"
+                typed.typeface = signatureTypeface(selectedSignatureFont)
+                true
+            }
+            menu.show()
+        }
         val preview = TextView(this).apply {
             text = "Draw with your finger • Transparent background"
             textSize = 12f
@@ -3140,7 +3153,10 @@ class MainActivity : AppCompatActivity() {
                     override fun onStopTrackingTouch(seekBar: SeekBar?) {}
                 })
             })
+            addView(label("TYPE SIGNATURE • CHOOSE A FONT", 12f, 0xFF2865B5.toInt(), true))
+            addView(fontButton, LinearLayout.LayoutParams(-1, -2))
             addView(typed, LinearLayout.LayoutParams(-1, -2))
+            typed.typeface = signatureTypeface(selectedSignatureFont)
             addView(label("Tip: Use Undo to remove the last stroke, or Clear to start again.", 11f, 0xFF64748B.toInt()))
         }
         val dialog = AlertDialog.Builder(this)
@@ -3152,7 +3168,7 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                val bitmap = buildSignatureBitmap(canvas, typed.text.toString())
+                val bitmap = buildSignatureBitmap(canvas, typed.text.toString(), selectedSignatureFont)
                 if (bitmap == null) {
                     Toast.makeText(this, "Please draw or type a signature first.", Toast.LENGTH_LONG).show()
                 } else {
@@ -3187,9 +3203,9 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun buildSignatureBitmap(canvas: SignatureCanvas, text: String): Bitmap? {
+    private fun buildSignatureBitmap(canvas: SignatureCanvas, text: String, fontName: String): Bitmap? {
         val value = text.trim()
-        return if (value.isNotEmpty()) renderTypedSignature(value)
+        return if (value.isNotEmpty()) renderTypedSignature(value, fontName)
         else if (canvas.hasSignature()) canvas.toBitmap()
         else null
     }
@@ -3221,13 +3237,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderTypedSignature(value: String): Bitmap {
+    private fun signatureTypeface(fontName: String): android.graphics.Typeface {
+        val style = when (fontName) {
+            "Bold" -> android.graphics.Typeface.BOLD
+            "Italic" -> android.graphics.Typeface.ITALIC
+            else -> android.graphics.Typeface.NORMAL
+        }
+        val family = when (fontName) {
+            "Serif", "Elegant" -> "serif"
+            "Sans Serif", "Bold", "Italic" -> "sans-serif"
+            "Monospace" -> "monospace"
+            else -> "cursive"
+        }
+        return android.graphics.Typeface.create(family, style)
+    }
+
+    private fun renderTypedSignature(value: String, fontName: String = "Cursive"): Bitmap {
         val bitmap = Bitmap.createBitmap(1000, 300, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.BLACK
             textSize = 112f
-            typeface = android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
+            typeface = signatureTypeface(fontName)
         }
         canvas.drawText(value, 30f, 190f, paint)
         return bitmap
