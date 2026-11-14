@@ -2963,23 +2963,28 @@ class MainActivity : AppCompatActivity() {
         previewList.addView(gap(10))
         uris.forEachIndexed { index, uri ->
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(7), dp(8), dp(7))
-                background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE2EAF5.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(104)).apply { bottomMargin = dp(8) }
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                background = rounded(0xFFF7F9FD.toInt(), 14, 0xFFE2EAF5.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, dp(222)).apply { bottomMargin = dp(12) }
             }
             val thumb = ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
+                adjustViewBounds = false
+                background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
+                clipToOutline = true
                 try {
                     contentResolver.openInputStream(uri).use { input ->
                         setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null)
                     }
                 } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
-                layoutParams = LinearLayout.LayoutParams(dp(82), dp(88))
+                contentDescription = "Cropped preview of selected image ${index + 1}"
+                layoutParams = LinearLayout.LayoutParams(dp(170), dp(174))
             }
             row.addView(thumb)
-            row.addView(label("  Page ${index + 1}", 13f, 0xFF263957.toInt(), true))
+            row.addView(gap(8))
+            row.addView(label("Page ${index + 1} • Fit preview with crop", 13f, 0xFF263957.toInt(), true))
             previewList.addView(row)
         }
         val scroll = ScrollView(this).apply {
