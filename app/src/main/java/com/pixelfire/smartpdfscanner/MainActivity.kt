@@ -1129,12 +1129,30 @@ class MainActivity : AppCompatActivity() {
             "Open Login, enter your account email and tap Forgot password. Follow the reset link sent by the authentication service. Check spam if you do not see it.",
             "Open the app drawer, choose Trash, select a document and choose Restore. Permanent deletion cannot be undone."
         )
-        AlertDialog.Builder(this).setTitle("Help and FAQ")
-            .setItems(topics) { _, which ->
-                AlertDialog.Builder(this).setTitle(topics[which]).setMessage(answers[which])
-                    .setPositiveButton("Got it", null)
-                    .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
-            }.setNegativeButton("Close", null).show()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(6))
+            background = rounded(0xFFF5F8FF.toInt(), 16)
+        }
+        topics.forEachIndexed { index, topic ->
+            val row = TextView(this).apply {
+                text = "ⓘ   $topic     ›"
+                textSize = 12.5f
+                setTextColor(0xFF263957.toInt())
+                setPadding(dp(12), dp(13), dp(10), dp(13))
+                background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFE1EAF7.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
+                isClickable = true
+                setOnClickListener {
+                    showPremiumDialog(AlertDialog.Builder(this@MainActivity).setTitle(topic)
+                        .setMessage(answers[index]).setPositiveButton("Got it", null)
+                        .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) })
+                }
+            }
+            panel.addView(row)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Help & FAQ")
+            .setView(panel).setNegativeButton("Close", null))
     }
 
     private fun openFeedbackEmail(reportBug: Boolean) {
