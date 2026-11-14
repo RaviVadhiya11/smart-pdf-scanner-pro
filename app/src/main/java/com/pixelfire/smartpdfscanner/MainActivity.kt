@@ -1092,6 +1092,7 @@ class MainActivity : AppCompatActivity() {
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
 
     private fun showCloudLoginDialog(startWithSignup: Boolean = false) {
+        if (!requireInternet("Login and account creation")) return
         val dialog = android.app.Dialog(this)
         var signupMode = startWithSignup
         val panel = LinearLayout(this).apply {
