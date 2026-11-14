@@ -1675,7 +1675,18 @@ class MainActivity : AppCompatActivity() {
             layoutParams = params
             setOnClickListener { openPdf(uri) }
         }
-        card.addView(documentIconTile(62))
+        val thumbnail = createPdfThumbnail(uri)
+        if (thumbnail != null) {
+            card.addView(ImageView(this).apply {
+                setImageBitmap(thumbnail)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = rounded(0xFFEAF2FF.toInt(), 13, 0xFFDCE7FA.toInt())
+                contentDescription = "Preview of $name"
+                layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
+            })
+        } else {
+            card.addView(documentIconTile(62))
+        }
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
@@ -1705,6 +1716,33 @@ class MainActivity : AppCompatActivity() {
             }
         })
         return card
+    }
+
+    private fun createPdfThumbnail(uri: Uri): Bitmap? {
+        return try {
+            val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: return null
+            descriptor.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    if (renderer.pageCount <= 0) return null
+                    renderer.openPage(0).use { page ->
+                        val maxSide = dp(124)
+                        val scale = minOf(
+                            maxSide.toFloat() / page.width.toFloat(),
+                            maxSide.toFloat() / page.height.toFloat()
+                        )
+                        val width = (page.width * scale).toInt().coerceAtLeast(1)
+                        val height = (page.height * scale).toInt().coerceAtLeast(1)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        val canvas = Canvas(bitmap)
+                        canvas.drawColor(android.graphics.Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        bitmap
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun documentIconTile(sizeDp: Int = 62): View {
