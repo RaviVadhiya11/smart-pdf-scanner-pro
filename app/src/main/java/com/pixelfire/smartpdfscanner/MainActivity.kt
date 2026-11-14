@@ -1580,12 +1580,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun manageTagsDialog() {
-        val field = android.widget.EditText(this).apply { hint = "Enter a tag name" }
-        AlertDialog.Builder(this).setTitle("Manage tags").setView(field)
-            .setPositiveButton("Save") { _, _ ->
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(8))
+            background = rounded(0xFFF5F8FF.toInt(), 16)
+        }
+        panel.addView(label("ORGANIZE YOUR DOCUMENTS", 10f, 0xFF3478F6.toInt(), true))
+        panel.addView(gap(8))
+        val field = android.widget.EditText(this).apply {
+            hint = "Enter a tag name"
+            textSize = 15f
+            setSingleLine(true)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFD8E4F4.toInt())
+        }
+        panel.addView(field)
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
+            .setPositiveButton("Save tag") { _, _ ->
                 val tag = field.text.toString().trim()
                 if (tag.isNotEmpty()) Toast.makeText(this, "Tag saved: $tag", Toast.LENGTH_SHORT).show()
-            }.setNegativeButton("Cancel", null).show()
+            }.setNegativeButton("Cancel", null))
     }
 
     private fun showSettingsDialog() {
@@ -2483,8 +2497,9 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val drawArea = FrameLayout(this).apply {
-            setBackgroundColor(0xFFF1F3F5.toInt())
-            addView(canvas, FrameLayout.LayoutParams(-1, dp(210)))
+            background = rounded(0xFFF8FBFF.toInt(), 16, 0xFFB8D0F5.toInt())
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            addView(canvas, FrameLayout.LayoutParams(-1, dp(230)))
         }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2495,8 +2510,8 @@ class MainActivity : AppCompatActivity() {
         }
         val tabs = arrayOf("Draw", "Text")
         var textMode = false
-        AlertDialog.Builder(this)
-            .setTitle("Create Signature")
+        showPremiumDialog(AlertDialog.Builder(this)
+            .setTitle("DocNexa • Create Signature")
             .setView(layout)
             .setNeutralButton("Clear") { _, _ -> canvas.clear(); typed.setText("") }
             .setNegativeButton("Cancel", null)
@@ -2517,8 +2532,7 @@ class MainActivity : AppCompatActivity() {
                         if (png != null) applySignatureToPdf(targetPdf, png)
                     } else pdfPicker.launch(arrayOf("application/pdf"))
                 }
-            }
-            .show()
+            })
         // The user can draw directly; entering text switches to a typed signature.
         typed.setOnFocusChangeListener { _, hasFocus -> textMode = hasFocus }
     }
@@ -3468,11 +3482,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdPhotoMenu() {
-        AlertDialog.Builder(this).setTitle("Import ID Photo")
-            .setItems(arrayOf("Import ID Card (Front / Back)", "Passport Photo Maker")) { _, which ->
-                if (which == 0) idCardPicker.launch(arrayOf("image/*"))
-                else passportPicker.launch(arrayOf("image/*"))
-            }.setNegativeButton("Cancel", null).show()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(6))
+            background = rounded(0xFFF5F8FF.toInt(), 16)
+        }
+        listOf(
+            Triple("▣", "ID Card • Front & Back", "Import, crop and create an ID PDF"),
+            Triple("▤", "Passport Photo Maker", "Crop a photo and create a print sheet")
+        ).forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(14), dp(12), dp(14))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE1EAF7.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(9) }
+                isClickable = true
+                setOnClickListener {
+                    if (index == 0) idCardPicker.launch(arrayOf("image/*"))
+                    else passportPicker.launch(arrayOf("image/*"))
+                }
+            }
+            row.addView(label(option.first, 24f, 0xFF3478F6.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
+            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            info.addView(label(option.second, 13f, 0xFF172B4D.toInt(), true))
+            info.addView(gap(4))
+            info.addView(label(option.third, 10.5f, 0xFF718096.toInt()))
+            row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 22f, 0xFF3478F6.toInt()))
+            panel.addView(row)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • ID Photo Studio")
+            .setView(panel).setNegativeButton("Cancel", null))
     }
 
     private fun showIdCardImportPreview(uris: List<Uri>) {
