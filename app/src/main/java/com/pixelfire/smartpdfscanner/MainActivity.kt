@@ -970,7 +970,20 @@ class MainActivity : AppCompatActivity() {
                 background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE2EAF5.toInt())
                 layoutParams = LinearLayout.LayoutParams(-1, dp(82)).apply { bottomMargin = dp(9) }
             }
-            card.addView(documentIconTile(58))
+            // Render the first PDF page as a real thumbnail; fall back to the PDF tile
+            // when the original content URI is no longer readable.
+            val thumbnail = createPdfThumbnail(target)
+            if (thumbnail != null) {
+                card.addView(android.widget.ImageView(this).apply {
+                    setImageBitmap(thumbnail)
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                    background = rounded(0xFFFFFFFF.toInt(), 8, 0xFFE2EAF5.toInt())
+                    contentDescription = "Preview of $name"
+                    layoutParams = LinearLayout.LayoutParams(dp(58), dp(68))
+                })
+            } else {
+                card.addView(documentIconTile(58))
+            }
             val info = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(11), 0, dp(4), 0)
