@@ -61,7 +61,6 @@ import com.google.android.gms.ads.AdLoader
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.gms.ads.nativead.NativeAdView
-import com.google.android.gms.ads.nativead.MediaView
 import com.google.android.gms.ads.MobileAds
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -2710,15 +2709,12 @@ class MainActivity : AppCompatActivity() {
                     slot.removeAllViews()
                     slot.addView(label("SPONSORED", 9f, 0xFF718096.toInt(), true))
                     slot.addView(gap(5))
+                    // Avoid embedding Google's media WebView in the native ad card.
+                    // Some devices/networks show a "Web page not available" page there.
+                    // The icon, headline, advertiser, body and CTA remain a complete native ad.
                     val adView = NativeAdView(this).apply {
                         setBackgroundColor(0xFFFFFFFF.toInt())
                     }
-                    val media = MediaView(this).apply {
-                        setBackgroundColor(0xFFF1F5F9.toInt())
-                    }
-                    nativeAd.mediaContent?.let { media.setMediaContent(it) }
-                    adView.mediaView = media
-                    adView.addView(media, LinearLayout.LayoutParams(-1, dp(88)))
 
                     val details = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
