@@ -3349,18 +3349,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun zipPdf(uri: Uri) {
-        Thread {
-            try {
-                val bytes = ByteArrayOutputStream()
-                ZipOutputStream(bytes).use { zip ->
-                    zip.putNextEntry(ZipEntry("document.pdf"))
-                    contentResolver.openInputStream(uri)!!.use { it.copyTo(zip) }
-                    zip.closeEntry()
-                }
-                val saved = saveDocumentBytes(bytes.toByteArray(), "PDF_Archive", "application/zip", "zip")
-                runOnUiThread { if (saved != null) Toast.makeText(this, "ZIP saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show() }
-            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to ZIP failed", Toast.LENGTH_LONG).show() } }
-        }.start()
+        val nameField = EditText(this).apply {
+            hint = "Archive name (e.g. My_Documents)"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            setText("DocNexa_PDF_Archive")
+        }
+        val options = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("Create a ZIP archive containing your selected PDF. The original PDF will remain unchanged.", 12f, 0xFF718096.toInt()))
+            addView(gap(8))
+            addView(nameField)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("PDF To ZIP • Create Archive")
+            .setView(options)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create ZIP") { _, _ ->
+                val archiveName = nameField.text.toString().trim()
+                    .replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60)
+                    .ifBlank { "DocNexa_PDF_Archive" }
+                Thread {
+                    try {
+                        val bytes = ByteArrayOutputStream()
+                        ZipOutputStream(bytes).use { zip ->
+                            zip.putNextEntry(ZipEntry("document.pdf"))
+                            val input = contentResolver.openInputStream(uri) ?: error("Could not open selected PDF")
+                            input.use { it.copyTo(zip) }
+                            zip.closeEntry()
+                        }
+                        val saved = saveDocumentBytes(bytes.toByteArray(), archiveName, "application/zip", "zip")
+                        runOnUiThread {
+                            if (saved != null) {
+                                Toast.makeText(this, "$archiveName.zip saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/zip"
+                                    putExtra(Intent.EXTRA_STREAM, saved)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                try { startActivity(Intent.createChooser(share, "Share ZIP archive")) }
+                                catch (_: Exception) { }
+                            } else Toast.makeText(this, "Could not save ZIP archive", Toast.LENGTH_LONG).show()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to ZIP failed", Toast.LENGTH_LONG).show() }
+                    }
+                }.start()
+            })
     }
 
     private fun showQrScanner() {
@@ -3611,7 +3646,11 @@ class MainActivity : AppCompatActivity() {
                 val pageCount = input.use { PDDocument.load(it).use { doc -> doc.numberOfPages } }
                 runOnUiThread {
                     if (pageCount < 2) {
-                        Toast.makeText(this, "This PDF has only one page", Toast.LENGTH_LONG).show()
+                        showPremiumDialog(AlertDialog.Builder(this)
+                            .setTitle("Cannot split a one-page PDF")
+                            .setMessage("This file contains only 1 page. Splitting needs at least 2 pages. Choose a multi-page PDF to extract page ranges, or use PDF To ZIP to package this file.")
+                            .setPositiveButton("Choose another PDF") { _, _ -> splitPicker.launch(arrayOf("application/pdf")) }
+                            .setNegativeButton("Close", null))
                         return@runOnUiThread
                     }
                     val panel = LinearLayout(this).apply {
@@ -3633,8 +3672,8 @@ class MainActivity : AppCompatActivity() {
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Split & Save") { _, _ ->
                             val selected = parsePageRanges(range.text.toString(), pageCount)
-                            if (selected.isEmpty() || selected.size == pageCount) {
-                                Toast.makeText(this, "Enter a valid page range that leaves pages for both files", Toast.LENGTH_LONG).show()
+                            if (selected.isEmpty()) {
+                                Toast.makeText(this, "Enter a valid page range from 1 to $pageCount", Toast.LENGTH_LONG).show()
                             } else splitPdfPages(uri, selected)
                         })
                 }
@@ -3673,13 +3712,16 @@ class MainActivity : AppCompatActivity() {
                         else remaining.importPage(source.getPage(i))
                     }
                     val firstBytes = ByteArrayOutputStream().also { picked.save(it) }.toByteArray()
-                    val secondBytes = ByteArrayOutputStream().also { remaining.save(it) }.toByteArray()
                     val savedA = savePdfBytes(firstBytes, "Selected_Pages")
-                    val savedB = savePdfBytes(secondBytes, "Remaining_Pages")
+                    val savedB = if (remaining.numberOfPages > 0) {
+                        val secondBytes = ByteArrayOutputStream().also { remaining.save(it) }.toByteArray()
+                        savePdfBytes(secondBytes, "Remaining_Pages")
+                    } else null
                     runOnUiThread {
                         status.text = "Custom page split complete"
-                        recent.text = "Saved: ${savedA?.lastPathSegment ?: "Selected pages"} and ${savedB?.lastPathSegment ?: "Remaining pages"}"
-                        Toast.makeText(this, "Both PDFs saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                        recent.text = if (savedB != null) "Saved selected pages and remaining pages" else "Saved extracted pages as a separate PDF"
+                        val message = if (savedB != null) "Selected pages and remaining pages saved in Downloads/DocumentScanner" else "All selected pages saved as a PDF in Downloads/DocumentScanner"
+                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                     }
                 } finally { picked.close(); remaining.close(); source.close() }
             } catch (e: Exception) {
