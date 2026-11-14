@@ -2737,42 +2737,116 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createTextPdfDialog() {
-        val field = android.widget.EditText(this).apply { hint = "Type or paste text"; minLines = 5; gravity = Gravity.TOP }
-        AlertDialog.Builder(this).setTitle("Text To PDF").setView(field)
-            .setPositiveButton("Create PDF") { _, _ -> field.text.toString().trim().takeIf { it.isNotEmpty() }?.let { createPdfFromText(it) } }
-            .setNegativeButton("Cancel", null).show()
+        val titleField = EditText(this).apply { hint = "Document title"; setSingleLine(true); setText("My Document") }
+        val bodyField = EditText(this).apply {
+            hint = "Type or paste your text here"
+            minLines = 7
+            maxLines = 12
+            gravity = Gravity.TOP
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val pageSize = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("A4", "Letter", "A5"))
+        }
+        val fontSize = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("10 pt", "11 pt", "12 pt", "14 pt", "16 pt", "18 pt"))
+            setSelection(2)
+        }
+        val margins = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Narrow", "Normal", "Wide"))
+            setSelection(1)
+        }
+        val spacing = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Compact", "Normal", "Relaxed"))
+            setSelection(1)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("Create a clean, multi-page PDF from your notes or pasted text.", 11f, 0xFF718096.toInt()))
+            addView(gap(8))
+            addView(titleField)
+            addView(gap(6))
+            addView(bodyField, LinearLayout.LayoutParams(-1, dp(150)))
+            addView(gap(8))
+            addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(pageSize)
+            addView(gap(5))
+            addView(label("Font size", 11f, 0xFF263957.toInt(), true)); addView(fontSize)
+            addView(gap(5))
+            addView(label("Page margins", 11f, 0xFF263957.toInt(), true)); addView(margins)
+            addView(gap(5))
+            addView(label("Line spacing", 11f, 0xFF263957.toInt(), true)); addView(spacing)
+        }
+        val scroll = ScrollView(this).apply { addView(panel) }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("Text To PDF • Advanced")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create PDF") { _, _ ->
+                val textValue = bodyField.text.toString().trim()
+                if (textValue.isBlank()) {
+                    Toast.makeText(this, "Please enter or paste some text", Toast.LENGTH_LONG).show()
+                } else {
+                    val sizes = listOf(595 to 842, 612 to 792, 420 to 595)
+                    val page = sizes[pageSize.selectedItemPosition.coerceIn(0, 2)]
+                    val font = listOf(10f, 11f, 12f, 14f, 16f, 18f)[fontSize.selectedItemPosition.coerceIn(0, 5)]
+                    val margin = listOf(28f, 48f, 68f)[margins.selectedItemPosition.coerceIn(0, 2)]
+                    val lineGap = listOf(1.15f, 1.45f, 1.8f)[spacing.selectedItemPosition.coerceIn(0, 2)]
+                    createPdfFromText(textValue, titleField.text.toString().trim().ifBlank { "My Document" }, page.first, page.second, font, margin, lineGap)
+                }
+            })
     }
 
-    private fun createPdfFromText(value: String) {
+    private fun createPdfFromText(value: String, title: String = "My Document", pageWidth: Int = 595, pageHeight: Int = 842, fontSize: Float = 12f, margin: Float = 48f, lineSpacing: Float = 1.45f) {
+        status.text = "Creating PDF…"
         Thread {
             try {
                 val doc = PdfDocument()
-                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12f; color = android.graphics.Color.BLACK }
-                val lines = value.lines().flatMap { line ->
-                    val out = mutableListOf<String>(); var current = ""
-                    for (word in line.split(" ")) {
-                        val next = if (current.isEmpty()) word else "$current $word"
-                        if (paint.measureText(next) > 500 && current.isNotEmpty()) { out.add(current); current = word } else current = next
+                val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = fontSize + 5f
+                    color = android.graphics.Color.rgb(25, 61, 112)
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                }
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = fontSize; color = android.graphics.Color.BLACK }
+                val maxWidth = pageWidth - margin * 2
+                val lineHeight = fontSize * lineSpacing
+                val lines = mutableListOf<String>()
+                value.replace("\r", "").split("\n").forEach { paragraph ->
+                    if (paragraph.isBlank()) { lines.add(""); return@forEach }
+                    var current = ""
+                    paragraph.split(Regex("\\s+")).forEach { word ->
+                        val candidate = if (current.isEmpty()) word else "$current $word"
+                        if (paint.measureText(candidate) > maxWidth && current.isNotEmpty()) {
+                            lines.add(current); current = word
+                        } else current = candidate
                     }
-                    out.add(current); out
+                    if (current.isNotEmpty()) lines.add(current)
                 }
                 var pageNo = 1
-                var page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNo).create())
-                var y = 55f
+                var page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
+                var y = margin
+                page.canvas.drawText(title.take(80), margin, y + titlePaint.textSize, titlePaint)
+                y += titlePaint.textSize + lineHeight
+                page.canvas.drawLine(margin, y - lineHeight / 3f, pageWidth - margin, y - lineHeight / 3f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD8E2F0.toInt(); strokeWidth = 1f })
                 for (line in lines) {
-                    if (y > 790f) { doc.finishPage(page); pageNo++; page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNo).create()); y = 55f }
-                    page.canvas.drawText(line, 48f, y, paint); y += 19f
+                    if (y + lineHeight > pageHeight - margin) {
+                        doc.finishPage(page)
+                        pageNo++
+                        page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
+                        y = margin
+                    }
+                    if (line.isNotEmpty()) page.canvas.drawText(line, margin, y, paint)
+                    y += lineHeight
                 }
                 doc.finishPage(page)
                 val saved = savePdf(doc); doc.close()
                 runOnUiThread {
                     if (saved != null) {
                         lastPdf = saved; buildScreen(); status.text = "Text PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
-                        Toast.makeText(this, "PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "PDF created with $pageNo page(s) and saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
                     } else Toast.makeText(this, "Could not save PDF", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Text PDF failed", Toast.LENGTH_LONG).show() }
+                runOnUiThread { status.text = "PDF creation failed"; Toast.makeText(this, e.localizedMessage ?: "Text PDF failed", Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
@@ -3351,32 +3425,83 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun passwordDialog(uri: Uri, remove: Boolean) {
-        val field = EditText(this).apply { hint = if (remove) "Current PDF password" else "Set PDF password"; inputType = 129 }
-        AlertDialog.Builder(this).setTitle(if (remove) "Remove PDF password" else "Protect PDF")
-            .setView(field).setPositiveButton(if (remove) "Unlock and save" else "Protect and save") { _, _ ->
-                val password = field.text.toString()
-                if (password.isBlank()) Toast.makeText(this, "Enter a password", Toast.LENGTH_SHORT).show()
-                else processPdfPassword(uri, password, remove)
-            }.setNegativeButton("Cancel", null).show()
+        val password = EditText(this).apply {
+            hint = if (remove) "Enter current PDF password" else "Create password (min. 6 characters)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val confirm = EditText(this).apply {
+            hint = "Confirm new password"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val showPassword = android.widget.CheckBox(this).apply { text = "Show password" }
+        showPassword.setOnCheckedChangeListener { _, checked ->
+            val type = if (checked) android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                else android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            password.inputType = type
+            confirm.inputType = type
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label(if (remove) "Enter the password currently protecting this PDF. The original file will remain unchanged." else "Create a password to encrypt a new copy. Keep it safe; you will need it to open the protected PDF.", 11f, 0xFF718096.toInt()))
+            addView(gap(10))
+            addView(password)
+            if (!remove) {
+                addView(gap(8))
+                addView(confirm)
+            }
+            addView(showPassword)
+        }
+        showPremiumDialog(AlertDialog.Builder(this)
+            .setTitle(if (remove) "Remove PDF Password" else "Protect PDF • Security")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton(if (remove) "Unlock & Save Copy" else "Encrypt & Save Copy") { _, _ ->
+                val value = password.text.toString()
+                val confirmation = confirm.text.toString()
+                when {
+                    value.isBlank() -> Toast.makeText(this, "Enter the PDF password", Toast.LENGTH_LONG).show()
+                    !remove && value.length < 6 -> Toast.makeText(this, "Use at least 6 characters for a stronger password", Toast.LENGTH_LONG).show()
+                    !remove && value != confirmation -> Toast.makeText(this, "Passwords do not match", Toast.LENGTH_LONG).show()
+                    else -> processPdfPassword(uri, value, remove)
+                }
+            })
     }
 
     private fun processPdfPassword(uri: Uri, password: String, remove: Boolean) {
+        status.text = if (remove) "Unlocking PDF…" else "Encrypting PDF…"
         Thread {
             try {
-                val bytes = contentResolver.openInputStream(uri)!!.use { input ->
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
                     val doc = if (remove) PDDocument.load(input, password) else PDDocument.load(input)
                     doc.use {
                         if (!remove) {
-                            val policy = StandardProtectionPolicy(password, password, AccessPermission())
-                            policy.encryptionKeyLength = 128
+                            val ownerPassword = java.util.UUID.randomUUID().toString().replace("-", "") + password
+                            val policy = StandardProtectionPolicy(ownerPassword, password, AccessPermission())
+                            policy.encryptionKeyLength = 256
                             it.protect(policy)
                         }
                         ByteArrayOutputStream().also { out -> it.save(out) }.toByteArray()
                     }
-                }
+                } ?: error("Could not read selected PDF")
                 val saved = savePdfBytes(bytes, if (remove) "Unlocked" else "Protected")
-                runOnUiThread { if (saved != null) { lastPdf = saved; Toast.makeText(this, "PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show(); buildScreen() } }
-            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Password operation failed", Toast.LENGTH_LONG).show() } }
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved
+                        status.text = if (remove) "PDF unlocked" else "PDF protected"
+                        Toast.makeText(this, if (remove) "Unlocked PDF copy saved. Original file is unchanged." else "Encrypted PDF copy saved. Remember your password.", Toast.LENGTH_LONG).show()
+                        buildScreen()
+                    } else Toast.makeText(this, "Could not save the PDF copy", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                val raw = e.localizedMessage ?: ""
+                val message = if (remove && (raw.contains("password", true) || raw.contains("decrypt", true) || raw.contains("invalid", true))) {
+                    "Could not unlock PDF. Check that the password is correct."
+                } else raw.ifBlank { if (remove) "PDF unlock failed" else "PDF protection failed" }
+                runOnUiThread { status.text = "PDF security operation failed"; Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+            }
         }.start()
     }
 
