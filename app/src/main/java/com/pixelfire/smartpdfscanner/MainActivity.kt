@@ -743,17 +743,8 @@ class MainActivity : AppCompatActivity() {
             recentCard.addView(recent)
             content.addView(recentCard)
         } else {
-            val adSlot = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE8EDF5.toInt())
-                minimumHeight = dp(92)
-            }
-            adSlot.addView(label("ADVERTISEMENT  •  Ad space", 11f, muted, true))
-            adSlot.addView(gap(5))
-            adSlot.addView(label("Banner ad placement", 10f, muted))
-            content.addView(adSlot)
+            content.addView(status)
+            content.addView(recent)
         }
         content.addView(gap(16))
         content.addView(label("MY DOCUMENTS", 15f, navy, true))
@@ -872,15 +863,6 @@ class MainActivity : AppCompatActivity() {
         bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
         footer.addView(bar)
-        val adCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-            background = rounded(0xFFF7F9FC.toInt(), 10, 0xFFE8EDF5.toInt())
-            layoutParams = LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(7) }
-        }
-        adCard.addView(label("ADVERTISEMENT  •  Ad space", 10f, 0xFF8994A5.toInt(), true))
-        footer.addView(adCard)
         root.addView(footer)
     }
 
