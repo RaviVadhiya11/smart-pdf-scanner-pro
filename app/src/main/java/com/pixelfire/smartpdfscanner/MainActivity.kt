@@ -794,6 +794,8 @@ class MainActivity : AppCompatActivity() {
             content.addView(gap(10))
         }
 
+        addNativeAdCard(content)
+
         // Before first successful scan show onboarding; afterwards reserve this area for ads.
         val hasScannedOnce = prefs.getBoolean("has_completed_first_scan", false)
         status = label(
@@ -1761,24 +1763,13 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(field)
         panel.addView(gap(10))
-        // Show a separate banner directly below the tag field whenever this dialog opens.
-        tagDialogAdView?.destroy()
-        val dialogAd = AdView(this).apply {
-            adUnitId = "ca-app-pub-3940256099942544/9214589741" // Google test banner during development.
-            setAdSize(AdSize.BANNER)
-            loadAd(AdRequest.Builder().build())
-        }
-        tagDialogAdView = dialogAd
-        panel.addView(dialogAd, LinearLayout.LayoutParams(-1, dp(50)))
-        val dialog = showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
+        // Native ad is shown only in this spacious dialog; no ad is placed beside action buttons.
+        addNativeAdCard(panel)
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
             .setPositiveButton("Save tag") { _, _ ->
                 val tag = field.text.toString().trim()
                 if (tag.isNotEmpty()) Toast.makeText(this, "Tag saved: $tag", Toast.LENGTH_SHORT).show()
             }.setNegativeButton("Cancel", null))
-        dialog.setOnDismissListener {
-            tagDialogAdView?.destroy()
-            tagDialogAdView = null
-        }
     }
 
     private fun showSettingsDialog() {
@@ -1978,6 +1969,7 @@ class MainActivity : AppCompatActivity() {
         tabs.addView(tab("▤  PDF Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
         tabs.addView(tab("▣  Import ID Photo", false) { showIdPhotoMenu() }, LinearLayout.LayoutParams(0, -2, 1.25f))
         body.addView(tabs)
+        addNativeAdCard(body)
         body.addView(gap(14))
 
         val allDocuments = getSavedPdfs()
@@ -4845,6 +4837,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(label("›", 22f, 0xFF3478F6.toInt()))
             panel.addView(row)
         }
+        addNativeAdCard(panel)
         showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • ID Photo Studio")
             .setView(panel).setNegativeButton("Cancel", null))
     }
@@ -5558,6 +5551,7 @@ class MainActivity : AppCompatActivity() {
             dialog.dismiss()
             splitPicker.launch(arrayOf("application/pdf"))
         }
+        addNativeAdCard(panel)
     }
 
     private fun openPdf(uri: Uri) {
