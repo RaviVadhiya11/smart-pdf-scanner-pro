@@ -3745,26 +3745,152 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exportPdfAsWord(uri: Uri) {
-        status.text = "Converting PDF text…"
+        val nameField = EditText(this).apply {
+            hint = "Word file name"
+            setSingleLine(true)
+            setText("DocNexa_Converted")
+        }
+        val fontSpinner = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Arial", "Calibri", "Times New Roman"))
+        }
+        val sizeSpinner = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("10 pt", "11 pt", "12 pt", "14 pt"))
+            setSelection(2)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            addView(label("Convert selectable PDF text into an editable Microsoft Word DOCX file.", 12f, 0xFF64748B.toInt()))
+            addView(gap(10))
+            addView(label("File name", 12f, 0xFF263957.toInt(), true))
+            addView(nameField)
+            addView(gap(8))
+            addView(label("Document font", 12f, 0xFF263957.toInt(), true))
+            addView(fontSpinner)
+            addView(gap(8))
+            addView(label("Font size", 12f, 0xFF263957.toInt(), true))
+            addView(sizeSpinner)
+            addView(gap(8))
+            addView(label("Note: scanned/image-only PDFs need OCR before Word conversion. The original PDF will not be changed.", 11f, 0xFF718096.toInt()))
+        }
+        showPremiumDialog(AlertDialog.Builder(this)
+            .setTitle("PDF to Word • Advanced Export")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Convert to DOCX") { _, _ ->
+                val base = nameField.text.toString().trim()
+                    .replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60)
+                    .ifBlank { "DocNexa_Converted" }
+                val font = fontSpinner.selectedItem.toString()
+                val fontSize = listOf(10, 11, 12, 14)[sizeSpinner.selectedItemPosition.coerceIn(0, 3)]
+                convertPdfToDocx(uri, base, font, fontSize)
+            })
+    }
+
+    private fun convertPdfToDocx(uri: Uri, fileName: String, fontName: String, fontSize: Int) {
+        status.text = "Converting PDF to editable Word…"
         Thread {
             try {
-                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
-                val text = input.use { stream -> PDDocument.load(stream).use { PDFTextStripper().getText(it) } }
-                if (text.isBlank()) error("No selectable text found in this PDF")
-                val escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    .replace("\n", "<br/>")
-                val html = "<html><head><meta charset=\"utf-8\"></head><body style=\"font-family:Arial\">$escaped</body></html>"
-                val saved = saveDocumentBytes(html.toByteArray(Charsets.UTF_8), "Converted", "application/msword", "doc")
+                val text = contentResolver.openInputStream(uri)?.use { stream ->
+                    PDDocument.load(stream).use { PDFTextStripper().getText(it) }
+                } ?: error("Cannot open PDF")
+                if (text.isBlank()) error("No selectable text found. This may be a scanned PDF; run Image to Text (OCR) first.")
+                val docxBytes = createDocxBytes(text, fontName, fontSize)
+                val saved = saveDocumentBytes(
+                    docxBytes, fileName,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
+                )
                 runOnUiThread {
                     if (saved != null) {
-                        status.text = "Word-compatible document saved"
-                        Toast.makeText(this, "Word document saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
-                    } else Toast.makeText(this, "Could not save Word document", Toast.LENGTH_LONG).show()
+                        status.text = "Word DOCX document saved"
+                        recent.text = "Latest: ${saved.lastPathSegment ?: fileName}"
+                        buildScreen()
+                        AlertDialog.Builder(this)
+                            .setTitle("Word file created")
+                            .setMessage("Editable DOCX saved in Downloads/DocumentScanner. The original PDF is unchanged.")
+                            .setPositiveButton("Open") { _, _ -> openWordDocument(saved) }
+                            .setNeutralButton("Share") { _, _ -> shareWordDocument(saved) }
+                            .setNegativeButton("Done", null)
+                            .show()
+                    } else {
+                        status.text = "Word export failed"
+                        Toast.makeText(this, "Could not save DOCX file", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF conversion failed", Toast.LENGTH_LONG).show() }
+                runOnUiThread {
+                    status.text = "Word conversion failed"
+                    Toast.makeText(this, e.localizedMessage ?: "PDF conversion failed", Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
+    }
+
+    private fun createDocxBytes(text: String, fontName: String, fontSize: Int): ByteArray {
+        val safeFont = fontName.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        val paragraphs = text.replace("\r\n", "\n").replace('\r', '\n').split("\n")
+            .map { it.trimEnd() }
+            .filter { it.isNotBlank() }
+            .ifEmpty { listOf(text.trim()) }
+        fun xml(value: String): String = value.replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;")
+            .replace("\"", "&quot;").replace("'", "&apos;")
+        val body = paragraphs.joinToString("") { paragraph ->
+            val runs = paragraph.split("\t").mapIndexed { index, part ->
+                val tab = if (index > 0) "<w:r><w:tab/></w:r>" else ""
+                tab + "<w:r><w:rPr><w:rFonts w:ascii=\"$safeFont\" w:hAnsi=\"$safeFont\"/><w:sz w:val=\"${fontSize * 2}\"/></w:rPr><w:t xml:space=\"preserve\">${xml(part)}</w:t></w:r>"
+            }.joinToString("")
+            "<w:p><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr>$runs</w:p>"
+        }
+        val documentXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>$body<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>"""
+        val contentTypes = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+        val rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+        return ByteArrayOutputStream().use { bytes ->
+            ZipOutputStream(bytes).use { zip ->
+                fun entry(name: String, value: String) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(value.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+                entry("[Content_Types].xml", contentTypes)
+                entry("_rels/.rels", rels)
+                entry("word/document.xml", documentXml)
+            }
+            bytes.toByteArray()
+        }
+    }
+
+    private fun openWordDocument(uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try { startActivity(intent) }
+        catch (_: Exception) { Toast.makeText(this, "No DOCX app found. The file is saved in Downloads/DocumentScanner.", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun shareWordDocument(uri: Uri) {
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Share Word document"))
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Could not share DOCX", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
