@@ -2415,13 +2415,31 @@ class MainActivity : AppCompatActivity() {
                 }
                 item.addView(icon)
                 item.addView(gap(8))
-                val caption = label(tool.title, 11f, 0xFF263957.toInt(), true)
+                val caption = label(tool.title, 12f, 0xFF263957.toInt(), true)
                 caption.gravity = Gravity.CENTER
                 caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
                 caption.maxLines = 2
                 item.addView(caption)
-                row.addView(item, LinearLayout.LayoutParams(0, dp(100), 1f).apply {
-                    leftMargin = dp(4); rightMargin = dp(4); bottomMargin = dp(8)
+                item.addView(gap(4))
+                val descriptions = mapOf(
+                    "Add/Merge PDF Files" to "Combine multiple PDFs",
+                    "Add Page from Gallery" to "Insert photos as pages",
+                    "Split" to "Extract custom page ranges",
+                    "Rotate all pages" to "Rotate selected pages",
+                    "Add Password" to "Protect with a password",
+                    "Remove Password" to "Unlock an accessible PDF",
+                    "PDF To Text" to "Extract and copy text",
+                    "PDF To ZIP" to "Package PDF for sharing",
+                    "Text To PDF" to "Create a PDF from notes",
+                    "PDF Details" to "View pages and metadata"
+                )
+                val sub = label(descriptions[tool.title] ?: "Open PDF utility", 9.5f, 0xFF718096.toInt())
+                sub.gravity = Gravity.CENTER
+                sub.textAlignment = View.TEXT_ALIGNMENT_CENTER
+                sub.maxLines = 2
+                item.addView(sub)
+                row.addView(item, LinearLayout.LayoutParams(0, dp(124), 1f).apply {
+                    leftMargin = dp(4); rightMargin = dp(4); bottomMargin = dp(9)
                 })
             }
             if (rowTools.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
@@ -2484,20 +2502,45 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun rotatePdfPages(uri: Uri) {
-        status.text = "Rotating PDF pages…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                val count = input.use { PDDocument.load(it).use { doc -> doc.numberOfPages } }
+                runOnUiThread {
+                    val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(4)) }
+                    panel.addView(label("TOTAL PAGES: $count", 12f, 0xFF3478F6.toInt(), true))
+                    val range = EditText(this).apply { hint = "All pages or range: 1-3, 5"; setSingleLine(true) }
+                    panel.addView(range)
+                    panel.addView(label("Leave blank to rotate every page. Rotation: 90° clockwise.", 11f, 0xFF718096.toInt()))
+                    showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Rotate Pages")
+                        .setView(panel).setNegativeButton("Cancel", null)
+                        .setPositiveButton("Rotate & Save") { _, _ ->
+                            val pages = if (range.text.isNullOrBlank()) (0 until count).toList()
+                                else parsePageRanges(range.text.toString(), count)
+                            if (pages.isEmpty()) Toast.makeText(this, "Please enter a valid page range", Toast.LENGTH_LONG).show()
+                            else rotateSelectedPdfPages(uri, pages)
+                        })
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not inspect PDF", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun rotateSelectedPdfPages(uri: Uri, pages: List<Int>) {
+        status.text = "Rotating selected pages…"
         Thread {
             try {
                 val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
                 val bytes = input.use { stream -> PDDocument.load(stream).use { doc ->
-                    for (page in doc.pages) page.rotation = (page.rotation + 90) % 360
+                    pages.forEach { index -> doc.getPage(index).rotation = (doc.getPage(index).rotation + 90) % 360 }
                     ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
                 } }
                 val saved = savePdfBytes(bytes, "Rotated")
                 runOnUiThread {
                     if (saved != null) {
-                        lastPdf = saved
-                        buildScreen()
-                        status.text = "All pages rotated 90°"
+                        lastPdf = saved; buildScreen()
+                        status.text = "Selected pages rotated"
                         recent.text = "Latest: ${saved.lastPathSegment}"
                         Toast.makeText(this, "Rotated PDF saved", Toast.LENGTH_LONG).show()
                     } else status.text = "Could not save rotated PDF"
@@ -3432,42 +3475,85 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun splitPdfFile(uri: Uri) {
-        status.text = "Splitting PDF…"
         Thread {
             try {
-                val input = contentResolver.openInputStream(uri)
-                    ?: throw IllegalStateException("Could not open selected PDF")
-                val source = input.use { PDDocument.load(it) }
-                val total = source.numberOfPages
-                if (total < 2) {
-                    source.close()
-                    throw IllegalArgumentException("PDF needs at least two pages to split")
-                }
-                val middle = (total + 1) / 2
-                val first = PDDocument()
-                val second = PDDocument()
-                try {
-                    for (i in 0 until middle) first.importPage(source.getPage(i))
-                    for (i in middle until total) second.importPage(source.getPage(i))
-                    val firstBytes = ByteArrayOutputStream().also { first.save(it) }.toByteArray()
-                    val secondBytes = ByteArrayOutputStream().also { second.save(it) }.toByteArray()
-                    val savedA = savePdfBytes(firstBytes, "Split_Part_1")
-                    val savedB = savePdfBytes(secondBytes, "Split_Part_2")
-                    runOnUiThread {
-                        status.text = "PDF split into two files"
-                        recent.text = "Saved: ${savedA?.lastPathSegment ?: "Part 1"} and ${savedB?.lastPathSegment ?: "Part 2"}"
-                        Toast.makeText(this, "Both parts saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                val input = contentResolver.openInputStream(uri) ?: error("Could not open selected PDF")
+                val pageCount = input.use { PDDocument.load(it).use { doc -> doc.numberOfPages } }
+                runOnUiThread {
+                    if (pageCount < 2) {
+                        Toast.makeText(this, "This PDF has only one page", Toast.LENGTH_LONG).show()
+                        return@runOnUiThread
                     }
-                } finally {
-                    first.close()
-                    second.close()
-                    source.close()
+                    val panel = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(16), dp(8), dp(16), dp(4))
+                    }
+                    panel.addView(label("TOTAL PAGES: $pageCount", 12f, 0xFF3478F6.toInt(), true))
+                    panel.addView(gap(8))
+                    val range = EditText(this).apply {
+                        hint = "Example: 1-3, 5, 7-9"
+                        setSingleLine(true)
+                        inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    }
+                    panel.addView(range)
+                    panel.addView(gap(5))
+                    panel.addView(label("Enter pages to extract. The remaining pages are saved as a second PDF.", 11f, 0xFF718096.toInt()))
+                    showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Smart PDF Split")
+                        .setView(panel)
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Split & Save") { _, _ ->
+                            val selected = parsePageRanges(range.text.toString(), pageCount)
+                            if (selected.isEmpty() || selected.size == pageCount) {
+                                Toast.makeText(this, "Enter a valid page range that leaves pages for both files", Toast.LENGTH_LONG).show()
+                            } else splitPdfPages(uri, selected)
+                        })
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "PDF split failed"
-                    Toast.makeText(this, e.localizedMessage ?: "Could not split PDF", Toast.LENGTH_LONG).show()
-                }
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not inspect PDF", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun parsePageRanges(value: String, total: Int): List<Int> {
+        val pages = sortedSetOf<Int>()
+        try {
+            value.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { part ->
+                val bounds = part.split("-").map { it.trim() }
+                require(bounds.size in 1..2)
+                val start = bounds[0].toInt()
+                val end = if (bounds.size == 2) bounds[1].toInt() else start
+                require(start >= 1 && end >= start && end <= total)
+                for (page in start..end) pages.add(page - 1)
+            }
+        } catch (_: Exception) { return emptyList() }
+        return pages.toList()
+    }
+
+    private fun splitPdfPages(uri: Uri, selectedPages: List<Int>) {
+        status.text = "Splitting selected pages…"
+        Thread {
+            try {
+                val input = contentResolver.openInputStream(uri) ?: error("Could not open PDF")
+                val source = input.use { PDDocument.load(it) }
+                val picked = PDDocument()
+                val remaining = PDDocument()
+                try {
+                    for (i in 0 until source.numberOfPages) {
+                        if (i in selectedPages) picked.importPage(source.getPage(i))
+                        else remaining.importPage(source.getPage(i))
+                    }
+                    val firstBytes = ByteArrayOutputStream().also { picked.save(it) }.toByteArray()
+                    val secondBytes = ByteArrayOutputStream().also { remaining.save(it) }.toByteArray()
+                    val savedA = savePdfBytes(firstBytes, "Selected_Pages")
+                    val savedB = savePdfBytes(secondBytes, "Remaining_Pages")
+                    runOnUiThread {
+                        status.text = "Custom page split complete"
+                        recent.text = "Saved: ${savedA?.lastPathSegment ?: "Selected pages"} and ${savedB?.lastPathSegment ?: "Remaining pages"}"
+                        Toast.makeText(this, "Both PDFs saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                    }
+                } finally { picked.close(); remaining.close(); source.close() }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "PDF split failed"; Toast.makeText(this, e.localizedMessage ?: "Could not split PDF", Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
