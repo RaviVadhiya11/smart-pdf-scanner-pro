@@ -828,18 +828,6 @@ class MainActivity : AppCompatActivity() {
         bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
         footer.addView(bar)
-        val share = TextView(this).apply {
-            text = "↗   Share DocNexa with friends"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF1557A8.toInt())
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            background = rounded(0xFFEAF2FF.toInt(), 14)
-            setPadding(dp(12), dp(11), dp(12), dp(11))
-            layoutParams = LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(7) }
-            setOnClickListener { shareApp() }
-        }
-        footer.addView(share)
         val adCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -2192,9 +2180,9 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showPdfTools() {
-        val bg = 0xFFF7F8FA.toInt()
-        val ink = 0xFF343A40.toInt()
-        val muted = 0xFF777777.toInt()
+        val bg = 0xFFF3F7FF.toInt()
+        val ink = 0xFF172B4D.toInt()
+        val muted = 0xFF718096.toInt()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
@@ -2203,14 +2191,14 @@ class MainActivity : AppCompatActivity() {
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(18))
-            background = rounded(0xFFFFFFFF.toInt(), 0)
-            elevation = dp(2).toFloat()
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 18)
+            elevation = dp(3).toFloat()
         }
         val back = TextView(this).apply {
             text = "‹"
             textSize = 34f
-            setTextColor(0xFF1686C8.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dp(42), dp(46))
             setOnClickListener { buildScreen() }
@@ -2222,18 +2210,18 @@ class MainActivity : AppCompatActivity() {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
             gravity = Gravity.CENTER
-            background = rounded(0xFF168BC5.toInt(), 5)
+            background = rounded(0xFF2C8DEB.toInt(), 12)
             layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
         }
         toolbar.addView(fileIcon)
-        val heading = label("PDF Tools", 20f, 0xFF666666.toInt(), true)
+        val heading = label("PDF Tools", 20f, 0xFFFFFFFF.toInt(), true)
         heading.setPadding(dp(18), 0, 0, 0)
         toolbar.addView(heading)
         root.addView(toolbar)
 
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(18), dp(10), dp(28))
+            setPadding(dp(14), dp(16), dp(14), dp(28))
         }
         addPdfSectionTitle(body, "Quick Access")
         addPdfToolHorizontal(body, listOf(
@@ -2326,53 +2314,47 @@ class MainActivity : AppCompatActivity() {
         parent.addView(horizontal)
     }
 
-    private fun addPdfToolGrid(
-        parent: LinearLayout,
-        tools: List<PdfTool>,
-        titleColor: Int,
-        subtitleColor: Int
-    ) {
-        tools.chunked(4).forEach { rowTools ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.TOP
-            }
+    private fun addPdfToolGrid(parent: LinearLayout, tools: List<PdfTool>, titleColor: Int, subtitleColor: Int) {
+        tools.chunked(2).forEach { rowTools ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP }
             rowTools.forEach { tool ->
                 val item = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    setPadding(dp(3), dp(8), dp(3), dp(13))
+                    gravity = Gravity.CENTER
+                    setPadding(dp(10), dp(12), dp(10), dp(12))
+                    background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE1EAF7.toInt())
+                    elevation = dp(1).toFloat()
                     isClickable = true
                     isFocusable = true
                     setOnClickListener { tool.action() }
                 }
-                val circle = TextView(this).apply {
+                val icon = TextView(this).apply {
                     text = tool.symbol
-                    textSize = 18f
+                    textSize = 21f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    setTextColor(0xFFFFFFFF.toInt())
+                    setTextColor(tool.color)
                     gravity = Gravity.CENTER
-                    background = rounded(tool.color, 50)
-                    elevation = dp(1).toFloat()
-                    layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+                    background = rounded(0xFFEAF2FF.toInt(), 14)
+                    layoutParams = LinearLayout.LayoutParams(dp(48), dp(46))
                 }
-                item.addView(circle)
-                item.addView(gap(5))
-                val caption = label(tool.title, 10.5f, subtitleColor)
-                caption.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                item.addView(icon)
+                item.addView(gap(8))
+                val caption = label(tool.title, 11f, 0xFF263957.toInt(), true)
+                caption.gravity = Gravity.CENTER
                 caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
+                caption.maxLines = 2
                 item.addView(caption)
-                row.addView(item, LinearLayout.LayoutParams(0, dp(86), 1f))
+                row.addView(item, LinearLayout.LayoutParams(0, dp(100), 1f).apply {
+                    leftMargin = dp(4); rightMargin = dp(4); bottomMargin = dp(8)
+                })
             }
-            repeat(4 - rowTools.size) {
-                row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-            }
+            if (rowTools.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
             parent.addView(row)
         }
     }
 
     private fun addPdfSectionTitle(parent: LinearLayout, title: String) {
-        val lineColor = 0xFFDADADA.toInt()
+        val lineColor = 0xFFD6E3F5.toInt()
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -2380,7 +2362,7 @@ class MainActivity : AppCompatActivity() {
         }
         row.addView(View(this).apply { setBackgroundColor(lineColor) },
             LinearLayout.LayoutParams(0, dp(1), 1f))
-        val text = label(title, 15f, 0xFF777777.toInt())
+        val text = label(title.uppercase(), 11f, 0xFF3478F6.toInt(), true)
         text.setPadding(dp(10), 0, dp(10), 0)
         row.addView(text)
         row.addView(View(this).apply { setBackgroundColor(lineColor) },
