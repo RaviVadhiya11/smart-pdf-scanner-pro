@@ -229,6 +229,14 @@ class MainActivity : AppCompatActivity() {
         if (uris.isNotEmpty()) showImageImportPreview(uris)
     }
 
+    private val idCardPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) showIdCardImportPreview(uris.take(2))
+    }
+
+    private val passportPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPassportPhotoEditor(uri)
+    }
+
     private val ocrPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) runOcr(uri)
     }
@@ -530,7 +538,7 @@ class MainActivity : AppCompatActivity() {
         }
         quickItem("⌂ Home", true) { buildScreen() }
         quickItem("▤ PDF Tools") { showPdfTools() }
-        quickItem("▣ ID Photo") { imagePicker.launch(arrayOf("image/*")) }
+        quickItem("▣ ID Photo") { showIdPhotoMenu() }
         quickItem("PDF Editor") { pdfEditorPicker.launch(arrayOf("application/pdf")) }
         quickItem("✍ Signature") { openSignatureEditor() }
         quickItem("OCR Image") { ocrPicker.launch("image/*") }
@@ -1628,7 +1636,7 @@ class MainActivity : AppCompatActivity() {
         }
         tabs.addView(tab("⌂  Home", false) { buildScreen() }, LinearLayout.LayoutParams(0, -2, 1f))
         tabs.addView(tab("▤  PDF Tools", false) { showPdfTools() }, LinearLayout.LayoutParams(0, -2, 1f))
-        tabs.addView(tab("▣  Import ID Photo", false) { imagePicker.launch(arrayOf("image/*")) }, LinearLayout.LayoutParams(0, -2, 1.25f))
+        tabs.addView(tab("▣  Import ID Photo", false) { showIdPhotoMenu() }, LinearLayout.LayoutParams(0, -2, 1.25f))
         body.addView(tabs)
         body.addView(gap(14))
 
@@ -3192,6 +3200,213 @@ class MainActivity : AppCompatActivity() {
                 status.text = "Scanner unavailable. Check Google Play services and internet."
                 Toast.makeText(this, error.localizedMessage ?: "Scanner error", Toast.LENGTH_LONG).show()
             }
+    }
+
+    private fun showIdPhotoMenu() {
+        AlertDialog.Builder(this).setTitle("Import ID Photo")
+            .setItems(arrayOf("Import ID Card (Front / Back)", "Passport Photo Maker")) { _, which ->
+                if (which == 0) idCardPicker.launch(arrayOf("image/*"))
+                else passportPicker.launch(arrayOf("image/*"))
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showIdCardImportPreview(uris: List<Uri>) {
+        val bitmaps = uris.map { uri ->
+            contentResolver.openInputStream(uri).use { input ->
+                if (input != null) BitmapFactory.decodeStream(input) else null
+            }
+        }.toMutableList()
+        if (bitmaps.any { it == null }) {
+            Toast.makeText(this, "Could not read one of the selected images", Toast.LENGTH_LONG).show()
+            return
+        }
+        val originals = bitmaps.filterNotNull().toMutableList()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        panel.addView(label("Select front and back images. Crop each side if needed.", 13f, 0xFF263957.toInt(), true))
+        originals.forEachIndexed { index, bitmap ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+            }
+            val preview = ImageView(this).apply {
+                setImageBitmap(bitmap)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                layoutParams = LinearLayout.LayoutParams(dp(112), dp(82))
+            }
+            row.addView(preview)
+            row.addView(label(if (index == 0) "  Front side" else "  Back side", 14f, 0xFF263957.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(Button(this).apply {
+                text = "Crop"
+                isAllCaps = false
+                setOnClickListener {
+                    val cropView = ImageCropView(this@MainActivity, originals[index])
+                    val dialog = AlertDialog.Builder(this@MainActivity).setTitle("Crop ${if (index == 0) "Front" else "Back"}")
+                        .setView(cropView).setPositiveButton("Apply Crop", null)
+                        .setNeutralButton("Rotate", null).setNegativeButton("Reset", null).create()
+                    dialog.setOnShowListener {
+                        dialog.window?.setLayout(-1, dp(560))
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            originals[index] = cropView.getCroppedBitmap()
+                            preview.setImageBitmap(originals[index])
+                            dialog.dismiss()
+                        }
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { cropView.rotateImage() }
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { cropView.resetCrop() }
+                    }
+                    dialog.show()
+                }
+            })
+            panel.addView(row)
+            panel.addView(gap(6))
+        }
+        val scroll = ScrollView(this).apply { addView(panel) }
+        AlertDialog.Builder(this).setTitle("ID Card Preview").setView(scroll)
+            .setPositiveButton("Create ID PDF") { _, _ -> createPdfFromBitmaps(originals, "ID_Card") }
+            .setNeutralButton("Share Images") { _, _ ->
+                val share = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "image/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(share, "Share ID images"))
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showPassportPhotoEditor(uri: Uri) {
+        try {
+            val source = contentResolver.openInputStream(uri).use { input ->
+                if (input != null) BitmapFactory.decodeStream(input) else null
+            } ?: throw IllegalStateException("Could not open selected photo")
+            val cropView = ImageCropView(this, source)
+            val sizeOptions = arrayOf("35 × 45 mm (Passport)", "2 × 2 inch (Square)", "Wallet 25 × เป็น35 mm")
+            var selectedSize = 0
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                addView(cropView, LinearLayout.LayoutParams(-1, dp(390)))
+                addView(label("Drag crop handles. Choose a print size below.", 12f, 0xFF53627A.toInt()))
+            }
+            AlertDialog.Builder(this).setTitle("Passport Photo Maker")
+                .setView(panel)
+                .setSingleChoiceItems(sizeOptions, 0) { _, which -> selectedSize = which }
+                .setPositiveButton("Create Photo Sheet") { _, _ ->
+                    val cropped = cropView.getCroppedBitmap()
+                    createPassportPhotoSheet(cropped, selectedSize)
+                }
+                .setNeutralButton("Rotate", null)
+                .setNegativeButton("Cancel", null)
+                .create().also { dialog ->
+                    dialog.setOnShowListener {
+                        dialog.window?.setLayout(-1, dp(650))
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { cropView.rotateImage() }
+                    }
+                }.show()
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Could not open photo", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun createPdfFromBitmaps(bitmaps: List<Bitmap>, prefix: String) {
+        Thread {
+            try {
+                val pdf = PdfDocument()
+                bitmaps.forEachIndexed { index, bitmap ->
+                    val page = pdf.startPage(PdfDocument.PageInfo.Builder(595, 842, index + 1).create())
+                    page.canvas.drawColor(android.graphics.Color.WHITE)
+                    val rect = fitRect(bitmap.width, bitmap.height, 515, 762, 40, 40)
+                    page.canvas.drawBitmap(bitmap, null, rect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                    pdf.finishPage(page)
+                }
+                val bytes = ByteArrayOutputStream().also { pdf.writeTo(it) }.toByteArray()
+                pdf.close()
+                val saved = savePdfBytes(bytes, prefix)
+                runOnUiThread {
+                    if (saved != null) {
+                        lastPdf = saved
+                        buildScreen()
+                        AlertDialog.Builder(this).setTitle("ID PDF Created")
+                            .setMessage("Your ID card PDF is saved in Downloads/DocumentScanner.")
+                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
+                            .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
+                            .setNegativeButton("Done", null).show()
+                    } else Toast.makeText(this, "Could not save ID PDF", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "ID PDF creation failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun createPassportPhotoSheet(photo: Bitmap, sizeChoice: Int) {
+        Thread {
+            try {
+                val mmWidth = when (sizeChoice) { 1 -> 50f; 2 -> 25f; else -> 35f }
+                val mmHeight = when (sizeChoice) { 1 -> 50f; 2 -> 35f; else -> 45f }
+                val pageWidth = 595
+                val pageHeight = 842
+                val margin = 24f
+                val gap = 10f
+                val photoW = mmWidth * 72f / 25.4f
+                val photoH = mmHeight * 72f / 25.4f
+                val cols = ((pageWidth - 2 * margin + gap) / (photoW + gap)).toInt().coerceAtLeast(1)
+                val rows = ((pageHeight - 2 * margin + gap) / (photoH + gap)).toInt().coerceAtLeast(1)
+                val sheet = Bitmap.createBitmap(pageWidth * 2, pageHeight * 2, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(sheet)
+                canvas.drawColor(android.graphics.Color.WHITE)
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                val w = photoW * 2; val h = photoH * 2; val g = gap * 2; val m = margin * 2
+                for (row in 0 until rows) for (col in 0 until cols) {
+                    val left = m + col * (w + g)
+                    val top = m + row * (h + g)
+                    canvas.drawBitmap(photo, null, android.graphics.RectF(left, top, left + w, top + h), paint)
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 1f
+                    paint.color = 0xFF999999.toInt()
+                    canvas.drawRect(left, top, left + w, top + h, paint)
+                    paint.style = Paint.Style.FILL
+                    paint.color = android.graphics.Color.BLACK
+                }
+                val jpgValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, "DocNexa_Passport_Photos_${System.currentTimeMillis()}.jpg")
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+                }
+                val jpgUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, jpgValues) ?: error("Could not create photo sheet")
+                contentResolver.openOutputStream(jpgUri).use { output ->
+                    if (output == null) error("Could not save photo sheet")
+                    sheet.compress(Bitmap.CompressFormat.JPEG, 95, output)
+                }
+                val doc = PdfDocument()
+                val page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create())
+                page.canvas.drawColor(android.graphics.Color.WHITE)
+                val printBitmap = Bitmap.createScaledBitmap(sheet, pageWidth, pageHeight, true)
+                page.canvas.drawBitmap(printBitmap, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                doc.finishPage(page)
+                val pdfBytes = ByteArrayOutputStream().also { doc.writeTo(it) }.toByteArray()
+                doc.close()
+                val pdfUri = savePdfBytes(pdfBytes, "Passport_Photo_Sheet")
+                runOnUiThread {
+                    AlertDialog.Builder(this).setTitle("Passport Photo Sheet Ready")
+                        .setMessage("Photo sheet saved to Gallery and PDF saved to Downloads/DocumentScanner. Check print scaling before using for official documents.")
+                        .setPositiveButton("Open PDF") { _, _ -> if (pdfUri != null) openPdf(pdfUri) }
+                        .setNeutralButton("Share JPG") { _, _ ->
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "image/jpeg"
+                                putExtra(Intent.EXTRA_STREAM, jpgUri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(Intent.createChooser(send, "Share passport photo sheet"))
+                        }.setNegativeButton("Done", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Passport photo sheet failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun showImageImportPreview(uris: List<Uri>) {
