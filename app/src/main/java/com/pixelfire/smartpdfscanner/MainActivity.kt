@@ -220,6 +220,7 @@ private class ImageCropView(context: android.content.Context, private var source
 
 class MainActivity : AppCompatActivity() {
     private var bannerAdView: AdView? = null
+    private var tagDialogAdView: AdView? = null
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
@@ -949,6 +950,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         bannerAdView?.destroy()
         bannerAdView = null
+        tagDialogAdView?.destroy()
+        tagDialogAdView = null
         super.onDestroy()
     }
 
@@ -1748,11 +1751,25 @@ class MainActivity : AppCompatActivity() {
             background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFD8E4F4.toInt())
         }
         panel.addView(field)
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
+        panel.addView(gap(10))
+        // Show a separate banner directly below the tag field whenever this dialog opens.
+        tagDialogAdView?.destroy()
+        val dialogAd = AdView(this).apply {
+            adUnitId = "ca-app-pub-3940256099942544/9214589741" // Google test banner during development.
+            setAdSize(AdSize.getBannerAdSize(this@MainActivity, 320, 50))
+            loadAd(AdRequest.Builder().build())
+        }
+        tagDialogAdView = dialogAd
+        panel.addView(dialogAd, LinearLayout.LayoutParams(-1, dp(50)))
+        val dialog = showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
             .setPositiveButton("Save tag") { _, _ ->
                 val tag = field.text.toString().trim()
                 if (tag.isNotEmpty()) Toast.makeText(this, "Tag saved: $tag", Toast.LENGTH_SHORT).show()
             }.setNegativeButton("Cancel", null))
+        dialog.setOnDismissListener {
+            tagDialogAdView?.destroy()
+            tagDialogAdView = null
+        }
     }
 
     private fun showSettingsDialog() {
