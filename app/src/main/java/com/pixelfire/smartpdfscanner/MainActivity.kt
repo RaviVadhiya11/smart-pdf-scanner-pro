@@ -4366,7 +4366,7 @@ class MainActivity : AppCompatActivity() {
         val pageSize = android.widget.Spinner(this).apply {
             adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("A4", "Letter", "A5"))
         }
-        val orientation = android.widget.Spinner(this).apply {
+        val orientationSpinner = android.widget.Spinner(this).apply {
             adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Portrait", "Landscape", "Auto fit image"))
         }
         val fit = android.widget.Spinner(this).apply {
@@ -4382,7 +4382,7 @@ class MainActivity : AppCompatActivity() {
             addView(label("${uris.size} image(s) • one image per PDF page", 11f, 0xFF718096.toInt()))
             addView(gap(8)); addView(label("File name", 11f, 0xFF263957.toInt(), true)); addView(fileName)
             addView(gap(7)); addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(pageSize)
-            addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientation)
+            addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientationSpinner)
             addView(gap(7)); addView(label("Image placement", 11f, 0xFF263957.toInt(), true)); addView(fit)
             addView(gap(7)); addView(label("Page margins", 11f, 0xFF263957.toInt(), true)); addView(margin)
         }
@@ -4393,8 +4393,8 @@ class MainActivity : AppCompatActivity() {
                 val base = fileName.text.toString().trim().replace(Regex("[^A-Za-z0-9_-]"), "_").trim('_').take(60).ifBlank { "Images_to_PDF" }
                 val sizes = listOf(595 to 842, 612 to 792, 420 to 595)
                 val selected = sizes[pageSize.selectedItemPosition.coerceIn(0, 2)]
-                val landscape = orientation.selectedItemPosition == 1
-                val autoFit = orientation.selectedItemPosition == 2
+                val landscape = orientationSpinner.selectedItemPosition == 1
+                val autoFit = orientationSpinner.selectedItemPosition == 2
                 val width = if (landscape) selected.second else selected.first
                 val height = if (landscape) selected.first else selected.second
                 val margins = listOf(20, 40, 64)[margin.selectedItemPosition.coerceIn(0, 2)]
