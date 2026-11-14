@@ -1717,6 +1717,38 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(send, "Share DocNexa"))
     }
 
+    private fun showDocsOptions(anchor: View) {
+        val menu = PopupMenu(this, anchor)
+        menu.menu.add("Search documents").setOnMenuItemClickListener {
+            showDocumentSearch(); true
+        }
+        menu.menu.add("Sort documents").setOnMenuItemClickListener {
+            AlertDialog.Builder(this).setTitle("Sort documents")
+                .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
+                    prefs.edit().putInt("document_sort_order", which).apply()
+                    showDocsScreen()
+                }.show()
+            true
+        }
+        menu.menu.add("Import images").setOnMenuItemClickListener {
+            imagePicker.launch(arrayOf("image/*")); true
+        }
+        menu.menu.add("Open PDF").setOnMenuItemClickListener {
+            pdfPicker.launch(arrayOf("application/pdf")); true
+        }
+        menu.menu.add("Create folder").setOnMenuItemClickListener {
+            createFolderDialog(); true
+        }
+        menu.menu.add("PDF tools").setOnMenuItemClickListener {
+            showPdfTools(); true
+        }
+        menu.menu.add("Account / Cloud Sync").setOnMenuItemClickListener {
+            if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
+            true
+        }
+        menu.show()
+    }
+
     private fun showDocsScreen() {
         val bg = 0xFFF5F8FF.toInt()
         val blue = 0xFF3478F6.toInt()
@@ -1751,10 +1783,12 @@ class MainActivity : AppCompatActivity() {
         toolbar.addView(label("  Doc Scanner", 20f, 0xFFFFFFFF.toInt(), true),
             LinearLayout.LayoutParams(0, -2, 1f))
         toolbar.addView(TextView(this).apply {
-            text = "♛   ⌕   ⋮"
+            text = "⌕   ⋮"
             textSize = 22f
             setTextColor(0xFFFFFFFF.toInt())
-            setOnClickListener { showComingSoon("Document options") }
+            setPadding(dp(8), dp(6), 0, dp(6))
+            contentDescription = "Document options"
+            setOnClickListener { showDocsOptions(this) }
         })
         body.addView(toolbar)
         body.addView(gap(10))
@@ -1780,12 +1814,37 @@ class MainActivity : AppCompatActivity() {
         body.addView(tabs)
         body.addView(gap(14))
 
+        val allDocuments = getSavedPdfs()
+        val favouriteUris = prefs.getStringSet("favourite_uris", emptySet()) ?: emptySet()
+        val selectedFilter = prefs.getString("docs_filter", "all") ?: "all"
+        val documents = when (selectedFilter) {
+            "recent" -> allDocuments.take(10)
+            "favourites" -> allDocuments.filter { favouriteUris.contains(it.second.toString()) }
+            else -> allDocuments
+        }
         val filters = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        filters.addView(label("All docs", 12f, blue, true), LinearLayout.LayoutParams(0, -2, 1f))
-        filters.addView(label("◷  Recent     ★  Favourite", 11f, muted))
+        fun filterChip(title: String, key: String) = TextView(this).apply {
+            text = title
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setPadding(dp(13), dp(9), dp(13), dp(9))
+            setTextColor(if (selectedFilter == key) blue else muted)
+            background = rounded(if (selectedFilter == key) 0xFFEAF2FF.toInt() else 0xFFFFFFFF.toInt(), 18)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                prefs.edit().putString("docs_filter", key).apply()
+                showDocsScreen()
+            }
+        }
+        filters.addView(filterChip("All docs", "all"))
+        filters.addView(gap(7))
+        filters.addView(filterChip("◷ Recent", "recent"))
+        filters.addView(gap(7))
+        filters.addView(filterChip("★ Favourites", "favourites"))
         body.addView(filters)
         body.addView(gap(14))
 
