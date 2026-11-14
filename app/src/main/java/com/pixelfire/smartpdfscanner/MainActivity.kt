@@ -261,7 +261,7 @@ class MainActivity : AppCompatActivity() {
     private val detailsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfDetails(uri) }
     private val rotatePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) rotatePdfPages(uri) }
     private val pdfEditorPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfEditor(uri) }
-    private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) compressPdf(uri) }
+    private val compressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showCompressionOptions(uri) }
     private val pdfToWordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) exportPdfAsWord(uri) }
     private val qrImagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) readQrFromImage(uri) }
     private val pdfToImagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) convertPdfToImages(uri) }
@@ -2742,29 +2742,120 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun compressPdf(uri: Uri) {
-        status.text = "Optimizing PDF…"
+    private data class CompressionPreset(val title: String, val dpi: Int, val quality: Int, val detail: String)
+
+    private val compressionPresets = listOf(
+        CompressionPreset("Light compression", 150, 82, "Good quality • 150 DPI • JPEG 82%"),
+        CompressionPreset("Recommended", 120, 70, "Balanced size and clarity • 120 DPI • JPEG 70%"),
+        CompressionPreset("Strong compression", 96, 55, "Smaller file • 96 DPI • JPEG 55%"),
+        CompressionPreset("Maximum compression", 72, 40, "Smallest output • 72 DPI • JPEG 40%")
+    )
+
+    private fun showCompressionOptions(uri: Uri) {
         Thread {
             try {
-                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
-                val bytes = input.use { stream ->
-                    PDDocument.load(stream).use { document ->
-                        ByteArrayOutputStream().also { document.save(it) }.toByteArray()
-                    }
-                }
-                val saved = savePdfBytes(bytes, "Compressed")
+                val size = contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open selected PDF")
+                val pages = PdfRenderer(pfd).use { it.pageCount }
                 runOnUiThread {
-                    if (saved != null) {
-                        lastPdf = saved
-                        status.text = "PDF optimized and saved"
-                        recent.text = "Latest: ${saved.lastPathSegment}"
-                        Toast.makeText(this, "Optimized PDF saved. Size reduction depends on the source PDF.", Toast.LENGTH_LONG).show()
-                    } else Toast.makeText(this, "Could not save optimized PDF", Toast.LENGTH_LONG).show()
+                    val details = "Selected PDF\nPages: $pages\nOriginal size: ${formatFileSize(size)}\n\nChoose compression level:"
+                    var selected = 1
+                    AlertDialog.Builder(this)
+                        .setTitle("Advanced PDF Compressor")
+                        .setMessage(details)
+                        .setSingleChoiceItems(compressionPresets.map { "${it.title}\n${it.detail}" }.toTypedArray(), selected) { _, which ->
+                            selected = which
+                        }
+                        .setPositiveButton("Compress PDF") { _, _ -> runPdfCompression(uri, compressionPresets[selected], size) }
+                        .setNeutralButton("Cancel", null)
+                        .show()
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF optimization failed", Toast.LENGTH_LONG).show() }
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show() }
             }
         }.start()
+    }
+
+    private fun runPdfCompression(uri: Uri, preset: CompressionPreset, originalSize: Long) {
+        status.text = "Compressing PDF…"
+        Thread {
+            try {
+                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open selected PDF")
+                val renderer = PdfRenderer(pfd)
+                val output = PdfDocument()
+                try {
+                    for (index in 0 until renderer.pageCount) {
+                        renderer.openPage(index).use { sourcePage ->
+                            val width = (sourcePage.width * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                            val height = (sourcePage.height * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                            try {
+                                bitmap.eraseColor(android.graphics.Color.WHITE)
+                                sourcePage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                val imageBytes = ByteArrayOutputStream().also { stream ->
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, preset.quality, stream)
+                                }.toByteArray()
+                                val compressedBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                                    ?: error("Could not encode page ${index + 1}")
+                                try {
+                                    val page = output.startPage(PdfDocument.PageInfo.Builder(sourcePage.width, sourcePage.height, index + 1).create())
+                                    page.canvas.drawBitmap(compressedBitmap, null, android.graphics.Rect(0, 0, sourcePage.width, sourcePage.height), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                                    output.finishPage(page)
+                                } finally {
+                                    compressedBitmap.recycle()
+                                }
+                            } finally {
+                                bitmap.recycle()
+                            }
+                        }
+                    }
+                    val compressedBytes = ByteArrayOutputStream().also { output.writeTo(it) }.toByteArray()
+                    val reduced = originalSize > 0 && compressedBytes.size < originalSize
+                    runOnUiThread {
+                        status.text = "Compression preview ready"
+                        val savedPercent = if (originalSize > 0) (((originalSize - compressedBytes.size).toDouble() / originalSize) * 100).toInt() else 0
+                        val summary = "Preset: ${preset.title}\nOriginal: ${formatFileSize(originalSize)}\nCompressed: ${formatFileSize(compressedBytes.size)}\n" +
+                            if (originalSize > 0) (if (reduced) "Size reduced by $savedPercent%" else "This PDF did not become smaller with this preset.") else "Compression complete."
+                        AlertDialog.Builder(this)
+                            .setTitle("Compression Preview")
+                            .setMessage(summary + "\n\nNote: This image-based compression reduces resolution and removes selectable/searchable text and form layers.")
+                            .setPositiveButton("Save PDF") { _, _ ->
+                                val saved = savePdfBytes(compressedBytes, "Compressed")
+                                if (saved != null) {
+                                    lastPdf = saved
+                                    status.text = "Compressed PDF saved"
+                                    recent.text = "Latest: ${saved.lastPathSegment}"
+                                    Toast.makeText(this, "Compressed PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                                } else Toast.makeText(this, "Could not save compressed PDF", Toast.LENGTH_LONG).show()
+                            }
+                            .setNeutralButton("Share") { _, _ ->
+                                val saved = savePdfBytes(compressedBytes, "Compressed")
+                                if (saved != null) {
+                                    lastPdf = saved
+                                    sharePdf(saved)
+                                } else Toast.makeText(this, "Could not prepare PDF to share", Toast.LENGTH_LONG).show()
+                            }
+                            .setNegativeButton("Discard", null)
+                            .show()
+                    }
+                } finally {
+                    output.close()
+                    renderer.close()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "Compression failed"
+                    Toast.makeText(this, e.localizedMessage ?: "PDF compression failed", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        if (bytes < 0) return "Unknown"
+        if (bytes < 1024) return "$bytes B"
+        if (bytes < 1024 * 1024) return String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        return String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0))
     }
 
     private fun exportPdfAsWord(uri: Uri) {
