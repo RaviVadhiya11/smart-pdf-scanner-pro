@@ -3244,8 +3244,12 @@ class MainActivity : AppCompatActivity() {
                 isAllCaps = false
                 setOnClickListener {
                     val cropView = ImageCropView(this@MainActivity, originals[index])
+                    val cropPanel = FrameLayout(this@MainActivity).apply {
+                        setPadding(dp(8), dp(8), dp(8), dp(8))
+                        addView(cropView, FrameLayout.LayoutParams(-1, dp(380)))
+                    }
                     val dialog = AlertDialog.Builder(this@MainActivity).setTitle("Crop ${if (index == 0) "Front" else "Back"}")
-                        .setView(cropView).setPositiveButton("Apply Crop", null)
+                        .setView(cropPanel).setPositiveButton("Apply Crop", null)
                         .setNeutralButton("Rotate", null).setNegativeButton("Reset", null).create()
                     dialog.setOnShowListener {
                         dialog.window?.setLayout(-1, dp(560))
