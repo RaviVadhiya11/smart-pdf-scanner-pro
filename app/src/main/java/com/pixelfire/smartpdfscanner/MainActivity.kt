@@ -2464,39 +2464,129 @@ class MainActivity : AppCompatActivity() {
         parent.addView(row)
     }
 
+    private fun showLongTextReport(title: String, body: String, copyLabel: String) {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(8), dp(14), dp(4))
+        }
+        panel.addView(label("DOCUMENT REPORT", 10f, 0xFF3478F6.toInt(), true))
+        panel.addView(gap(6))
+        val content = TextView(this).apply {
+            text = body
+            textSize = 12f
+            setTextColor(0xFF263957.toInt())
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setTextIsSelectable(true)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        panel.addView(ScrollView(this).apply { addView(content) },
+            LinearLayout.LayoutParams(-1, dp(390)))
+        showPremiumDialog(AlertDialog.Builder(this).setTitle(title).setView(panel)
+            .setNeutralButton(copyLabel) { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(title, body))
+                Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            }
+            .setPositiveButton("Close", null))
+    }
+
     private fun extractPdfText(uri: Uri) {
         status.text = "Extracting PDF text…"
         Thread {
             try {
-                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
-                val text = input.use { stream -> PDDocument.load(stream).use { doc -> PDFTextStripper().getText(doc) } }
+                val text = contentResolver.openInputStream(uri)?.use { stream ->
+                    PDDocument.load(stream).use { doc -> PDFTextStripper().getText(doc) }
+                } ?: error("Cannot open PDF")
                 runOnUiThread {
                     status.text = "PDF text extracted"
-                    AlertDialog.Builder(this).setTitle("PDF To Text")
-                        .setMessage(text.ifBlank { "No selectable text found. For scanned image PDFs, use Image To Text (OCR)." })
-                        .setPositiveButton("Copy") { _, _ ->
-                            val clip = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clip.setPrimaryClip(android.content.ClipData.newPlainText("PDF text", text))
-                            Toast.makeText(this, "Text copied", Toast.LENGTH_SHORT).show()
-                        }.setNegativeButton("Close", null).show()
+                    if (text.isBlank()) {
+                        showPremiumDialog(AlertDialog.Builder(this).setTitle("PDF To Text")
+                            .setMessage("No selectable text was found. If this is a scanned PDF, use the Image To Text (OCR) tool.")
+                            .setPositiveButton("Close", null))
+                    } else {
+                        showLongTextReport("DocNexa • Extracted Text", text, "Copy Text")
+                    }
                 }
             } catch (e: Exception) {
-                runOnUiThread { status.text = "PDF text extraction failed"; Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show() }
+                runOnUiThread {
+                    status.text = "PDF text extraction failed"
+                    Toast.makeText(this, e.localizedMessage ?: "Could not read PDF", Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }
 
     private fun showPdfDetails(uri: Uri) {
+        status.text = "Reading PDF information…"
         Thread {
             try {
-                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
-                val details = input.use { stream -> PDDocument.load(stream).use { doc ->
-                    val box = doc.getPage(0).mediaBox
-                    "Pages: ${doc.numberOfPages}\nPage 1 size: ${"%.1f".format(box.width)} × ${"%.1f".format(box.height)} pt\nTitle: ${doc.documentInformation.title ?: "—"}\nAuthor: ${doc.documentInformation.author ?: "—"}"
-                } }
-                runOnUiThread { AlertDialog.Builder(this).setTitle("PDF Details").setMessage(details).setPositiveButton("OK", null).show() }
+                val fileName = try {
+                    contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                } catch (_: Exception) { null } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Selected PDF"
+                val fileSize = try {
+                    contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                } catch (_: Exception) { -1L }
+                val details = contentResolver.openInputStream(uri)?.use { stream ->
+                    PDDocument.load(stream).use { doc ->
+                        val info = doc.documentInformation
+                        val pages = doc.numberOfPages
+                        val sizes = linkedMapOf<String, Int>()
+                        var portrait = 0
+                        var landscape = 0
+                        var square = 0
+                        val pageReport = StringBuilder()
+                        for (index in 0 until pages) {
+                            val page = doc.getPage(index)
+                            val box = page.mediaBox
+                            val size = String.format(Locale.US, "%.1f × %.1f pt", box.width, box.height)
+                            sizes[size] = (sizes[size] ?: 0) + 1
+                            when {
+                                box.height > box.width -> portrait++
+                                box.width > box.height -> landscape++
+                                else -> square++
+                            }
+                            if (index < 10) pageReport.append("Page ${index + 1}: $size • Rotation ${page.rotation}°\\n")
+                        }
+                        val dateFormat = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+                        fun dateText(value: java.util.Calendar?): String =
+                            value?.time?.let { dateFormat.format(it) } ?: "—"
+                        val sizeText = when {
+                            fileSize < 0 -> "Unavailable"
+                            fileSize >= 1024L * 1024L -> String.format(Locale.US, "%.2f MB", fileSize / (1024.0 * 1024.0))
+                            fileSize >= 1024L -> String.format(Locale.US, "%.1f KB", fileSize / 1024.0)
+                            else -> "$fileSize bytes"
+                        }
+                        buildString {
+                            append("FILE INFORMATION\\nName: $fileName\\nSize: $sizeText\\n\\n")
+                            append("DOCUMENT\\nPages: $pages\\n")
+                            append("Layout: $portrait portrait • $landscape landscape • $square square\\n")
+                            append("Page sizes: ")
+                            append(sizes.entries.joinToString("; ") { entry -> "${entry.key} (${entry.value})" })
+                            append("\\nPDF version: ${doc.version}\\nEncrypted: ${if (doc.isEncrypted) "Yes" else "No"}\\n\\n")
+                            append("METADATA\\n")
+                            append("Title: ${info.title?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Author: ${info.author?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Subject: ${info.subject?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Creator: ${info.creator?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Producer: ${info.producer?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Keywords: ${info.keywords?.takeIf { it.isNotBlank() } ?: "—"}\\n")
+                            append("Created: ${dateText(info.creationDate)}\\nModified: ${dateText(info.modificationDate)}\\n\\n")
+                            append("PAGE BREAKDOWN\\n$pageReport")
+                            if (pages > 10) append("…and ${pages - 10} more page(s)\\n")
+                        }
+                    }
+                } ?: error("Cannot open selected PDF")
+                runOnUiThread {
+                    status.text = "PDF information ready"
+                    showLongTextReport("DocNexa • PDF Details", details, "Copy Report")
+                }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not read PDF details", Toast.LENGTH_LONG).show() }
+                runOnUiThread {
+                    status.text = "Could not read PDF information"
+                    Toast.makeText(this, e.localizedMessage ?: "Could not read PDF details", Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }
