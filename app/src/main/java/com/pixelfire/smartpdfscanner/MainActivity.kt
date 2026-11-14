@@ -3106,13 +3106,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showQrScanner() {
-        AlertDialog.Builder(this).setTitle("QR Scanner")
-            .setItems(arrayOf("Live automatic camera scan", "Scan QR from gallery image")) { _, which ->
-                if (which == 0) {
-                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) openLiveQrCamera()
-                    else qrCameraPermission.launch(Manifest.permission.CAMERA)
-                } else qrImagePicker.launch("image/*")
-            }.show()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(4))
+            background = rounded(0xFFF5F8FF.toInt(), 18)
+        }
+        val choices = listOf(
+            Triple("▣", "Live camera scanner", "Scan a QR code using your camera"),
+            Triple("▧", "Scan from gallery", "Choose an image containing a QR code")
+        )
+        choices.forEachIndexed { index, item ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE2EAF5.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, dp(70)).apply { bottomMargin = dp(9) }
+                setOnClickListener {
+                    when(index) {
+                        0 -> if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) openLiveQrCamera() else qrCameraPermission.launch(Manifest.permission.CAMERA)
+                        1 -> qrImagePicker.launch("image/*")
+                    }
+                }
+            }
+            row.addView(label(item.first, 24f, 0xFF168BC5.toInt(), true), LinearLayout.LayoutParams(dp(44), -2))
+            val textBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            textBox.addView(label(item.second, 14f, 0xFF172B4D.toInt(), true))
+            textBox.addView(gap(3))
+            textBox.addView(label(item.third, 10.5f, 0xFF718096.toInt()))
+            row.addView(textBox, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 23f, 0xFF718096.toInt()))
+            panel.addView(row)
+        }
+        showPremiumDialog(AlertDialog.Builder(this).setTitle("QR Scanner").setView(panel).setNegativeButton("Close", null))
     }
 
     private fun openLiveQrCamera() {
@@ -3217,7 +3243,11 @@ class MainActivity : AppCompatActivity() {
             minLines = 2
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
-        AlertDialog.Builder(this).setTitle("Create QR Code").setView(field)
+        field.background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFD8E4F2.toInt())
+        field.setTextColor(0xFF172B4D.toInt())
+        field.setHintTextColor(0xFF8994A5.toInt())
+        val inputPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(4)); addView(label("Enter the content you want to share", 12f, 0xFF64748B.toInt(), true)); addView(gap(8)); addView(field) }
+        AlertDialog.Builder(this).setTitle("Create QR Code").setView(inputPanel)
             .setPositiveButton("Generate") { _, _ ->
                 val value = field.text.toString().trim()
                 if (value.isBlank()) {
@@ -3265,12 +3295,12 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                             .setNegativeButton("Done", null)
-                            .show()
+                            .let { showPremiumDialog(it) }
                     } catch (e: Exception) {
                         Toast.makeText(this, e.localizedMessage ?: "QR generation failed", Toast.LENGTH_LONG).show()
                     }
                 }
-            }.setNegativeButton("Cancel", null).show()
+            }.setNegativeButton("Cancel", null).let { showPremiumDialog(it) }
     }
 
     private fun showComingSoon(feature: String) {
