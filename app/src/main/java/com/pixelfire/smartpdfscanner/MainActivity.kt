@@ -64,6 +64,8 @@ import com.google.android.gms.ads.nativead.NativeAdView
 import com.google.android.gms.ads.MobileAds
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
+import com.google.firebase.remoteconfig.remoteConfigSettings
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -401,6 +403,29 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private fun initializeRemoteConfig() {
+        // Defaults keep the app safe and usable even when Remote Config is offline.
+        val remoteConfig = FirebaseRemoteConfig.getInstance()
+        val settings = com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings.Builder()
+            .setMinimumFetchIntervalInSeconds(3600)
+            .build()
+        remoteConfig.setConfigSettingsAsync(settings)
+        remoteConfig.setDefaultsAsync(
+            mapOf(
+                "announcement_enabled" to false,
+                "announcement_message" to ""
+            )
+        )
+        remoteConfig.fetchAndActivate().addOnCompleteListener(this) { task ->
+            if (task.isSuccessful && remoteConfig.getBoolean("announcement_enabled")) {
+                val message = remoteConfig.getString("announcement_message").trim()
+                if (message.isNotEmpty() && !isFinishing && !isDestroyed) {
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Firebase Analytics records a lightweight app-open event. Crashlytics
@@ -414,6 +439,7 @@ class MainActivity : AppCompatActivity() {
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
+        initializeRemoteConfig()
         pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
         pendingResultName = savedInstanceState?.getString("result_pending_name")
         val resultUris = savedInstanceState?.getStringArrayList("result_uris")
