@@ -431,7 +431,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun toolDialogScroll(content: View): ScrollView = ScrollView(this).apply {
+    private fun toolDialogScroll(content: View, maxHeightFraction: Float = 0.57f): ScrollView = ScrollView(this).apply {
         isFillViewport = false
         clipToPadding = false
         addView(content)
@@ -439,7 +439,7 @@ class MainActivity : AppCompatActivity() {
         layoutParams = ViewGroup.LayoutParams(-1, -2)
         viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
-                val maximum = (resources.displayMetrics.heightPixels * 0.57f).toInt()
+                val maximum = (resources.displayMetrics.heightPixels * maxHeightFraction).toInt()
                 if (height > maximum) layoutParams = layoutParams.apply { height = maximum }
             }
         })
@@ -3011,7 +3011,10 @@ class MainActivity : AppCompatActivity() {
      * Loads and renders a Google Native Advanced ad using registered native assets.
      * The ad is inserted between Quick Access and the PDF Tools grid.
      */
-    private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount) {
+    private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount): () -> Unit {
+        val disposed = AtomicBoolean(false)
+        var displayedAd: NativeAd? = null
+        var displayedAdView: NativeAdView? = null
         val slot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(9), dp(8), dp(9), dp(8))
@@ -3030,17 +3033,17 @@ class MainActivity : AppCompatActivity() {
 
         val loader = AdLoader.Builder(this, "ca-app-pub-3940256099942544/2247696110")
             .forNativeAd { nativeAd ->
-                if (isFinishing || isDestroyed || !slot.isAttachedToWindow) {
+                if (disposed.get() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                     nativeAd.destroy()
                     return@forNativeAd
                 }
-                loadedNativeAds.add(nativeAd)
                 runOnUiThread {
-                    if (!slot.isAttachedToWindow) {
-                        loadedNativeAds.remove(nativeAd)
+                    if (disposed.get() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                         nativeAd.destroy()
                         return@runOnUiThread
                     }
+                    displayedAd = nativeAd
+                    loadedNativeAds.add(nativeAd)
                     slot.removeAllViews()
                     slot.addView(label("SPONSORED", 9f, 0xFF718096.toInt(), true))
                     slot.addView(gap(5))
@@ -3051,6 +3054,13 @@ class MainActivity : AppCompatActivity() {
                         setBackgroundColor(0xFFFFFFFF.toInt())
                     }
 
+                    displayedAdView = adView
+                    // NativeAdView is a FrameLayout. Stack assets in a vertical child to avoid overlap.
+                    val assets = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, dp(18), 0, 0)
+                    }
+                    adView.addView(assets, FrameLayout.LayoutParams(-1, -2))
                     val details = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
@@ -3091,7 +3101,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     adView.callToActionView = cta
                     details.addView(cta, LinearLayout.LayoutParams(-2, dp(36)))
-                    adView.addView(details)
+                    assets.addView(details)
 
                     nativeAd.body?.takeIf { it.isNotBlank() }?.let { bodyText ->
                         val bodyView = label(bodyText, 10f, 0xFF52627A.toInt()).apply {
@@ -3100,7 +3110,7 @@ class MainActivity : AppCompatActivity() {
                             setPadding(0, dp(5), 0, 0)
                         }
                         adView.bodyView = bodyView
-                        adView.addView(bodyView)
+                        assets.addView(bodyView)
                     }
                     adView.setNativeAd(nativeAd)
                     slot.addView(adView)
@@ -3113,6 +3123,15 @@ class MainActivity : AppCompatActivity() {
             })
             .build()
         loader.loadAd(AdRequest.Builder().build())
+        return {
+            if (disposed.compareAndSet(false, true)) {
+                displayedAdView?.destroy()
+                displayedAdView = null
+                displayedAd?.let { ad -> loadedNativeAds.remove(ad); ad.destroy() }
+                displayedAd = null
+                (slot.parent as? ViewGroup)?.removeView(slot)
+            }
+        }
     }
 
     private fun showCreatePdfHub() {
@@ -4961,6 +4980,8 @@ class MainActivity : AppCompatActivity() {
             info.addView(name); info.addView(gap(5)); info.addView(fileTypeLabel); info.addView(gap(4)); info.addView(metadata); info.addView(gap(5)); info.addView(location)
             card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
             panel.addView(card)
+            val resultAdHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(resultAdHost)
             panel.addView(gap(14))
             val statusText = label("Use Save As to choose a folder on your device.", 12f, 0xFF52627A.toInt()).apply {
                 accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -5005,7 +5026,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(actions)
             val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
-            val dialog = appDialog().setView(toolDialogScroll(panel)).setNegativeButton("Done", null).create()
+            val dialog = appDialog().setView(toolDialogScroll(panel, 0.68f)).setNegativeButton("Done", null).create()
             exportResultDialog = dialog
             var displayedUri: String? = null
             var selectorEntries = emptyList<String>()
@@ -5098,13 +5119,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             refreshExportResult = { render() }
+            var disposeResultAd: () -> Unit = {}
             dialog.setOnDismissListener {
+                disposeResultAd()
                 resultPreviewGeneration.incrementAndGet()
                 if (exportResultDialog === dialog) {
                     exportResultDialog = null; refreshExportResult = null; exportStatusView = null; exportResults.clear()
                 }
             }
             dialog.show()
+            // Request only once for the result session, after the host is attached.
+            disposeResultAd = addNativeAdCard(resultAdHost)
             render()
         }
     }
