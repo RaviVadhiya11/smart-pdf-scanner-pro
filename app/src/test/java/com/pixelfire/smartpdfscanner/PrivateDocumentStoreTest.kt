@@ -50,4 +50,27 @@ class PrivateDocumentStoreTest {
         assertThrows(IOException::class.java) { PrivateDocumentStore.save(blocked, byteArrayOf(1), "Scan.pdf") }
         assertEquals("keep", blocked.readText())
     }
+    @Test fun renameNeverOverwritesAnotherDocument() = inFolder { folder ->
+        val source = File(folder, "first.pdf").apply { writeText("first") }
+        val existing = File(folder, "second.pdf").apply { writeText("second") }
+        assertThrows(IOException::class.java) { PrivateDocumentStore.rename(source, existing.name) }
+        assertEquals("first", source.readText())
+        assertEquals("second", existing.readText())
+    }
+    @Test fun renameRejectsPathsAndKeepsTheSource() = inFolder { folder ->
+        val source = File(folder, "first.pdf").apply { writeText("keep") }
+        for (name in listOf("../outside.pdf", "sub/file.pdf", "sub\\file.pdf", "", "bad\nname.pdf")) {
+            assertThrows(IllegalArgumentException::class.java) { PrivateDocumentStore.rename(source, name) }
+        }
+        assertEquals("keep", source.readText())
+        assertEquals(1, folder.listFiles()!!.size)
+    }
+    @Test fun renamePreservesContentsAndSupportsUnchangedName() = inFolder { folder ->
+        val source = File(folder, "first.pdf").apply { writeText("keep") }
+        assertEquals(source, PrivateDocumentStore.rename(source, "first.pdf"))
+        val renamed = PrivateDocumentStore.rename(source, "New document.pdf")
+        assertFalse(source.exists())
+        assertEquals("keep", renamed.readText())
+        assertEquals(1, folder.listFiles()!!.size)
+    }
 }

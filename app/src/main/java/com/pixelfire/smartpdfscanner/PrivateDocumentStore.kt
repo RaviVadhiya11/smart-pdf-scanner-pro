@@ -9,6 +9,23 @@ import java.io.OutputStream
 internal object PrivateDocumentStore {
     fun save(directory: File, bytes: ByteArray, name: String): File = save(directory, name) { it.write(bytes) }
 
+    /** Rename within the same directory, reserving the name before moving. */
+    @Synchronized
+    fun rename(source: File, requestedName: String): File {
+        val name = requestedName.trim()
+        require(name.isNotBlank() && name.length <= 120 && name != "." && name != ".." &&
+            name.none { it == '/' || it == '\\' || it.isISOControl() }) { "Use a file name without slashes or control characters (up to 120 characters)." }
+        if (!source.isFile) throw IOException("The original file is no longer available.")
+        val target = File(source.parentFile, name)
+        if (source.canonicalFile == target.canonicalFile) return source
+        if (!target.createNewFile()) throw IOException("A document with this name already exists. Choose another name.")
+        if (!source.renameTo(target)) {
+            target.delete()
+            throw IOException("Could not rename this document.")
+        }
+        return target
+    }
+
     @Synchronized
     fun save(directory: File, name: String, writeContents: (OutputStream) -> Unit): File {
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create the documents folder.")

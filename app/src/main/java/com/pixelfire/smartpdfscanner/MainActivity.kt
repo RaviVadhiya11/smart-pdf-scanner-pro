@@ -348,6 +348,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private val pdfTextPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) extractPdfText(uri) }
+    private val collagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPageCollage(uri) }
     private val detailsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfDetails(uri) }
     private val rotatePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) rotatePdfPages(uri) }
     private val pdfEditorPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfEditor(uri) }
@@ -705,7 +706,11 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("scanner_data", MODE_PRIVATE) }
     private val homeFolders = mutableListOf<String>()
     private var selectedFolder: String = "New Folder"
-    private val folderAssignments by lazy { prefs.getString("folder_assignments", "")?.split("\\n")?.filter { it.contains("|") }?.associate { it.substringBefore("|") to it.substringAfter("|") }?.toMutableMap() ?: mutableMapOf() }
+    private val folderAssignments by lazy { java.util.Collections.synchronizedMap(prefs.getString("folder_assignments", "")?.split("\\n")?.filter { it.contains("|") }?.associate { it.substringBefore("|") to it.substringAfter("|") }?.toMutableMap() ?: mutableMapOf()) }
+
+    private fun folderAssignmentSnapshot(): String = synchronized(folderAssignments) {
+        folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }
+    }
 
     private fun loadFolders() {
         homeFolders.clear()
@@ -715,7 +720,7 @@ class MainActivity : AppCompatActivity() {
     private fun saveFolders() { prefs.edit().putStringSet("folders", homeFolders.toSet()).apply() }
     private fun assignPdf(uri: Uri) {
         folderAssignments[uri.toString()] = selectedFolder
-        prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+        prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
     }
 
     private fun styleSystemBars(statusColor: Int, lightStatus: Boolean) {
@@ -1071,7 +1076,7 @@ class MainActivity : AppCompatActivity() {
             if (hasScannedOnce) "Your scanner is ready" else "Ready to scan your first document",
             14f, navy, true
         )
-        recent = label("Your PDFs are saved in Downloads/DocumentScanner", 11f, muted)
+        recent = label("Saved inside DocNexa • use Save As for a device copy", 11f, muted)
         if (!hasScannedOnce) {
             val recentCard = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1115,11 +1120,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDocumentSearch() {
-        val field = EditText(this).apply { hint = "Enter document name"; setSingleLine(true) }
+        val field = EditText(this).apply { hint = "Name, tags or date note"; setSingleLine(true) }
         appDialog().setTitle("Search documents").setView(field)
             .setPositiveButton("Search") { _, _ ->
                 val query = field.text.toString().trim()
-                val matches = getSavedPdfs().filter { it.first.contains(query, ignoreCase = true) }
+                val matches = getSavedPdfs().filter { (it.first + " " + prefs.getString("document_tag_" + it.second.toString().hashCode(), "") + " " +
+                    prefs.getString("document_datetime_" + it.second.toString().hashCode(), "")).contains(query, ignoreCase = true) }
                 if (query.isBlank()) Toast.makeText(this, "Type a document name to search", Toast.LENGTH_SHORT).show()
                 else if (matches.isEmpty()) appDialog().setTitle("No documents found")
                     .setMessage("No saved PDF matches: " + query).setPositiveButton("OK", null).show()
@@ -1555,7 +1561,7 @@ class MainActivity : AppCompatActivity() {
         val answers = arrayOf(
             "Tap Scan on the home screen, allow camera access if asked, capture your pages and save the PDF.",
             "Tap Import and select one or more images. DocNexa will create a PDF from the selected images.",
-            "Scanned PDFs are saved in Downloads/DocumentScanner on your device.",
+            "Scanned PDFs are saved in DocNexa app storage on your device.",
             "Open the app drawer, choose Login or Create Account, verify your email if requested, then use Account / Cloud Sync. Cloud sync requires an internet connection.",
             "Open Login, enter your account email and tap Forgot password. Follow the reset link sent by the authentication service. Check spam if you do not see it.",
             "Open the app drawer, choose Trash, select a document and choose Restore. Permanent deletion cannot be undone."
@@ -1624,7 +1630,7 @@ class MainActivity : AppCompatActivity() {
             If you create an account, your email address and the name you enter may be processed by the app's authentication service (Supabase). Your password is handled by that authentication service; do not share it with anyone.
 
             2. Documents and files
-            PDFs created or imported in the app are saved on your device in Downloads/DocumentScanner. If you choose Cloud Sync while signed in, document files may be uploaded to the configured Supabase storage service so they can be restored on another device. Do not upload documents unless you are comfortable storing them with that service.
+            PDFs created or imported in the app are saved on your device in DocNexa app storage. If you choose Cloud Sync while signed in, document files may be uploaded to the configured Supabase storage service so they can be restored on another device. Do not upload documents unless you are comfortable storing them with that service.
 
             3. Camera, photos and files
             Camera access is used for document scanning. Photo/file access is used only when you choose to import or open documents. The app processes the selected content to provide its scanner and PDF features.
@@ -1684,7 +1690,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDataHelp() {
         appDialog().setTitle("Your data and account")
-            .setMessage("Local PDFs are stored in Downloads/DocumentScanner. Cloud sync is optional and requires you to sign in. Signing out only removes the account session from this device; it does not automatically erase PDFs saved locally or cloud copies. To request help with account or privacy data, use Contact us and describe what you want removed. Never send your password.")
+            .setMessage("Local PDFs are stored inside DocNexa and may be removed when you uninstall the app or clear app data. Use Save As to keep a separate device copy. Cloud sync is optional and requires you to sign in. Signing out only removes the account session from this device; it does not automatically erase PDFs saved locally or cloud copies. To request help with account or privacy data, use Contact us and describe what you want removed. Never send your password.")
             .setPositiveButton("OK", null)
             .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
     }
@@ -2109,7 +2115,7 @@ class MainActivity : AppCompatActivity() {
                     showDocsScreen()
                 }.setNegativeButton("Cancel", null).show()
         }
-        setting("▤", "Storage location", "Downloads/DocumentScanner • ${docs.size} saved PDF(s)") {
+        setting("▤", "Storage location", "DocNexa app storage • ${docs.size} saved PDF(s)") {
             showPremiumDialog(appDialog()
                 .setTitle("DocNexa storage")
                 .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nInternal storage / Download / DocumentScanner\n\nCurrently indexed: ${docs.size} PDF(s).\n\nYou can open this folder from your phone's Files app.")
@@ -2479,7 +2485,7 @@ class MainActivity : AppCompatActivity() {
         action("Open with Google Docs", "Open using a compatible app", "G") { openPdfWithGoogleDocs(uri) }
 
         section("Convert and export")
-        action("Export first page as JPG", "Save only page 1 to Gallery", "▧") { savePdfPageAsJpg(uri) }
+        action("Export first page as JPG", "Create a JPG with Save As and Share", "▧") { savePdfPageAsJpg(uri) }
         action("Export all pages as images", "Save every page as a separate image", "▧") { convertPdfToImages(uri) }
         action("Create ZIP archive", "Package this PDF into a ZIP file", "ZIP") { zipPdf(uri) }
         action("Extract PDF text", "Read and copy selectable text", "T") { extractPdfText(uri) }
@@ -2488,11 +2494,12 @@ class MainActivity : AppCompatActivity() {
         section("Edit and organize")
         action("Edit PDF", "Add text, signature and annotations", "✎") { showPdfEditor(uri) }
         action("Compress PDF", "Reduce file size with quality options", "⇩") { showCompressionOptions(uri) }
+        action("Page Collage", "Arrange 2 or 4 pages per sheet", "▦") { showPageCollage(uri) }
         action("Split PDF", "Extract selected pages into a new PDF", "↔") { splitPdfFile(uri) }
         action("Rotate pages", "Rotate all or selected pages", "⟳") { rotatePdfPages(uri) }
         action("Move to Folder", "Organize this document", "▰") { movePdfToFolder(uri) }
         action("Rename PDF", "Change the document filename", "Aa") { renamePdfDocument(uri, name) }
-        action("Copy PDF", "Create another copy in Downloads", "▣") { copyPdfDocument(uri) }
+        action("Copy PDF", "Create another copy inside DocNexa", "▣") { copyPdfDocument(uri) }
         action("Tags and notes", "Add searchable labels or a date note", "⌑") {
             appDialog().setTitle("Document details")
                 .setItems(arrayOf("Edit tags", "Add date / time note")) { _, which ->
@@ -2522,7 +2529,7 @@ class MainActivity : AppCompatActivity() {
         val more = arrayOf(
             "Favourite / Unfavourite", "Pin Document", "OCR Text",
             "Copy PDF", "Split PDF", "Rename", "Tags",
-            "Date and Time setting", "Open with Google Docs", "MultiSide Doc / Collage"
+            "Date and Time setting", "Open with Google Docs", "Page Collage"
         )
         appDialog().setTitle("More • $name").setItems(more) { _, which ->
             when (which) {
@@ -2538,7 +2545,7 @@ class MainActivity : AppCompatActivity() {
                 6 -> documentTagDialog(uri)
                 7 -> documentDateTimeDialog(uri)
                 8 -> openPdfWithGoogleDocs(uri)
-                9 -> Toast.makeText(this, "MultiSide Doc / Collage is not available yet.", Toast.LENGTH_LONG).show()
+                9 -> showPageCollage(uri)
             }
         }.show()
     }
@@ -2560,32 +2567,95 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
-                val bitmap = descriptor.use { pfd ->
+                descriptor.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
-                        if (renderer.pageCount == 0) error("PDF has no pages")
+                        require(renderer.pageCount > 0) { "PDF has no pages" }
                         renderer.openPage(0).use { page ->
-                            val scale = 2f
-                            Bitmap.createBitmap((page.width * scale).toInt(), (page.height * scale).toInt(), Bitmap.Config.ARGB_8888).also {
-                                Canvas(it).apply { drawColor(android.graphics.Color.WHITE) }
-                                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            val scale = minOf(2f, 2400f / maxOf(page.width, page.height))
+                            val bitmap = Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                            try {
+                                Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                val bytes = ByteArrayOutputStream().also { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)) }.toByteArray()
+                                val name = "DocNexa_Page1_${System.currentTimeMillis()}.jpg"
+                                val saved = saveBytesPrivately(bytes, name) ?: error("Could not save JPG. Check available storage.")
+                                showExportSuccess(saved, name, "image/jpeg")
+                            } finally { bitmap.recycle() }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to JPG failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun showPageCollage(uri: Uri) {
+        var perSheet = 2
+        appDialog().setTitle("Page Collage")
+            .setView(label("Arrange pages on A4 sheets. Original kept. The new PDF contains page images; searchable text, links and forms are flattened.", 13f, 0xFF69778D.toInt()).apply { setPadding(dp(24), dp(12), dp(24), dp(12)) })
+            .setSingleChoiceItems(arrayOf("2 pages per sheet", "4 pages per sheet"), 0) { _, index -> perSheet = if (index == 0) 2 else 4 }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create collage") { _, _ -> createPageCollage(uri, perSheet) }.show()
+    }
+
+    private fun createPageCollage(uri: Uri, perSheet: Int) {
+        val progress = appDialog().setTitle("Creating page collage")
+            .setMessage("Preparing pages…").setCancelable(false).create()
+        progress.show()
+        Thread {
+            try {
+                val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
+                descriptor.use { pfd ->
+                    PdfRenderer(pfd).use { renderer ->
+                        require(renderer.pageCount > 0) { "PDF has no pages" }
+                        val totalPages = renderer.pageCount
+                        PdfDocument().use { output ->
+                            val columns = if (perSheet == 4) 2 else 1
+                            val cellWidth = (595 - 48) / columns
+                            val cellHeight = (842 - 48) / 2
+                            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            for (start in 0 until renderer.pageCount step perSheet) {
+                                val sheet = output.startPage(PdfDocument.PageInfo.Builder(595, 842, start / perSheet + 1).create())
+                                try {
+                                    sheet.canvas.drawColor(android.graphics.Color.WHITE)
+                                    for (slot in 0 until minOf(perSheet, renderer.pageCount - start)) {
+                                        renderer.openPage(start + slot).use { source ->
+                                            val scale = minOf(cellWidth * 2f / source.width, (cellHeight - 22) * 2f / source.height)
+                                            val bitmap = Bitmap.createBitmap((source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                                            try {
+                                                Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                                                source.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                                val x = 24 + (slot % columns) * cellWidth
+                                                val y = 24 + (slot / columns) * cellHeight
+                                                sheet.canvas.drawBitmap(bitmap, null, fitRect(bitmap.width, bitmap.height, cellWidth - 12, cellHeight - 26, x + 6, y), paint)
+                                                paint.textSize = 10f
+                                                paint.color = android.graphics.Color.DKGRAY
+                                                sheet.canvas.drawText("Page ${start + slot + 1}", x + 6f, (y + cellHeight - 8).toFloat(), paint)
+                                            } finally { bitmap.recycle() }
+                                        }
+                                    }
+                                } finally { output.finishPage(sheet) }
+                                runOnUiThread { if (!isDestroyed) progress.setMessage("Processed ${minOf(start + perSheet, totalPages)} of $totalPages pages") }
+                            }
+                            val file = PrivateDocumentStore.save(privateDocumentsDir(), "Page_Collage_${System.currentTimeMillis()}.pdf") { output.writeTo(it) }
+                            val saved = privateDocumentUri(file)
+                            assignPdf(saved)
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) {
+                                    progress.dismiss()
+                                    lastPdf = saved
+                                    showExportSuccess(saved, file.name, "application/pdf")
+                                }
                             }
                         }
                     }
                 }
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, "DocNexa_${System.currentTimeMillis()}.jpg")
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
-                }
-                val imageUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("Could not create Gallery image")
-                contentResolver.openOutputStream(imageUri).use { output ->
-                    if (output == null) error("Could not save JPG")
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
-                }
-                bitmap.recycle()
-                showExportSuccess(imageUri, "DocNexa_${System.currentTimeMillis()}.jpg", "image/jpeg")
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to JPG failed", Toast.LENGTH_LONG).show() }
+                runOnUiThread { if (!isFinishing && !isDestroyed) {
+                    progress.dismiss()
+                    appDialog().setTitle("Could not create collage").setMessage(e.localizedMessage ?: "Check this PDF and available storage.").setPositiveButton("OK", null).show()
+                } }
             }
         }.start()
     }
@@ -2595,7 +2665,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot read PDF")
                 val copied = savePdfBytes(bytes, "Copy")
-                runOnUiThread { Toast.makeText(this, if (copied != null) "PDF copy saved in Downloads/DocumentScanner" else "Copy failed", Toast.LENGTH_LONG).show(); buildScreen() }
+                runOnUiThread { Toast.makeText(this, if (copied != null) "PDF copy saved in DocNexa app storage" else "Copy failed", Toast.LENGTH_LONG).show(); buildScreen() }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Copy failed", Toast.LENGTH_LONG).show() }
             }
@@ -2613,17 +2683,17 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val newName = if (value.endsWith(".pdf", true)) value else "$value.pdf"
                         val privateFile = privateDocumentFile(uri)
+                        var renamedFile: java.io.File? = null
                         val changed = if (privateFile != null) {
-                            privateFile.renameTo(java.io.File(privateDocumentsDir(), newName))
+                            renamedFile = PrivateDocumentStore.rename(privateFile, newName)
+                            true
                         } else {
                             val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, newName) }
                             contentResolver.update(uri, values, null, null) > 0
                         }
                         if (changed) {
-                            val assignments = folderAssignments.remove(uri.toString())
-                            val renamedFile = privateFile?.let { java.io.File(privateDocumentsDir(), newName) }
-                            if (assignments != null && renamedFile != null) folderAssignments[privateDocumentUri(renamedFile).toString()] = assignments
-                            prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+                            val renamedUri = renamedFile?.let { privateDocumentUri(it) } ?: uri
+                            if (renamedUri != uri) migrateDocumentMetadata(uri, renamedUri)
                             Toast.makeText(this, "PDF renamed", Toast.LENGTH_SHORT).show()
                             buildScreen()
                         } else Toast.makeText(this, "Rename failed", Toast.LENGTH_LONG).show()
@@ -2634,12 +2704,29 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
+    private fun migrateDocumentMetadata(oldUri: Uri, newUri: Uri) {
+        val old = oldUri.toString()
+        val new = newUri.toString()
+        folderAssignments.remove(old)?.let { folderAssignments[new] = it }
+        val editor = prefs.edit().putString("folder_assignments", folderAssignmentSnapshot())
+        for (key in listOf("favourite_uris", "trash_uris")) {
+            val values = prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet()
+            if (values.remove(old)) { values.add(new); editor.putStringSet(key, values) }
+        }
+        for (prefix in listOf("document_tag_", "document_datetime_")) {
+            val oldKey = prefix + old.hashCode()
+            prefs.getString(oldKey, null)?.let { editor.putString(prefix + new.hashCode(), it).remove(oldKey) }
+        }
+        editor.apply()
+        if (lastPdf == oldUri) lastPdf = newUri
+    }
+
     private fun movePdfToFolder(uri: Uri) {
         if (homeFolders.isEmpty()) loadFolders()
         val folders = homeFolders.toTypedArray()
         appDialog().setTitle("Move to Folder").setItems(folders) { _, which ->
             folderAssignments[uri.toString()] = folders[which]
-            prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+            prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
             Toast.makeText(this, "Moved to ${folders[which]}", Toast.LENGTH_SHORT).show()
             buildScreen()
         }.setNegativeButton("Cancel", null).show()
@@ -2725,33 +2812,37 @@ class MainActivity : AppCompatActivity() {
     private fun getSavedPdfs(): List<Pair<String, Uri>> {
         val trashed = prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()
         val results = mutableListOf<Pair<String, Uri>>()
+        val modified = mutableMapOf<Uri, Long>()
         try {
             privateDocumentsDir().listFiles()?.filter { it.isFile && it.extension.equals("pdf", true) }?.forEach { file ->
                 val uri = privateDocumentUri(file)
-                if (!trashed.contains(uri.toString())) results.add(file.name to uri)
+                if (!trashed.contains(uri.toString())) { results.add(file.name to uri); modified[uri] = file.lastModified() }
             }
             // Keep documents created by earlier app versions visible during migration.
             val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external")
-            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED)
             val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?" else "${MediaStore.MediaColumns.MIME_TYPE} = ?"
             val args = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) arrayOf("Download/DocumentScanner/", "application/pdf") else arrayOf("application/pdf")
             contentResolver.query(collection, projection, selection, args, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
                 val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
                 val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
-                while (cursor.moveToNext() && results.size < 100) {
+                while (cursor.moveToNext()) {
                     val id = cursor.getLong(idIndex)
                     val name = cursor.getString(nameIndex) ?: "Document.pdf"
                     val itemUri = Uri.withAppendedPath(collection, id.toString())
-                    if (!trashed.contains(itemUri.toString()) && results.none { it.second == itemUri }) results.add(name to itemUri)
+                    if (!trashed.contains(itemUri.toString()) && results.none { it.second == itemUri }) {
+                        results.add(name to itemUri)
+                        modified[itemUri] = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)) * 1000L
+                    }
                 }
             }
         } catch (_: Exception) { }
         return when (prefs.getInt("document_sort_order", 2)) {
             0 -> results.sortedBy { it.first.lowercase(Locale.ROOT) }
             1 -> results.sortedByDescending { it.first.lowercase(Locale.ROOT) }
-            3 -> results.reversed()
-            else -> results
-        }.take(100)
+            3 -> results.sortedBy { modified[it.second] ?: 0L }
+            else -> results.sortedByDescending { modified[it.second] ?: 0L }
+        }
     }
     private fun createFolderDialog() {
         val field = android.widget.EditText(this).apply { hint = "Folder name" }
@@ -2775,8 +2866,8 @@ class MainActivity : AppCompatActivity() {
                 if (name.isNotEmpty() && index >= 0) {
                     homeFolders[index] = name
                     saveFolders()
-                    folderAssignments.entries.filter { it.value == oldName }.forEach { folderAssignments[it.key] = name }
-                    prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
+                    synchronized(folderAssignments) { folderAssignments.entries.filter { it.value == oldName }.forEach { folderAssignments[it.key] = name } }
+                    prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
                     buildScreen()
                 }
             }.setNegativeButton("Cancel", null).show()
@@ -2882,6 +2973,7 @@ class MainActivity : AppCompatActivity() {
         )
         val pdfTools = listOf(
             PdfTool("Create PDF", "＋", 0xFF2563EB.toInt()) { showCreatePdfHub() },
+            PdfTool("Page Collage", "▦", 0xFF0891B2.toInt()) { collagePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Reorder Pages", "⇅", 0xFF2563EB.toInt()) { reorderPagesPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Delete Pages", "−", 0xFFDC4D58.toInt()) { deletePagesPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Extract Pages", "⇱", 0xFF0891B2.toInt()) { extractPagesPicker.launch(arrayOf("application/pdf")) },
@@ -3953,7 +4045,7 @@ class MainActivity : AppCompatActivity() {
             document.writeTo(output)
             document.close()
             val saved = savePdfBytes(output.toByteArray(), "Signature")
-            Toast.makeText(this, if (saved != null) "Signature-only PDF saved in Downloads/DocumentScanner" else "Could not save signature PDF", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, if (saved != null) "Signature-only PDF saved in DocNexa app storage" else "Could not save signature PDF", Toast.LENGTH_LONG).show()
             buildScreen()
         } catch (e: Exception) {
             Toast.makeText(this, e.localizedMessage ?: "Signature PDF creation failed", Toast.LENGTH_LONG).show()
@@ -4539,7 +4631,7 @@ class MainActivity : AppCompatActivity() {
                         lastPdf = saved
                         status.text = "Edited PDF saved"
                         recent.text = "Latest: ${saved.lastPathSegment}"
-                        Toast.makeText(this, "Edited PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Edited PDF saved in DocNexa app storage", Toast.LENGTH_LONG).show()
                         openPdf(saved)
                     } else Toast.makeText(this, "Could not save edited PDF", Toast.LENGTH_LONG).show()
                 }
@@ -4718,7 +4810,7 @@ class MainActivity : AppCompatActivity() {
                                     lastPdf = saved
                                     status.text = "Compressed PDF saved"
                                     recent.text = "Latest: ${saved.lastPathSegment}"
-                                    Toast.makeText(this, "Compressed PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(this, "Compressed PDF saved in DocNexa app storage", Toast.LENGTH_LONG).show()
                                 } else Toast.makeText(this, "Could not save compressed PDF", Toast.LENGTH_LONG).show()
                             }
                             .setNeutralButton("Share") { _, _ ->
@@ -4878,7 +4970,7 @@ class MainActivity : AppCompatActivity() {
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try { startActivity(intent) }
-        catch (_: Exception) { Toast.makeText(this, "No DOCX app found. The file is saved in Downloads/DocumentScanner.", Toast.LENGTH_LONG).show() }
+        catch (_: Exception) { Toast.makeText(this, "No DOCX app found. The file is saved in DocNexa app storage.", Toast.LENGTH_LONG).show() }
     }
 
     private fun shareWordDocument(uri: Uri) {
@@ -5294,7 +5386,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } finally { renderer.close(); pfd.close() }
-                runOnUiThread { Toast.makeText(this, "PDF pages exported as images to Downloads/DocumentScanner", Toast.LENGTH_LONG).show() }
+                runOnUiThread { Toast.makeText(this, "PDF pages exported as images to DocNexa app storage", Toast.LENGTH_LONG).show() }
             } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to Image failed", Toast.LENGTH_LONG).show() } }
         }.start()
     }
@@ -5332,7 +5424,7 @@ class MainActivity : AppCompatActivity() {
                         val saved = saveDocumentBytes(bytes.toByteArray(), archiveName, "application/zip", "zip")
                         runOnUiThread {
                             if (saved != null) {
-                                Toast.makeText(this, "$archiveName.zip saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this, "$archiveName.zip saved in DocNexa app storage", Toast.LENGTH_LONG).show()
                                 val share = Intent(Intent.ACTION_SEND).apply {
                                     type = "application/zip"
                                     putExtra(Intent.EXTRA_STREAM, saved)
@@ -5528,7 +5620,7 @@ class MainActivity : AppCompatActivity() {
                                 val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
                                 Toast.makeText(
                                     this,
-                                    if (saved != null) "QR PNG downloaded to Downloads/DocumentScanner" else "Could not save QR image",
+                                    if (saved != null) "QR PNG downloaded to DocNexa app storage" else "Could not save QR image",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
