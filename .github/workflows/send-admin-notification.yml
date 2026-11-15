@@ -1,0 +1,71 @@
+name: Send DocNexa Admin Notification
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Notification title"
+        required: true
+        type: string
+      message:
+        description: "Notification message"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    name: Send to opted-in DocNexa users
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Firebase Admin SDK
+        run: npm install --no-save firebase-admin
+
+      - name: Send topic notification
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          NOTIFICATION_TITLE: ${{ inputs.title }}
+          NOTIFICATION_MESSAGE: ${{ inputs.message }}
+        run: |
+          node <<'NODE'
+          const { initializeApp, cert } = require('firebase-admin/app');
+          const { getMessaging } = require('firebase-admin/messaging');
+
+          async function main() {
+            const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+            if (!raw) throw new Error('Missing FIREBASE_SERVICE_ACCOUNT repository secret.');
+
+            const serviceAccount = JSON.parse(raw);
+            if (serviceAccount.project_id !== 'docnexa-f428d') {
+              throw new Error('The configured service account is not for the DocNexa Firebase project.');
+            }
+
+            const title = (process.env.NOTIFICATION_TITLE || '').trim();
+            const body = (process.env.NOTIFICATION_MESSAGE || '').trim();
+            if (!title || !body) throw new Error('Both notification title and message are required.');
+            if (title.length > 80 || body.length > 500) {
+              throw new Error('Title must be at most 80 characters and message at most 500 characters.');
+            }
+
+            initializeApp({ credential: cert(serviceAccount) });
+            const messageId = await getMessaging().send({
+              topic: 'docnexa_announcements',
+              notification: { title, body },
+              data: { type: 'admin_announcement' },
+              android: { priority: 'normal', notification: { channelId: 'important_updates' } }
+            });
+            console.log('Notification accepted by Firebase. Message ID:', messageId);
+          }
+
+          main().catch(error => {
+            console.error('Notification send failed:', error.message);
+            process.exit(1);
+          });
+          NODE
