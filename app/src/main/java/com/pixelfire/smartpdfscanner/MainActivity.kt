@@ -4955,10 +4955,10 @@ class MainActivity : AppCompatActivity() {
             card.addView(frame, LinearLayout.LayoutParams(dp(72), dp(96)))
             val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
             val name = label("", 14f, 0xFF172B4D.toInt(), true).apply { setTextIsSelectable(true) }
-            val type = label("", 11f, 0xFF52627A.toInt())
+            val fileTypeLabel = label("", 11f, 0xFF52627A.toInt())
             val metadata = label("Reading file details…", 11f, 0xFF52627A.toInt())
             val location = label("", 10f, 0xFF128268.toInt())
-            info.addView(name); info.addView(gap(5)); info.addView(type); info.addView(gap(4)); info.addView(metadata); info.addView(gap(5)); info.addView(location)
+            info.addView(name); info.addView(gap(5)); info.addView(fileTypeLabel); info.addView(gap(4)); info.addView(metadata); info.addView(gap(5)); info.addView(location)
             card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
             panel.addView(card)
             panel.addView(gap(14))
@@ -5025,7 +5025,7 @@ class MainActivity : AppCompatActivity() {
                     bindingSelector = false
                 }
                 name.text = item.fileName
-                type.text = ExportResultSession.typeLabel(item.mime)
+                fileTypeLabel.text = ExportResultSession.typeLabel(item.mime)
                 location.text = if (privateDocumentFile(Uri.parse(item.uri)) != null) "Saved inside DocNexa" else "Saved file"
                 openButton.text = if (item.mime == "application/pdf") "Open PDF" else "Open file"
                 gallery.visibility = if (item.mime.startsWith("image/") && Build.VERSION.SDK_INT >= 29) View.VISIBLE else View.GONE
@@ -6009,7 +6009,7 @@ class MainActivity : AppCompatActivity() {
                 doc.close()
                 val pdfUri = savePdfBytes(pdfBytes, "Passport_Photo_Sheet")
                 runOnUiThread {
-                    showExportSuccess(jpgUri, displayName(jpgUri, 0), "image/jpeg")
+                    showExportSuccess(jpgUri, jpgValues.getAsString(MediaStore.Images.Media.DISPLAY_NAME) ?: "Passport_Photos.jpg", "image/jpeg")
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Passport photo sheet failed", Toast.LENGTH_LONG).show() }
