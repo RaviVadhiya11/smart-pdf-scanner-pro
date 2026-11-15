@@ -37,4 +37,17 @@ class PdfPagePlanTest {
         assertEquals(listOf(0), PdfPagePlan.selection(" 1 ", 1))
         assertEquals(listOf(0, 1, 3), PdfPagePlan.selection(" 1 - 2 , 4 ", 4))
     }
+    @Test fun compactSelectionsRoundTripWithoutChangingOrder() {
+        listOf(listOf(0), listOf(0, 1, 2, 4), listOf(5, 4, 3, 0, 1), (0 until 20000).toList()).forEach { pages ->
+            assertEquals(pages, PdfPagePlan.selection(PdfPagePlan.formatSelection(pages), pages.max() + 1))
+        }
+        assertEquals("", PdfPagePlan.formatSelection(emptyList()))
+    }
+    @Test fun arrowMovesPreserveAllPagesAndRespectBoundaries() {
+        assertEquals(listOf(1, 0, 2), PdfPagePlan.move(listOf(0, 1, 2), 0, 1))
+        assertEquals(listOf(2, 0, 1), PdfPagePlan.move(listOf(0, 2, 1), 2, -1))
+        assertEquals(listOf(0, 1), PdfPagePlan.move(listOf(0, 1), 0, -1))
+        assertEquals(listOf(0, 1), PdfPagePlan.move(listOf(0, 1), 1, 1))
+        assertEquals(listOf(0, 1), PdfPagePlan.move(listOf(0, 1), 4, -1))
+    }
 }

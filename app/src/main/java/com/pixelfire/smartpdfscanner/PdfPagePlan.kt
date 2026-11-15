@@ -31,6 +31,32 @@ internal object PdfPagePlan {
         return selected
     }
 
+    /** Compact consecutive runs without losing a user's chosen page order. */
+    fun formatSelection(pages: List<Int>): String {
+        if (pages.isEmpty()) return ""
+        val parts = ArrayList<String>()
+        var index = 0
+        while (index < pages.size) {
+            val first = pages[index]
+            var last = index
+            val step = if (index + 1 < pages.size) pages[index + 1] - first else 0
+            if (step == 1 || step == -1) {
+                while (last + 1 < pages.size && pages[last + 1] - pages[last] == step) last++
+            }
+            parts.add(if (last == index) "${first + 1}" else "${first + 1}-${pages[last] + 1}")
+            index = last + 1
+        }
+        return parts.joinToString(", ")
+    }
+
+    fun move(pages: List<Int>, page: Int, direction: Int): List<Int> {
+        require(direction == -1 || direction == 1) { "Choose an adjacent position." }
+        val from = pages.indexOf(page)
+        val to = from + direction
+        if (from == -1 || to !in pages.indices) return pages.toList()
+        return pages.toMutableList().apply { java.util.Collections.swap(this, from, to) }
+    }
+
     fun build(operation: Operation, value: String, total: Int): List<Int> {
         val selected = selection(value, total)
         return when (operation) {

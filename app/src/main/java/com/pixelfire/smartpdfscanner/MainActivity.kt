@@ -397,50 +397,236 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
-    private fun showPremiumDialog(builder: AlertDialog.Builder): AlertDialog {
-        val dialog = builder.create()
-        dialog.setOnShowListener {
-            dialog.window?.setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 24, 0xFFE1E9F5.toInt()))
-            dialog.window?.setLayout(
-                (resources.displayMetrics.widthPixels * 0.90f).toInt(),
-                android.view.WindowManager.LayoutParams.WRAP_CONTENT
-            )
-            listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
-                dialog.getButton(which)?.apply {
-                    isAllCaps = false
-                    textSize = 14f
-                    setTextColor(0xFF1764C0.toInt())
+    private fun showPremiumDialog(builder: AlertDialog.Builder): AlertDialog = builder.show()
+
+    /** Shared dialog appearance without replacing each tool's validation or button callbacks. */
+    private fun appDialog(): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
+        override fun create(): AlertDialog {
+            val dialog = super.create()
+            dialog.window?.decorView?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.post {
+                        if (!dialog.isShowing) return@post
+                        dialog.window?.apply {
+                            setLayout(minOf(dp(560), resources.displayMetrics.widthPixels - dp(32)), -2)
+                            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                        }
+                        fun styleInputs(view: View) {
+                            if (view is NativeAdView) return
+                            if (view is EditText) {
+                                view.setTextColor(0xFF172B4D.toInt())
+                                view.setHintTextColor(0xFF64748B.toInt())
+                                view.textSize = maxOf(view.textSize / resources.displayMetrics.scaledDensity, 14f)
+                                view.setPadding(dp(14), dp(12), dp(14), dp(12))
+                                view.minimumHeight = dp(48)
+                                view.background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFD4E2F4.toInt())
+                                (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
+                                    it.topMargin = dp(8); it.bottomMargin = dp(8)
+                                }
+                            }
+                            if (view is android.widget.CompoundButton) {
+                                view.setTextColor(0xFF172B4D.toInt())
+                                view.buttonTintList = android.content.res.ColorStateList(
+                                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                                    intArrayOf(0xFF2563EB.toInt(), 0xFF64748B.toInt())
+                                )
+                            }
+                            if (view is ViewGroup) for (i in 0 until view.childCount) styleInputs(view.getChildAt(i))
+                        }
+                        styleInputs(view)
+                    }
+                }
+                override fun onViewDetachedFromWindow(view: View) = Unit
+            })
+            return dialog
+        }
+    }
+
+    private fun toolDialogScroll(content: View): ScrollView = ScrollView(this).apply {
+        isFillViewport = false
+        clipToPadding = false
+        addView(content)
+        // Reserve room for the title and actions on small screens and with large font settings.
+        layoutParams = ViewGroup.LayoutParams(-1, -2)
+        viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                val maximum = (resources.displayMetrics.heightPixels * 0.57f).toInt()
+                if (height > maximum) layoutParams = layoutParams.apply { height = maximum }
+            }
+        })
+    }
+
+    private fun bindPageSelectionAction(dialog: AlertDialog, field: EditText, count: Int, extraFields: List<EditText> = emptyList(), extraValid: () -> Boolean = { true }) {
+        fun validate() {
+            val valid = runCatching { PdfPagePlan.selection(field.text.toString(), count) }.isSuccess && extraValid()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = valid
+        }
+        (listOf(field) + extraFields).forEach { input ->
+            input.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun afterTextChanged(s: android.text.Editable?) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { validate() }
+            })
+        }
+        validate()
+    }
+
+    private val pagePreviewExecutor = Executors.newSingleThreadExecutor()
+
+    /** Render at most eight small previews per batch, keeping large documents responsive. */
+    private fun addVisualPageSelector(
+        parent: LinearLayout, uri: Uri, count: Int, field: EditText,
+        reorder: Boolean = false
+    ) {
+        val holder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        parent.addView(holder)
+        val toolbar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        holder.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(toolbar)
+        })
+        val counter = label("", 12f, 0xFF2563EB.toInt(), true).apply { setPadding(0, dp(8), 0, dp(8)) }
+        holder.addView(counter)
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        holder.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(strip) })
+        val pager = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val previous = Button(this).apply { text = "‹ Previous"; isAllCaps = false; textSize = 11f }
+        val position = label("", 11f, 0xFF64748B.toInt()).apply { gravity = Gravity.CENTER }
+        val next = Button(this).apply { text = "Next ›"; isAllCaps = false; textSize = 11f }
+        pager.addView(previous, LinearLayout.LayoutParams(-2, dp(48)))
+        pager.addView(position, LinearLayout.LayoutParams(0, -2, 1f))
+        pager.addView(next, LinearLayout.LayoutParams(-2, dp(48)))
+        holder.addView(pager)
+        var batchStart = 0
+        val generation = java.util.concurrent.atomic.AtomicInteger()
+        val cache = android.util.LruCache<Int, Bitmap>(16)
+        fun selection(): List<Int> = runCatching { PdfPagePlan.selection(field.text.toString(), count) }.getOrDefault(emptyList())
+        fun choose(pages: List<Int>) { field.setText(PdfPagePlan.formatSelection(pages)) }
+        fun shortcut(title: String, action: () -> Unit) {
+            toolbar.addView(Button(this).apply {
+                text = title; isAllCaps = false; textSize = 11f
+                setOnClickListener { action() }
+            }, LinearLayout.LayoutParams(-2, dp(48)))
+        }
+        if (reorder) {
+            shortcut("Reset") { choose((0 until count).toList()) }
+            shortcut("Reverse") { choose(selection().ifEmpty { (0 until count).toList() }.reversed()) }
+        } else {
+            shortcut("All") { choose((0 until count).toList()) }
+            shortcut("Odd") { choose((0 until count).filter { it % 2 == 0 }) }
+            shortcut("Even") { choose((0 until count).filter { it % 2 == 1 }) }
+            shortcut("Clear") { choose(emptyList()) }
+        }
+        fun render() {
+            val selected = selection()
+            val pages = if (reorder && selected.size == count) selected else (0 until count).toList()
+            batchStart = batchStart.coerceIn(0, maxOf(0, ((count - 1) / 8) * 8))
+            counter.text = if (reorder) "${selected.size} / $count pages in order • use arrows to move" else "${selected.size} / $count selected • tap a page"
+            strip.removeAllViews()
+            val token = generation.incrementAndGet()
+            val requests = mutableListOf<Triple<Int, ImageView, TextView>>()
+            val selectedSet = selected.toHashSet()
+            pages.drop(batchStart).take(8).forEachIndexed { index, pageIndex ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(6), dp(7), dp(6), dp(7))
+                    background = rounded(if (pageIndex in selectedSet) 0xFFEAF2FF.toInt() else 0xFFF8FAFC.toInt(), 12, 0xFFD4E2F4.toInt())
+                }
+                val image = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "Preview of page ${pageIndex + 1}"
+                    setBackgroundColor(0xFFFFFFFF.toInt())
+                }
+                val fallback = label("Loading preview…", 9f, 0xFF64748B.toInt()).apply { gravity = Gravity.CENTER }
+                val frame = FrameLayout(this).apply {
+                    addView(image, FrameLayout.LayoutParams(-1, -1))
+                    addView(fallback, FrameLayout.LayoutParams(-1, -1))
+                }
+                card.addView(frame, LinearLayout.LayoutParams(-1, dp(104)))
+                if (reorder) {
+                    card.addView(label("Page ${pageIndex + 1}", 12f, 0xFF172B4D.toInt(), true))
+                    card.addView(label("Position ${batchStart + index + 1}", 10f, 0xFF64748B.toInt()))
+                    val moves = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                    listOf(-1 to "‹", 1 to "›").forEach { (direction, symbol) ->
+                        moves.addView(Button(this).apply {
+                            text = symbol; minWidth = 0; minimumWidth = 0
+                            contentDescription = "Move page ${pageIndex + 1} ${if (direction < 0) "earlier" else "later"}"
+                            isEnabled = selected.size == count && selected.indexOf(pageIndex) + direction in selected.indices
+                            setOnClickListener { choose(PdfPagePlan.move(selection(), pageIndex, direction)) }
+                        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                    }
+                    card.addView(moves)
+                } else {
+                    val check = android.widget.CheckBox(this).apply {
+                        text = "Page ${pageIndex + 1}"; textSize = 11f
+                        isChecked = pageIndex in selectedSet
+                        setOnCheckedChangeListener { _, checked ->
+                            val current = selection().toMutableList()
+                            if (checked && pageIndex !in current) current.add(pageIndex)
+                            if (!checked) current.remove(pageIndex)
+                            // Explicitly keep an empty list invalid instead of silently selecting all.
+                            choose(current)
+                        }
+                    }
+                    card.addView(check)
+                    card.setOnClickListener { check.performClick() }
+                }
+                strip.addView(card, LinearLayout.LayoutParams(dp(108), -2).apply { rightMargin = dp(8) })
+                val cached = cache.get(pageIndex)
+                if (cached != null) { image.setImageBitmap(cached); fallback.visibility = View.GONE }
+                else requests.add(Triple(pageIndex, image, fallback))
+            }
+            previous.isEnabled = batchStart > 0
+            next.isEnabled = batchStart + 8 < count
+            position.text = "${batchStart + 1}–${minOf(batchStart + 8, count)} / $count"
+            pager.visibility = if (count > 8) View.VISIBLE else View.GONE
+            if (requests.isNotEmpty() && !pagePreviewExecutor.isShutdown) pagePreviewExecutor.execute {
+                try {
+                    val fd = contentResolver.openFileDescriptor(uri, "r") ?: error("No preview")
+                    fd.use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            for ((pageIndex, image, fallback) in requests) {
+                                if (generation.get() != token || isDestroyed) break
+                                val bitmap = renderer.openPage(pageIndex).use { page ->
+                                    val scale = minOf(144f / page.width, 180f / page.height)
+                                    Bitmap.createBitmap(maxOf(1, (page.width * scale).toInt()), maxOf(1, (page.height * scale).toInt()), Bitmap.Config.ARGB_8888).also {
+                                        Canvas(it).drawColor(android.graphics.Color.WHITE)
+                                        page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    }
+                                }
+                                cache.put(pageIndex, bitmap)
+                                runOnUiThread {
+                                    if (generation.get() == token && holder.isAttachedToWindow) {
+                                        image.setImageBitmap(bitmap); fallback.visibility = View.GONE
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    runOnUiThread {
+                        if (generation.get() == token) requests.forEach { it.third.text = "Preview unavailable" }
+                    }
                 }
             }
         }
-        dialog.show()
-        attachNativeAdToDialog(dialog)
-        return dialog
+        val refresh = Runnable { render() }
+        previous.setOnClickListener { batchStart -= 8; render() }
+        next.setOnClickListener { batchStart += 8; render() }
+        field.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                holder.removeCallbacks(refresh); holder.postDelayed(refresh, 180)
+            }
+        })
+        holder.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) { holder.post(refresh) }
+            override fun onViewDetachedFromWindow(view: View) { generation.incrementAndGet(); holder.removeCallbacks(refresh); cache.evictAll() }
+        })
     }
 
-    /**
-     * Adds a responsive Native Ad inside the standard AlertDialog content area,
-     * above the action buttons. Dialogs that already contain an ad card are left alone.
-     */
-    private fun attachNativeAdToDialog(dialog: AlertDialog) {
-        if (!dialog.isShowing) return
-        val decor = dialog.window?.decorView ?: return
-        val parentId = resources.getIdentifier("parentPanel", "id", "android")
-        val parent = if (parentId != 0) decor.findViewById<ViewGroup>(parentId) else null
-        if (parent != null && !containsNativeAdSlot(parent)) {
-            // Use a dedicated LinearLayout host: Android's internal parentPanel is not
-            // guaranteed to be a LinearLayout on every device / Android version.
-            val host = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = ViewGroup.LayoutParams(-1, -2)
-            }
-            val buttonId = resources.getIdentifier("buttonPanel", "id", "android")
-            val buttonPanel = if (buttonId != 0) parent.findViewById<View>(buttonId) else null
-            val insertAt = if (buttonPanel != null) parent.indexOfChild(buttonPanel).coerceAtLeast(0) else parent.childCount
-            parent.addView(host, insertAt, ViewGroup.LayoutParams(-1, -2))
-            addNativeAdCard(host)
-        }
-    }
 
     private fun containsNativeAdSlot(view: View): Boolean {
         if (view.tag == "docnexa_native_ad_slot") return true
@@ -914,14 +1100,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDocumentSearch() {
         val field = EditText(this).apply { hint = "Enter document name"; setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Search documents").setView(field)
+        appDialog().setTitle("Search documents").setView(field)
             .setPositiveButton("Search") { _, _ ->
                 val query = field.text.toString().trim()
                 val matches = getSavedPdfs().filter { it.first.contains(query, ignoreCase = true) }
                 if (query.isBlank()) Toast.makeText(this, "Type a document name to search", Toast.LENGTH_SHORT).show()
-                else if (matches.isEmpty()) AlertDialog.Builder(this).setTitle("No documents found")
+                else if (matches.isEmpty()) appDialog().setTitle("No documents found")
                     .setMessage("No saved PDF matches: " + query).setPositiveButton("OK", null).show()
-                else AlertDialog.Builder(this).setTitle("Search results • " + matches.size)
+                else appDialog().setTitle("Search results • " + matches.size)
                     .setItems(matches.map { it.first }.toTypedArray()) { _, index -> openPdf(matches[index].second) }
                     .setNegativeButton("Close", null).show()
             }.setNegativeButton("Cancel", null).show()
@@ -930,7 +1116,7 @@ class MainActivity : AppCompatActivity() {
     private fun showHomeOverflowMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
-            AlertDialog.Builder(this)
+            appDialog()
                 .setTitle("PDF / JPG")
                 .setItems(arrayOf("Create PDF from images", "Open PDF file")) { _, which ->
                     if (which == 0) imagePicker.launch(arrayOf("image/*"))
@@ -947,7 +1133,7 @@ class MainActivity : AppCompatActivity() {
         }
         popup.menu.add("PDF Tools").setOnMenuItemClickListener { showPdfTools(); true }
         popup.menu.add("Sort By").setOnMenuItemClickListener {
-            AlertDialog.Builder(this).setTitle("Sort documents")
+            appDialog().setTitle("Sort documents")
                 .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
                     prefs.edit().putInt("document_sort_order", which).apply()
                     buildScreen()
@@ -957,7 +1143,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add("Select").setOnMenuItemClickListener {
             val docs = getSavedPdfs()
             if (docs.isEmpty()) Toast.makeText(this, "No documents to select yet", Toast.LENGTH_SHORT).show()
-            else AlertDialog.Builder(this).setTitle("Select documents")
+            else appDialog().setTitle("Select documents")
                 .setMultiChoiceItems(docs.map { it.first }.toTypedArray(), BooleanArray(docs.size)) { _, _, _ -> }
                 .setPositiveButton("Done", null).show()
             true
@@ -968,7 +1154,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
         popup.menu.add("View Mode").setOnMenuItemClickListener {
-            AlertDialog.Builder(this).setTitle("View mode")
+            appDialog().setTitle("View mode")
                 .setSingleChoiceItems(arrayOf("List view", "Grid view"), prefs.getInt("document_view_mode", 0)) { dialog, which ->
                     prefs.edit().putInt("document_view_mode", which).apply()
                     dialog.dismiss()
@@ -1017,6 +1203,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        pagePreviewExecutor.shutdownNow()
         loadedNativeAds.forEach { it.destroy() }
         loadedNativeAds.clear()
         super.onDestroy()
@@ -1070,7 +1257,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(empty)
             // Keep the native ad inside the Trash popup, above its action button.
             addNativeAdCard(panel)
-            showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash").setView(panel)
+            showPremiumDialog(appDialog().setTitle("Trash").setView(panel)
                 .setPositiveButton("OK", null))
             return
         }
@@ -1118,7 +1305,7 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(0xFF64748B.toInt())
                 setPadding(dp(10), dp(8), dp(4), dp(8))
                 setOnClickListener {
-                    AlertDialog.Builder(this@MainActivity).setTitle(name)
+                    appDialog().setTitle(name)
                         .setItems(arrayOf("Restore document", "Delete permanently")) { _, action ->
                             val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
                             if (action == 0) {
@@ -1127,7 +1314,7 @@ class MainActivity : AppCompatActivity() {
                                 Toast.makeText(this@MainActivity, "PDF restored", Toast.LENGTH_SHORT).show()
                                 showTrashScreen()
                             } else {
-                                AlertDialog.Builder(this@MainActivity)
+                                appDialog()
                                     .setTitle("Delete permanently?")
                                     .setMessage("This PDF will be removed from your device.")
                                     .setNegativeButton("Cancel", null)
@@ -1152,7 +1339,7 @@ class MainActivity : AppCompatActivity() {
         panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
         // Keep the native ad inside the Trash popup, above its action button.
         addNativeAdCard(panel)
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Trash • ${trashed.size} item(s)")
+        showPremiumDialog(appDialog().setTitle("Trash • ${trashed.size} item(s)")
             .setView(panel).setPositiveButton("Close", null))
     }
 
@@ -1356,14 +1543,14 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
                 isClickable = true
                 setOnClickListener {
-                    showPremiumDialog(AlertDialog.Builder(this@MainActivity).setTitle(topic)
+                    showPremiumDialog(appDialog().setTitle(topic)
                         .setMessage(answers[index]).setPositiveButton("Got it", null)
                         .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) })
                 }
             }
             panel.addView(row)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Help & FAQ")
+        showPremiumDialog(appDialog().setTitle("DocNexa • Help & FAQ")
             .setView(panel).setNegativeButton("Close", null))
     }
 
@@ -1383,7 +1570,7 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(Intent.createChooser(intent, if (reportBug) "Send bug report" else "Contact DocNexa"))
         } catch (_: Exception) {
-            AlertDialog.Builder(this).setTitle("Email app not found")
+            appDialog().setTitle("Email app not found")
                 .setMessage("Please install or set up an email app on your phone, then try again.")
                 .setPositiveButton("OK", null).show()
         }
@@ -1391,7 +1578,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAboutDocNexa() {
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" }
-        AlertDialog.Builder(this).setTitle("About DocNexa")
+        appDialog().setTitle("About DocNexa")
             .setMessage("DOCNEXA\nPDF Scanner & Editor\nVersion $version\n\nScan, organise and manage PDF documents from your Android device. Save PDFs locally and optionally use an account for cloud backup and sync.\n\nDocNexa is provided as a document productivity tool. Always keep a separate backup of important files.")
             .setPositiveButton("OK", null).show()
     }
@@ -1434,7 +1621,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(12), dp(18), dp(12))
         }
         val scroll = ScrollView(this).apply { addView(view) }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Privacy Policy")
+        showPremiumDialog(appDialog().setTitle("Privacy Policy")
             .setView(scroll).setPositiveButton("Close", null)
             .setNeutralButton("Privacy question") { _, _ -> openFeedbackEmail(false) })
     }
@@ -1458,13 +1645,13 @@ class MainActivity : AppCompatActivity() {
             text = terms; textSize = 13f; setTextColor(0xFF263957.toInt())
             setPadding(dp(18), dp(12), dp(18), dp(12))
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Terms of Use")
+        showPremiumDialog(appDialog().setTitle("Terms of Use")
             .setView(ScrollView(this).apply { addView(view) })
             .setPositiveButton("Close", null))
     }
 
     private fun showDataHelp() {
-        AlertDialog.Builder(this).setTitle("Your data and account")
+        appDialog().setTitle("Your data and account")
             .setMessage("Local PDFs are stored in Downloads/DocumentScanner. Cloud sync is optional and requires you to sign in. Signing out only removes the account session from this device; it does not automatically erase PDFs saved locally or cloud copies. To request help with account or privacy data, use Contact us and describe what you want removed. Never send your password.")
             .setPositiveButton("OK", null)
             .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
@@ -1701,7 +1888,7 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
                         syncCloudNow()
                     } else if (signUp) {
-                        AlertDialog.Builder(this)
+                        appDialog()
                             .setTitle("Verify your email")
                             .setMessage("We sent a confirmation link to $email. Open the email, tap Confirm, then return to DocNexa and sign in. Check Spam/Junk too.")
                             .setPositiveButton("OK", null)
@@ -1736,7 +1923,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requireInternet(feature: String): Boolean {
         if (isInternetAvailable()) return true
-        AlertDialog.Builder(this)
+        appDialog()
             .setTitle("Internet connection required")
             .setMessage("$feature is available in Online Mode. Connect to Wi-Fi or mobile data and try again. Your offline scan and PDF files remain available.")
             .setPositiveButton("OK", null).show()
@@ -1745,7 +1932,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun cloudAccountMenu() {
         if (!requireInternet("DocNexa Cloud account")) return
-        AlertDialog.Builder(this).setTitle("DocNexa Cloud")
+        appDialog().setTitle("DocNexa Cloud")
             .setMessage("Connected: ${prefs.getString("cloud_email", "")}")
             .setItems(arrayOf("Sync now", "Sign out")) { _, which ->
                 if (which == 0) syncCloudNow() else confirmCloudSignOut()
@@ -1753,7 +1940,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmCloudSignOut() {
-        AlertDialog.Builder(this)
+        appDialog()
             .setTitle("Sign out of DocNexa?")
             .setMessage("Your cloud account will be disconnected on this device. Your locally saved PDFs will not be deleted.")
             .setNegativeButton("Cancel", null)
@@ -1828,7 +2015,7 @@ class MainActivity : AppCompatActivity() {
         panel.addView(gap(10))
         // Native ad is shown only in this spacious dialog; no ad is placed beside action buttons.
         addNativeAdCard(panel)
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Manage Tags").setView(panel)
+        showPremiumDialog(appDialog().setTitle("DocNexa • Manage Tags").setView(panel)
             .setPositiveButton("Save tag") { _, _ ->
                 val tag = field.text.toString().trim()
                 if (tag.isNotEmpty()) Toast.makeText(this, "Tag saved: $tag", Toast.LENGTH_SHORT).show()
@@ -1883,7 +2070,7 @@ class MainActivity : AppCompatActivity() {
 
         section("DOCUMENT PREFERENCES")
         setting("⇅", "Default sort order", sortNames[currentSort]) {
-            AlertDialog.Builder(this).setTitle("Sort documents")
+            appDialog().setTitle("Sort documents")
                 .setSingleChoiceItems(sortNames, currentSort) { dialog, which ->
                     prefs.edit().putInt("document_sort_order", which).apply()
                     dialog.dismiss()
@@ -1891,7 +2078,7 @@ class MainActivity : AppCompatActivity() {
                 }.setNegativeButton("Cancel", null).show()
         }
         setting("▤", "Storage location", "Downloads/DocumentScanner • ${docs.size} saved PDF(s)") {
-            showPremiumDialog(AlertDialog.Builder(this)
+            showPremiumDialog(appDialog()
                 .setTitle("DocNexa storage")
                 .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nInternal storage / Download / DocumentScanner\n\nCurrently indexed: ${docs.size} PDF(s).\n\nYou can open this folder from your phone's Files app.")
                 .setPositiveButton("OK", null))
@@ -1899,7 +2086,7 @@ class MainActivity : AppCompatActivity() {
 
         section("APP & SUPPORT")
         setting("ⓘ", "App information", "DocNexa • Version $appVersion") {
-            showPremiumDialog(AlertDialog.Builder(this)
+            showPremiumDialog(appDialog()
                 .setTitle("About DocNexa")
                 .setMessage("DocNexa\nPDF Scanner & Editor\nVersion $appVersion\n\nScan, create, organize and manage PDF documents on your device.")
                 .setPositiveButton("Done", null))
@@ -1909,7 +2096,7 @@ class MainActivity : AppCompatActivity() {
 
         section("MAINTENANCE")
         setting("♲", "Clear temporary files", "Remove temporary app cache; saved PDFs are not deleted") {
-            AlertDialog.Builder(this).setTitle("Clear temporary files?")
+            appDialog().setTitle("Clear temporary files?")
                 .setMessage("This removes temporary cache files only. Your saved PDFs, folders and account data will remain untouched.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Clear") { _, _ ->
@@ -1926,7 +2113,7 @@ class MainActivity : AppCompatActivity() {
             isFillViewport = true
             addView(panel)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Settings • DocNexa")
+        showPremiumDialog(appDialog().setTitle("Settings • DocNexa")
             .setView(scroll).setNegativeButton("Close", null))
     }
 
@@ -1943,7 +2130,7 @@ class MainActivity : AppCompatActivity() {
             showDocumentSearch(); true
         }
         menu.menu.add("Sort documents").setOnMenuItemClickListener {
-            AlertDialog.Builder(this).setTitle("Sort documents")
+            appDialog().setTitle("Sort documents")
                 .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
                     prefs.edit().putInt("document_sort_order", which).apply()
                     showDocsScreen()
@@ -2167,7 +2354,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(0xFF777777.toInt())
             setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
+                appDialog().setItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
                     when (which) {
                         0 -> showFolderContents(name)
                         1 -> renameFolder(name)
@@ -2278,7 +2465,7 @@ class MainActivity : AppCompatActivity() {
         action("Rename PDF", "Change the document filename", "Aa") { renamePdfDocument(uri, name) }
         action("Copy PDF", "Create another copy in Downloads", "▣") { copyPdfDocument(uri) }
         action("Tags and notes", "Add searchable labels or a date note", "⌑") {
-            AlertDialog.Builder(this).setTitle("Document details")
+            appDialog().setTitle("Document details")
                 .setItems(arrayOf("Edit tags", "Add date / time note")) { _, which ->
                     if (which == 0) documentTagDialog(uri) else documentDateTimeDialog(uri)
                 }.show()
@@ -2292,13 +2479,13 @@ class MainActivity : AppCompatActivity() {
         action("Remove PDF password", "Unlock a PDF when you know its password", "◉") { passwordDialog(uri, true) }
         action("Save to Cloud", "Upload using your connected cloud account", "☁") { sharePdfToGoogleDrive(uri) }
         action("Move to Trash", "Delete later or restore from Trash", "⌫") {
-            AlertDialog.Builder(this).setTitle("Move to Trash?")
+            appDialog().setTitle("Move to Trash?")
                 .setMessage("This PDF will be moved to DocNexa Trash. You can restore it later.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Move to Trash") { _, _ -> moveToTrash(uri) }.show()
         }
 
-        showPremiumDialog(AlertDialog.Builder(this).setTitle(name).setView(scroll)
+        showPremiumDialog(appDialog().setTitle(name).setView(scroll)
             .setNegativeButton("Close", null))
     }
 
@@ -2308,7 +2495,7 @@ class MainActivity : AppCompatActivity() {
             "Copy PDF", "Split PDF", "Rename", "Tags",
             "Date and Time setting", "Open with Google Docs", "MultiSide Doc / Collage"
         )
-        AlertDialog.Builder(this).setTitle("More • $name").setItems(more) { _, which ->
+        appDialog().setTitle("More • $name").setItems(more) { _, which ->
             when (which) {
                 0 -> toggleFavourite(uri)
                 1 -> {
@@ -2388,7 +2575,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renamePdfDocument(uri: Uri, oldName: String) {
         val field = EditText(this).apply { setText(oldName.removeSuffix(".pdf")); selectAll() }
-        AlertDialog.Builder(this).setTitle("Rename PDF").setView(field)
+        appDialog().setTitle("Rename PDF").setView(field)
             .setPositiveButton("Save") { _, _ ->
                 val value = field.text.toString().trim()
                 if (value.isBlank()) {
@@ -2421,7 +2608,7 @@ class MainActivity : AppCompatActivity() {
     private fun movePdfToFolder(uri: Uri) {
         if (homeFolders.isEmpty()) loadFolders()
         val folders = homeFolders.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Move to Folder").setItems(folders) { _, which ->
+        appDialog().setTitle("Move to Folder").setItems(folders) { _, which ->
             folderAssignments[uri.toString()] = folders[which]
             prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
             Toast.makeText(this, "Moved to ${folders[which]}", Toast.LENGTH_SHORT).show()
@@ -2432,7 +2619,7 @@ class MainActivity : AppCompatActivity() {
     private fun documentTagDialog(uri: Uri) {
         val key = "document_tag_" + uri.toString().hashCode()
         val field = EditText(this).apply { hint = "Enter tags separated by commas"; setText(prefs.getString(key, "")) }
-        AlertDialog.Builder(this).setTitle("Document Tags").setView(field)
+        appDialog().setTitle("Document Tags").setView(field)
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit().putString(key, field.text.toString().trim()).apply()
                 Toast.makeText(this, "Tags saved", Toast.LENGTH_SHORT).show()
@@ -2444,7 +2631,7 @@ class MainActivity : AppCompatActivity() {
             hint = "Document title"
             setText(prefs.getString("document_datetime_" + uri.toString().hashCode(), ""))
         }
-        AlertDialog.Builder(this).setTitle("Document date / time label").setMessage("Add a custom date or time note for this document.")
+        appDialog().setTitle("Document date / time label").setMessage("Add a custom date or time note for this document.")
             .setView(field)
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit().putString("document_datetime_" + uri.toString().hashCode(), field.text.toString().trim()).apply()
@@ -2539,7 +2726,7 @@ class MainActivity : AppCompatActivity() {
     }
     private fun createFolderDialog() {
         val field = android.widget.EditText(this).apply { hint = "Folder name" }
-        AlertDialog.Builder(this).setTitle("Create folder").setView(field)
+        appDialog().setTitle("Create folder").setView(field)
             .setPositiveButton("Create") { _, _ ->
                 val name = field.text.toString().trim()
                 if (name.isNotEmpty() && !homeFolders.contains(name)) {
@@ -2552,7 +2739,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renameFolder(oldName: String) {
         val field = android.widget.EditText(this).apply { setText(oldName) }
-        AlertDialog.Builder(this).setTitle("Rename folder").setView(field)
+        appDialog().setTitle("Rename folder").setView(field)
             .setPositiveButton("Save") { _, _ ->
                 val name = field.text.toString().trim()
                 val index = homeFolders.indexOf(oldName)
@@ -2567,7 +2754,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun deleteFolder(name: String) {
-        AlertDialog.Builder(this).setMessage("Delete folder '$name'?")
+        appDialog().setMessage("Delete folder '$name'?")
             .setPositiveButton("Delete") { _, _ -> homeFolders.remove(name); saveFolders(); buildScreen() }
             .setNegativeButton("Cancel", null).show()
     }
@@ -2577,10 +2764,10 @@ class MainActivity : AppCompatActivity() {
         val items = getSavedPdfs().filter { folderAssignments[it.second.toString()] == folder }
         val names = items.map { it.first }.toTypedArray()
         if (items.isEmpty()) {
-            AlertDialog.Builder(this).setTitle(folder).setMessage("This folder is empty. New PDFs created while this folder is selected will be saved here.").setPositiveButton("OK", null).show()
+            appDialog().setTitle(folder).setMessage("This folder is empty. New PDFs created while this folder is selected will be saved here.").setPositiveButton("OK", null).show()
             return
         }
-        AlertDialog.Builder(this).setTitle(folder).setItems(names) { _, which -> openPdf(items[which].second) }
+        appDialog().setTitle(folder).setItems(names) { _, which -> openPdf(items[which].second) }
             .setPositiveButton("Close", null).show()
     }
 
@@ -2718,7 +2905,7 @@ class MainActivity : AppCompatActivity() {
         }
         customize.setOnClickListener {
             val selected = catalog.map { it.title in pinned }.toBooleanArray()
-            AlertDialog.Builder(this)
+            appDialog()
                 .setTitle("Customize Quick Access")
                 .setMultiChoiceItems(catalog.map { it.title }.toTypedArray(), selected) { _, which, checked ->
                     selected[which] = checked
@@ -2962,7 +3149,7 @@ class MainActivity : AppCompatActivity() {
         option("Advanced PDF Design", "Create a formatted document with header and footer", "✎") {
             showAdvancedPdfDesignDialog()
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Create PDF • DocNexa")
+        showPremiumDialog(appDialog().setTitle("Create PDF • DocNexa")
             .setMessage("Choose how you want to create your PDF.")
             .setView(panel).setNegativeButton("Close", null))
     }
@@ -2986,7 +3173,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(7)); addView(label("Page size", 11f, 0xFF263957.toInt(), true)); addView(size)
             addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientationSpinner)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Blank PDF • Settings").setView(panel)
+        showPremiumDialog(appDialog().setTitle("Blank PDF • Settings").setView(panel)
             .setNegativeButton("Cancel", null).setPositiveButton("Create PDF") { _, _ ->
                 val count = pages.text.toString().toIntOrNull()
                 if (count == null || count !in 1..50) {
@@ -3019,7 +3206,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved; status.text = "Blank PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
                         buildScreen()
-                        AlertDialog.Builder(this).setTitle("Blank PDF created")
+                        appDialog().setTitle("Blank PDF created")
                             .setMessage("${count} blank page(s) saved as ${saved.lastPathSegment}")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
                             .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
@@ -3058,7 +3245,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(6)); addView(label("Body font", 11f, 0xFF263957.toInt(), true)); addView(font)
             addView(pageNumbers)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Advanced PDF Design").setView(ScrollView(this).apply { addView(panel) })
+        showPremiumDialog(appDialog().setTitle("Advanced PDF Design").setView(ScrollView(this).apply { addView(panel) })
             .setNegativeButton("Cancel", null).setPositiveButton("Create PDF") { _, _ ->
                 val content = bodyField.text.toString().trim()
                 if (content.isBlank()) Toast.makeText(this, "Enter document content first", Toast.LENGTH_LONG).show()
@@ -3119,7 +3306,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved; status.text = "Designed PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
                         buildScreen()
-                        AlertDialog.Builder(this).setTitle("Designed PDF created")
+                        appDialog().setTitle("Designed PDF created")
                             .setMessage("Saved as ${saved.lastPathSegment}")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
                             .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
@@ -3283,7 +3470,7 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(ScrollView(this).apply { addView(content) },
             LinearLayout.LayoutParams(-1, dp(390)))
-        showPremiumDialog(AlertDialog.Builder(this).setTitle(title).setView(panel)
+        showPremiumDialog(appDialog().setTitle(title).setView(panel)
             .setNeutralButton(copyLabel) { _, _ ->
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText(title, body))
@@ -3302,7 +3489,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     status.text = "PDF text extracted"
                     if (text.isBlank()) {
-                        showPremiumDialog(AlertDialog.Builder(this).setTitle("PDF To Text")
+                        showPremiumDialog(appDialog().setTitle("PDF To Text")
                             .setMessage("No selectable text was found. If this is a scanned PDF, use the Image To Text (OCR) tool.")
                             .setPositiveButton("Close", null))
                     } else {
@@ -3403,15 +3590,16 @@ class MainActivity : AppCompatActivity() {
                     panel.addView(label("TOTAL PAGES: $count", 12f, 0xFF3478F6.toInt(), true))
                     val range = EditText(this).apply { hint = "All pages or range: 1-3, 5"; setSingleLine(true) }
                     panel.addView(range)
-                    panel.addView(label("Leave blank to rotate every page. Rotation: 90° clockwise.", 11f, 0xFF718096.toInt()))
-                    showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Rotate Pages")
-                        .setView(panel).setNegativeButton("Cancel", null)
+                    range.setText(if (count == 1) "1" else "1-$count")
+                    addVisualPageSelector(panel, uri, count, range)
+                    panel.addView(label("Select pages above or enter a range. Rotation: 90° clockwise.", 11f, 0xFF718096.toInt()))
+                    showPremiumDialog(appDialog().setTitle("DocNexa • Rotate Pages")
+                        .setView(toolDialogScroll(panel)).setNegativeButton("Cancel", null)
                         .setPositiveButton("Rotate & Save") { _, _ ->
-                            val pages = if (range.text.isNullOrBlank()) (0 until count).toList()
-                                else parsePageRanges(range.text.toString(), count)
+                            val pages = parsePageRanges(range.text.toString(), count)
                             if (pages.isEmpty()) Toast.makeText(this, "Please enter a valid page range", Toast.LENGTH_LONG).show()
                             else rotateSelectedPdfPages(uri, pages)
-                        })
+                        }).also { bindPageSelectionAction(it, range, count) }
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not inspect PDF", Toast.LENGTH_LONG).show() }
@@ -3485,7 +3673,7 @@ class MainActivity : AppCompatActivity() {
             addView(label("Line spacing", 11f, 0xFF263957.toInt(), true)); addView(spacing)
         }
         val scroll = ScrollView(this).apply { addView(panel) }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Text To PDF • Advanced")
+        showPremiumDialog(appDialog().setTitle("Text To PDF • Advanced")
             .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Create PDF") { _, _ ->
@@ -3617,7 +3805,7 @@ class MainActivity : AppCompatActivity() {
             typed.typeface = signatureTypeface(selectedSignatureFont)
             addView(label("Tip: Use Undo to remove the last stroke, or Clear to start again.", 11f, 0xFF64748B.toInt()))
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = appDialog()
             .setTitle("DocNexa • Signature Studio")
             .setView(ScrollView(this).apply { addView(layout) })
             .setNeutralButton("Save Signature PDF", null)
@@ -3777,7 +3965,7 @@ class MainActivity : AppCompatActivity() {
             addView(yControl)
             addView(label("Tip: Position values are relative to the selected PDF page.", 11f, 0xFF718096.toInt()))
         }
-        AlertDialog.Builder(this)
+        appDialog()
             .setTitle("DocNexa • Place Signature")
             .setView(panel)
             .setNegativeButton("Cancel", null)
@@ -3833,7 +4021,7 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun inspectPageTool(uri: Uri, onReady: (Int) -> Unit) {
-        val progress = AlertDialog.Builder(this).setTitle("Opening PDF")
+        val progress = appDialog().setTitle("Opening PDF")
             .setView(android.widget.ProgressBar(this).apply { setPadding(dp(24), dp(20), dp(24), dp(20)) })
             .setCancelable(false).show()
         Thread {
@@ -3854,7 +4042,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
                         progress.dismiss()
-                        AlertDialog.Builder(this).setTitle("Cannot edit this PDF")
+                        appDialog().setTitle("Cannot edit this PDF")
                             .setMessage(e.localizedMessage ?: "Unlock password-protected PDFs before using this tool.")
                             .setPositiveButton("Close", null).show()
                     }
@@ -3872,10 +4060,10 @@ class MainActivity : AppCompatActivity() {
             panel.addView(label("$count pages • Original stays unchanged", 12f, 0xFF2563EB.toInt(), true))
             panel.addView(gap(12))
             val instructions = when (operation) {
-                PdfPagePlan.Operation.REORDER -> "Enter every page once in the desired order. Reverse ranges work too: 5-1."
-                PdfPagePlan.Operation.DELETE -> "Enter pages to remove, for example 2-4, 7. At least one page must remain."
-                PdfPagePlan.Operation.EXTRACT -> "Enter pages to keep in your chosen order, for example 3, 1-2."
-                PdfPagePlan.Operation.DUPLICATE -> "Enter pages to duplicate, for example 1, 3-5. A copy is inserted immediately after each selected page."
+                PdfPagePlan.Operation.REORDER -> "Move pages with the arrows or type a custom order. Include every page once."
+                PdfPagePlan.Operation.DELETE -> "Tap pages to remove or enter a range. At least one page must remain."
+                PdfPagePlan.Operation.EXTRACT -> "Tap pages to keep. Their selection order becomes the output order."
+                PdfPagePlan.Operation.DUPLICATE -> "Tap pages to duplicate. A copy is inserted immediately after each selected page."
             }
             panel.addView(label(instructions, 13f, 0xFF475569.toInt()))
             val field = EditText(this).apply {
@@ -3884,20 +4072,23 @@ class MainActivity : AppCompatActivity() {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT
                 contentDescription = "Page numbers and ranges"
                 if (operation == PdfPagePlan.Operation.REORDER) setText(if (count == 1) "1" else "1-$count")
+                else if (operation == PdfPagePlan.Operation.EXTRACT) setText("1")
             }
             panel.addView(field)
+            addVisualPageSelector(panel, uri, count, field, reorder = operation == PdfPagePlan.Operation.REORDER)
             val preview = label("", 12f, 0xFF475569.toInt())
             panel.addView(preview)
             panel.addView(gap(12))
             panel.addView(label("The new PDF copies page artwork. Annotations, bookmarks and interactive form fields are not copied.", 11f, 0xFF718096.toInt()))
-            val dialog = AlertDialog.Builder(this).setTitle(operation.title)
-                .setView(ScrollView(this).apply { addView(panel) })
+            val dialog = appDialog().setTitle(operation.title)
+                .setView(toolDialogScroll(panel))
                 .setPositiveButton("Save new PDF", null)
                 .setNegativeButton("Cancel", null)
                 .apply { if (operation == PdfPagePlan.Operation.REORDER) setNeutralButton("Reverse order", null) }
                 .create()
             fun updatePreview() {
                 val plan = runCatching { PdfPagePlan.build(operation, field.text.toString(), count) }.getOrNull()
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = plan != null
                 preview.text = if (plan == null) "Enter a valid selection to preview the output." else {
                     val sample = plan.take(12).joinToString(", ") { (it + 1).toString() }
                     "Output: ${plan.size} pages\nOrder: $sample${if (plan.size > 12) ", …" else ""}"
@@ -3909,6 +4100,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { field.error = null; updatePreview() }
             })
             dialog.setOnShowListener {
+                updatePreview()
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
                     field.setText(if (count == 1) "1" else "$count-1")
                 }
@@ -3954,9 +4146,9 @@ class MainActivity : AppCompatActivity() {
             panel.addView(label("$count pages • Saves a new numbered copy", 12f, 0xFF2563EB.toInt(), true))
             panel.addView(gap(10))
             val range = EditText(this).apply {
-                hint = "Pages to number (blank = all)"
+                hint = "Pages to number"
                 setSingleLine(true)
-                contentDescription = "Pages to number, leave blank for all pages"
+                contentDescription = "Pages to number"
             }
             val start = EditText(this).apply {
                 hint = "First number"
@@ -3966,20 +4158,21 @@ class MainActivity : AppCompatActivity() {
             }
             val top = android.widget.CheckBox(this).apply { text = "Place numbers at the top (default: bottom)" }
             val prefix = android.widget.CheckBox(this).apply { text = "Use Page prefix, for example Page 1"; isChecked = true }
+            range.setText(if (count == 1) "1" else "1-$count")
             panel.addView(range)
+            addVisualPageSelector(panel, uri, count, range)
             panel.addView(label("Numbers follow document order, even if a range is typed in reverse.", 11f, 0xFF718096.toInt()))
             panel.addView(start)
             panel.addView(top)
             panel.addView(prefix)
             panel.addView(label("Numbers are centered on each visible page and respect page rotation.", 12f, 0xFF475569.toInt()))
-            val dialog = AlertDialog.Builder(this).setTitle("Add Page Numbers")
-                .setView(ScrollView(this).apply { addView(panel) })
+            val dialog = appDialog().setTitle("Add Page Numbers")
+                .setView(toolDialogScroll(panel))
                 .setPositiveButton("Save numbered PDF", null).setNegativeButton("Cancel", null).create()
             dialog.setOnShowListener {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                     val pages = try {
-                        if (range.text.isBlank()) (0 until count).toList()
-                        else PdfPagePlan.selection(range.text.toString(), count).sorted()
+                        PdfPagePlan.selection(range.text.toString(), count).sorted()
                     } catch (e: IllegalArgumentException) {
                         range.error = e.message
                         return@setOnClickListener
@@ -4030,11 +4223,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             dialog.show()
+            bindPageSelectionAction(dialog, range, count, listOf(start)) {
+                val first = start.text.toString().toIntOrNull()
+                val selectedCount = runCatching { PdfPagePlan.selection(range.text.toString(), count).size }.getOrDefault(0)
+                first != null && first > 0 && first.toLong() + selectedCount - 1 <= Int.MAX_VALUE
+            }
         }
     }
 
     private fun runPagePdfOperation(uri: Uri, title: String, prefix: String, transform: (PDDocument) -> ByteArray) {
-        val progress = AlertDialog.Builder(this).setTitle(title)
+        val progress = appDialog().setTitle(title)
             .setMessage("Processing your PDF…")
             .setView(android.widget.ProgressBar(this).apply { setPadding(dp(24), dp(16), dp(24), dp(16)) })
             .setCancelable(false).show()
@@ -4062,7 +4260,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
                         progress.dismiss()
-                        AlertDialog.Builder(this).setTitle("PDF operation failed")
+                        appDialog().setTitle("PDF operation failed")
                             .setMessage(e.localizedMessage ?: "Try another PDF or a smaller page selection.")
                             .setPositiveButton("Close", null).show()
                     }
@@ -4167,7 +4365,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addWatermarkDialog(uri: Uri) {
         val field = EditText(this).apply { hint = "Watermark text" }
-        AlertDialog.Builder(this).setTitle("Watermark").setView(field)
+        appDialog().setTitle("Watermark").setView(field)
             .setPositiveButton("Apply") { _, _ -> if (field.text.isNotBlank()) addWatermark(uri, field.text.toString()) }
             .setNegativeButton("Cancel", null).show()
     }
@@ -4192,7 +4390,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addWhitenerDialog(uri: Uri) {
-        AlertDialog.Builder(this).setTitle("Whitener Tool")
+        appDialog().setTitle("Whitener Tool")
             .setMessage("This adds a white cover to the lower area of every page. The original remains unchanged.")
             .setPositiveButton("Add Whitener") { _, _ -> applyWhiteout(uri) }
             .setNegativeButton("Cancel", null).show()
@@ -4237,7 +4435,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addShapeDialog(uri: Uri) {
-        AlertDialog.Builder(this).setTitle("Line and Shapes")
+        appDialog().setTitle("Line and Shapes")
             .setItems(arrayOf("Add rectangle", "Add line", "Add circle")) { _, which -> addShapeToPdf(uri, which) }.show()
     }
 
@@ -4266,7 +4464,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addTextToPdfDialog(uri: Uri) {
         val field = EditText(this).apply { hint = "Enter text to place on first page"; minLines = 2 }
-        AlertDialog.Builder(this).setTitle("Add text to PDF").setView(field)
+        appDialog().setTitle("Add text to PDF").setView(field)
             .setPositiveButton("Save edited PDF") { _, _ ->
                 val value = field.text.toString().trim()
                 if (value.isNotEmpty()) addTextToPdf(uri, value)
@@ -4373,7 +4571,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     panel.addView(label("Note: Pages are converted to images. Searchable text, links, forms and annotations may not be preserved.", 10.5f, 0xFF718096.toInt()))
                     val scroll = ScrollView(this).apply { isFillViewport = true; addView(panel) }
-                    showPremiumDialog(AlertDialog.Builder(this)
+                    showPremiumDialog(appDialog()
                         .setTitle("DocNexa • Compression Studio")
                         .setView(scroll)
                         .setPositiveButton("Compress PDF") { _, _ -> runPdfCompression(uri, compressionPresets[selected], size) }
@@ -4421,7 +4619,7 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Custom compression")
+        showPremiumDialog(appDialog().setTitle("Custom compression")
             .setView(panel)
             .setPositiveButton("Compress with custom settings") { _, _ ->
                 runPdfCompression(uri, CompressionPreset("Custom", dpi, quality, "\$dpi DPI • JPEG \$quality%"), originalSize)
@@ -4469,7 +4667,7 @@ class MainActivity : AppCompatActivity() {
                         val savedPercent = if (originalSize > 0) (((originalSize - compressedBytes.size).toDouble() / originalSize) * 100).toInt() else 0
                         val summary = "Preset: ${preset.title}\nOriginal: ${formatFileSize(originalSize)}\nCompressed: ${formatFileSize(compressedBytes.size.toLong())}\n" +
                             if (originalSize > 0) (if (reduced) "Size reduced by $savedPercent%" else "This PDF did not become smaller with this preset.") else "Compression complete."
-                        AlertDialog.Builder(this)
+                        appDialog()
                             .setTitle("Compression Preview")
                             .setMessage(summary + "\n\nNote: This image-based compression reduces resolution and removes selectable/searchable text and form layers.")
                             .setPositiveButton("Save PDF") { _, _ ->
@@ -4542,7 +4740,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(8))
             addView(label("Note: scanned/image-only PDFs need OCR before Word conversion. The original PDF will not be changed.", 11f, 0xFF718096.toInt()))
         }
-        showPremiumDialog(AlertDialog.Builder(this)
+        showPremiumDialog(appDialog()
             .setTitle("PDF to Word • Advanced Export")
             .setView(panel)
             .setNegativeButton("Cancel", null)
@@ -4574,7 +4772,7 @@ class MainActivity : AppCompatActivity() {
                         status.text = "Word DOCX document saved"
                         recent.text = "Latest: ${saved.lastPathSegment ?: fileName}"
                         buildScreen()
-                        AlertDialog.Builder(this)
+                        appDialog()
                             .setTitle("Word file created")
                             .setMessage("Editable DOCX saved in Downloads/DocumentScanner. The original PDF is unchanged.")
                             .setPositiveButton("Open") { _, _ -> openWordDocument(saved) }
@@ -4810,7 +5008,7 @@ class MainActivity : AppCompatActivity() {
         panel.addView(label("Your file is now available in $destination.", 12f, 0xFF667085.toInt()))
         panel.addView(gap(8))
         addNativeAdCard(panel)
-        AlertDialog.Builder(this).setTitle("DocNexa").setView(panel).setPositiveButton("OK", null).show()
+        appDialog().setTitle("DocNexa").setView(panel).setPositiveButton("OK", null).show()
     }
     private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -4850,7 +5048,7 @@ class MainActivity : AppCompatActivity() {
             }
             addView(showPassword)
         }
-        showPremiumDialog(AlertDialog.Builder(this)
+        showPremiumDialog(appDialog()
             .setTitle(if (remove) "Remove PDF Password" else "Protect PDF • Security")
             .setView(panel)
             .setNegativeButton("Cancel", null)
@@ -4938,7 +5136,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(8))
             addView(nameField)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("PDF To ZIP • Create Archive")
+        showPremiumDialog(appDialog().setTitle("PDF To ZIP • Create Archive")
             .setView(options)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Create ZIP") { _, _ ->
@@ -5007,7 +5205,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(label("›", 23f, 0xFF718096.toInt()))
             panel.addView(row)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("QR Scanner").setView(panel).setNegativeButton("Close", null))
+        showPremiumDialog(appDialog().setTitle("QR Scanner").setView(panel).setNegativeButton("Close", null))
     }
 
     private fun openLiveQrCamera() {
@@ -5054,7 +5252,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showQrResult(value: String) {
-        AlertDialog.Builder(this).setTitle("QR Scanner • Result")
+        appDialog().setTitle("QR Scanner • Result")
             .setMessage(value.ifBlank { "No QR code found. Try a clearer image." })
             .setPositiveButton("Copy") { _, _ ->
                 if (value.isNotBlank()) {
@@ -5097,11 +5295,11 @@ class MainActivity : AppCompatActivity() {
         val favourites = prefs.getStringSet("favourite_uris", emptySet()) ?: emptySet()
         val docs = getSavedPdfs().filter { favourites.contains(it.second.toString()) }
         if (docs.isEmpty()) {
-            AlertDialog.Builder(this).setTitle("Favourite").setMessage("No favourite PDFs yet. Open a document menu and choose Add/Remove Favourite.")
+            appDialog().setTitle("Favourite").setMessage("No favourite PDFs yet. Open a document menu and choose Add/Remove Favourite.")
                 .setPositiveButton("OK", null).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Favourite documents")
+        appDialog().setTitle("Favourite documents")
             .setItems(docs.map { it.first }.toTypedArray()) { _, index -> openPdf(docs[index].second) }
             .setNegativeButton("Close", null).show()
     }
@@ -5116,7 +5314,7 @@ class MainActivity : AppCompatActivity() {
         field.setTextColor(0xFF172B4D.toInt())
         field.setHintTextColor(0xFF8994A5.toInt())
         val inputPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(4)); addView(label("Enter the content you want to share", 12f, 0xFF64748B.toInt(), true)); addView(gap(8)); addView(field) }
-        AlertDialog.Builder(this).setTitle("Create QR Code").setView(inputPanel)
+        appDialog().setTitle("Create QR Code").setView(inputPanel)
             .setPositiveButton("Generate") { _, _ ->
                 val value = field.text.toString().trim()
                 if (value.isBlank()) {
@@ -5136,7 +5334,7 @@ class MainActivity : AppCompatActivity() {
                             adjustViewBounds = true
                             setPadding(dp(12), dp(12), dp(12), dp(12))
                         }
-                        AlertDialog.Builder(this).setTitle("QR Code Ready").setView(preview)
+                        appDialog().setTitle("QR Code Ready").setView(preview)
                             .setMessage("Your QR code is ready. Download it to your phone or share it directly.")
                             .setPositiveButton("Download") { _, _ ->
                                 val saved = saveDocumentBytes(bytes, "DocNexa_QR", "image/png", "png")
@@ -5173,7 +5371,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showComingSoon(feature: String) {
-        AlertDialog.Builder(this)
+        appDialog()
             .setTitle(feature)
             .setMessage("This tool is planned for a future update. The available PDF tools are Open PDF, Merge, Split, Image to PDF and Share PDF.")
             .setPositiveButton("OK", null)
@@ -5276,7 +5474,7 @@ class MainActivity : AppCompatActivity() {
             addView(label("Output PDF name", 11f, 0xFF263957.toInt(), true))
             addView(nameField)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Merge PDFs • Preview")
+        showPremiumDialog(appDialog().setTitle("Merge PDFs • Preview")
             .setView(ScrollView(this).apply { addView(panel) })
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Merge in this order") { _, _ ->
@@ -5306,7 +5504,7 @@ class MainActivity : AppCompatActivity() {
                                 recent.text = "Latest: ${saved?.lastPathSegment ?: "Merged PDF"}"
                                 if (saved != null) {
                                     buildScreen()
-                                    AlertDialog.Builder(this)
+                                    appDialog()
                                         .setTitle("PDFs merged successfully")
                                         .setMessage("${mergeOrder.size} files combined in your selected order into ${saved.lastPathSegment}")
                                         .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
@@ -5335,7 +5533,7 @@ class MainActivity : AppCompatActivity() {
                 val pageCount = input.use { PDDocument.load(it).use { doc -> doc.numberOfPages } }
                 runOnUiThread {
                     if (pageCount < 2) {
-                        showPremiumDialog(AlertDialog.Builder(this)
+                        showPremiumDialog(appDialog()
                             .setTitle("Cannot split a one-page PDF")
                             .setMessage("This file contains only 1 page. Splitting needs at least 2 pages. Choose a multi-page PDF to extract page ranges, or use PDF To ZIP to package this file.")
                             .setPositiveButton("Choose another PDF") { _, _ -> splitPicker.launch(arrayOf("application/pdf")) }
@@ -5354,17 +5552,19 @@ class MainActivity : AppCompatActivity() {
                         inputType = android.text.InputType.TYPE_CLASS_TEXT
                     }
                     panel.addView(range)
+                    range.setText("1")
+                    addVisualPageSelector(panel, uri, pageCount, range)
                     panel.addView(gap(5))
                     panel.addView(label("Enter pages to extract. The remaining pages are saved as a second PDF.", 11f, 0xFF718096.toInt()))
-                    showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • Smart PDF Split")
-                        .setView(panel)
+                    showPremiumDialog(appDialog().setTitle("DocNexa • Smart PDF Split")
+                        .setView(toolDialogScroll(panel))
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Split & Save") { _, _ ->
                             val selected = parsePageRanges(range.text.toString(), pageCount)
                             if (selected.isEmpty()) {
                                 Toast.makeText(this, "Enter a valid page range from 1 to $pageCount", Toast.LENGTH_LONG).show()
                             } else splitPdfPages(uri, selected)
-                        })
+                        }).also { bindPageSelectionAction(it, range, pageCount) }
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not inspect PDF", Toast.LENGTH_LONG).show() }
@@ -5372,20 +5572,8 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun parsePageRanges(value: String, total: Int): List<Int> {
-        val pages = sortedSetOf<Int>()
-        try {
-            value.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { part ->
-                val bounds = part.split("-").map { it.trim() }
-                require(bounds.size in 1..2)
-                val start = bounds[0].toInt()
-                val end = if (bounds.size == 2) bounds[1].toInt() else start
-                require(start >= 1 && end >= start && end <= total)
-                for (page in start..end) pages.add(page - 1)
-            }
-        } catch (_: Exception) { return emptyList() }
-        return pages.toList()
-    }
+    private fun parsePageRanges(value: String, total: Int): List<Int> =
+        runCatching { PdfPagePlan.selection(value, total).sorted() }.getOrDefault(emptyList())
 
     private fun splitPdfPages(uri: Uri, selectedPages: List<Int>) {
         status.text = "Splitting selected pages…"
@@ -5506,7 +5694,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(row)
         }
         addNativeAdCard(panel)
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("DocNexa • ID Photo Studio")
+        showPremiumDialog(appDialog().setTitle("DocNexa • ID Photo Studio")
             .setView(panel).setNegativeButton("Cancel", null))
     }
 
@@ -5548,7 +5736,7 @@ class MainActivity : AppCompatActivity() {
                         setPadding(dp(8), dp(8), dp(8), dp(8))
                         addView(cropView, FrameLayout.LayoutParams(-1, dp(380)))
                     }
-                    val dialog = AlertDialog.Builder(this@MainActivity).setTitle("Crop ${if (index == 0) "Front" else "Back"}")
+                    val dialog = appDialog().setTitle("Crop ${if (index == 0) "Front" else "Back"}")
                         .setView(cropPanel).setPositiveButton("Apply Crop", null)
                         .setNeutralButton("Rotate", null).setNegativeButton("Reset", null).create()
                     dialog.setOnShowListener {
@@ -5569,7 +5757,7 @@ class MainActivity : AppCompatActivity() {
         }
         val scroll = ScrollView(this).apply { addView(panel) }
         addNativeAdCard(panel)
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("ID Card Preview").setView(scroll)
+        showPremiumDialog(appDialog().setTitle("ID Card Preview").setView(scroll)
             .setPositiveButton("Create ID PDF") { _, _ -> createPdfFromBitmaps(originals, "ID_Card") }
             .setNeutralButton("Share Images") { _, _ ->
                 val share = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
@@ -5597,7 +5785,7 @@ class MainActivity : AppCompatActivity() {
                 addView(label("Drag crop handles. Choose a print size below.", 12f, 0xFF53627A.toInt()))
             }
             addNativeAdCard(panel)
-            AlertDialog.Builder(this).setTitle("Passport Photo Maker")
+            appDialog().setTitle("Passport Photo Maker")
                 .setView(panel)
                 .setSingleChoiceItems(sizeOptions, 0) { _, which -> selectedSize = which }
                 .setPositiveButton("Create Photo Sheet") { _, _ ->
@@ -5635,7 +5823,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved
                         buildScreen()
-                        AlertDialog.Builder(this).setTitle("ID PDF Created")
+                        appDialog().setTitle("ID PDF Created")
                             .setMessage("Your ID card PDF is saved in Downloads/DocumentScanner.")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
                             .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
@@ -5705,7 +5893,7 @@ class MainActivity : AppCompatActivity() {
                 doc.close()
                 val pdfUri = savePdfBytes(pdfBytes, "Passport_Photo_Sheet")
                 runOnUiThread {
-                    AlertDialog.Builder(this).setTitle("Passport Photo Sheet Ready")
+                    appDialog().setTitle("Passport Photo Sheet Ready")
                         .setMessage("Photo sheet saved to Gallery and PDF saved to Downloads/DocumentScanner. Check print scaling before using for official documents.")
                         .setPositiveButton("Open PDF") { _, _ -> if (pdfUri != null) openPdf(pdfUri) }
                         .setNeutralButton("Share JPG") { _, _ ->
@@ -5788,7 +5976,7 @@ class MainActivity : AppCompatActivity() {
                             setBackgroundColor(android.graphics.Color.WHITE)
                             layoutParams = LinearLayout.LayoutParams(-1, dp(440))
                         }
-                        showPremiumDialog(AlertDialog.Builder(this@MainActivity)
+                        showPremiumDialog(appDialog()
                             .setTitle("Page preview • ${p + 1}")
                             .setView(large).setPositiveButton("Done", null))
                     } catch (e: Exception) {
@@ -5821,7 +6009,7 @@ class MainActivity : AppCompatActivity() {
                         addView(cropView, LinearLayout.LayoutParams(-1, dp(330)))
                         addView(label("Drag the corner handles to select the crop area.", 12f, 0xFF53627A.toInt()))
                     }
-                    val cropDialog = AlertDialog.Builder(this@MainActivity).setTitle("Crop page ${p + 1}").setView(panel)
+                    val cropDialog = appDialog().setTitle("Crop page ${p + 1}").setView(panel)
                         .setPositiveButton("Apply crop", null).setNeutralButton("Rotate", null).setNegativeButton("Reset", null).create()
                     cropDialog.setOnShowListener {
                         cropDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -5900,7 +6088,7 @@ class MainActivity : AppCompatActivity() {
         previewList.addView(label("Tip: Preview pages, change order, rotate, crop, duplicate or remove images. Your original gallery photos are not modified.", 11f, 0xFF718096.toInt()))
         addNativeAdCard(previewList)
         val scroll = ScrollView(this).apply { addView(previewList); isFillViewport = false }
-        val dialog = AlertDialog.Builder(this).setTitle("Image to PDF • Page manager").setView(scroll)
+        val dialog = appDialog().setTitle("Image to PDF • Page manager").setView(scroll)
             .setPositiveButton("Next: PDF settings", null)
             .setNeutralButton("Share images") { _, _ -> shareSelectedImages(orderedUris) }
             .setNegativeButton("Cancel", null).create()
@@ -5938,7 +6126,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(7)); addView(label("Image placement", 11f, 0xFF263957.toInt(), true)); addView(fit)
             addView(gap(7)); addView(label("Page margins", 11f, 0xFF263957.toInt(), true)); addView(margin)
         }
-        showPremiumDialog(AlertDialog.Builder(this).setTitle("Image to PDF • Export settings")
+        showPremiumDialog(appDialog().setTitle("Image to PDF • Export settings")
             .setView(panel)
             .setNegativeButton("Back", null)
             .setPositiveButton("Create PDF") { _, _ ->
@@ -6012,7 +6200,7 @@ class MainActivity : AppCompatActivity() {
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
                     if (output != null) {
                         buildScreen()
-                        AlertDialog.Builder(this)
+                        appDialog()
                             .setTitle("PDF created successfully")
                             .setMessage("${uris.size} image page(s) saved as ${output.lastPathSegment}.")
                             .setPositiveButton("Open PDF") { _, _ -> openPdf(output) }
@@ -6094,7 +6282,7 @@ class MainActivity : AppCompatActivity() {
                         layoutParams = LinearLayout.LayoutParams(-1, dp(330))
                     }
                     textPanel.addView(resultScroll)
-                    showPremiumDialog(AlertDialog.Builder(this)
+                    showPremiumDialog(appDialog()
                         .setTitle("DocNexa • Extracted Text")
                         .setView(textPanel)
                         .setPositiveButton("Copy text") { _, _ ->
@@ -6158,7 +6346,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(row)
             panel.addView(gap(8))
         }
-        val dialog = showPremiumDialog(AlertDialog.Builder(this)
+        val dialog = showPremiumDialog(appDialog()
             .setTitle("Import File • DocNexa")
             .setView(panel)
             .setNegativeButton("Close", null))
