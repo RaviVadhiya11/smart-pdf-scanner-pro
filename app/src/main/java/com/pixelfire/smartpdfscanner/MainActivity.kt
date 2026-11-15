@@ -1848,36 +1848,42 @@ class MainActivity : AppCompatActivity() {
         if (!requireInternet("Login and account creation")) return
         val dialog = android.app.Dialog(this)
         var signupMode = startWithSignup
+
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(22), dp(22), dp(18))
-            background = rounded(0xFFFFFFFF.toInt(), 24)
+            background = rounded(0xFF101426.toInt(), 26, 0xFF343B62.toInt())
         }
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
+
         val logo = TextView(this).apply {
-            text = "▤"
+            text = "D"
             textSize = 30f
+            typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
-            setTextColor(0xFF315CF5.toInt())
-            background = rounded(0xFFEAF0FF.toInt(), 18)
-            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
+            setTextColor(0xFFFFFFFF.toInt())
+            background = gradient(0xFF8B5CF6.toInt(), 0xFF4F46E5.toInt(), 20)
+            layoutParams = LinearLayout.LayoutParams(dp(66), dp(66))
         }
         content.addView(logo)
-        content.addView(gap(12))
-        content.addView(label("DOCNEXA", 22f, 0xFF1B2B4B.toInt(), true))
-        content.addView(gap(4))
-        val subtitle = label("Your documents. Safe, synced and organised.", 12f, 0xFF77839A.toInt())
+        content.addView(gap(13))
+        content.addView(label("DOCNEXA", 23f, 0xFFF8FAFF.toInt(), true))
+        content.addView(gap(5))
+        val subtitle = label(
+            "Your documents, securely organised.",
+            12f, 0xFFAEB8D2.toInt()
+        )
         content.addView(subtitle)
-        content.addView(gap(20))
+        content.addView(gap(22))
 
         val tabs = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = rounded(0xFFF0F3FA.toInt(), 14)
+            background = rounded(0xFF1B2138.toInt(), 14)
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         fun tabButton(text: String): TextView = TextView(this).apply {
@@ -1887,45 +1893,80 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(12), dp(10), dp(12))
         }
-        val loginTab = tabButton("LOGIN")
+        val loginTab = tabButton("SIGN IN")
         val signupTab = tabButton("CREATE ACCOUNT")
-        tabs.addView(loginTab, LinearLayout.LayoutParams(0, dp(44), 1f))
-        tabs.addView(signupTab, LinearLayout.LayoutParams(0, dp(44), 1f))
+        tabs.addView(loginTab, LinearLayout.LayoutParams(0, dp(46), 1f))
+        tabs.addView(signupTab, LinearLayout.LayoutParams(0, dp(46), 1f))
         content.addView(tabs)
-        content.addView(gap(18))
+        content.addView(gap(20))
 
-        val name = EditText(this).apply {
-            hint = "Full name"
+        fun authField(hintText: String, inputType: Int): EditText = EditText(this).apply {
+            hint = hintText
             setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            textSize = 14f
+            setTextColor(0xFFF7F8FF.toInt())
+            setHintTextColor(0xFF8791AE.toInt())
+            this.inputType = inputType
             setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
+            background = rounded(0xFF1A2035.toInt(), 13, 0xFF39415F.toInt())
         }
-        val email = EditText(this).apply {
-            hint = "Email address"
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
-        }
-        val password = EditText(this).apply {
-            hint = "Password (8+ characters)"
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(0xFFF7F9FD.toInt(), 12, 0xFFE0E6F0.toInt())
-        }
-        fun addField(caption: String, field: EditText) {
-            content.addView(label(caption, 11f, 0xFF53627A.toInt(), true).apply {
+
+        val name = authField(
+            "Your full name",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        )
+        val email = authField(
+            "you@example.com",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        )
+        val password = authField(
+            "Password (minimum 8 characters)",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        )
+
+        fun addCaption(text: String) {
+            content.addView(label(text, 10f, 0xFFB9C3DC.toInt(), true).apply {
                 gravity = Gravity.START
-                setPadding(dp(2), 0, 0, dp(6))
+                setPadding(dp(2), 0, 0, dp(7))
             })
-            content.addView(field, LinearLayout.LayoutParams(-1, dp(52)))
-            content.addView(gap(13))
         }
-        addField("FULL NAME", name)
-        addField("EMAIL ADDRESS", email)
-        addField("PASSWORD", password)
+        addCaption("FULL NAME")
+        content.addView(name, LinearLayout.LayoutParams(-1, dp(54)))
+        content.addView(gap(14))
+        addCaption("EMAIL ADDRESS")
+        content.addView(email, LinearLayout.LayoutParams(-1, dp(54)))
+        content.addView(gap(14))
+        addCaption("PASSWORD")
+        val passwordRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(0xFF1A2035.toInt(), 13, 0xFF39415F.toInt())
+            clipToOutline = true
+        }
+        password.background = null
+        password.setPadding(dp(15), dp(12), dp(4), dp(12))
+        passwordRow.addView(password, LinearLayout.LayoutParams(0, dp(54), 1f))
+        val showPassword = TextView(this).apply {
+            text = "SHOW"
+            textSize = 10f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(0xFFB9A5FF.toInt())
+            setPadding(dp(10), 0, dp(14), 0)
+        }
+        showPassword.setOnClickListener {
+            val visible = password.inputType == (android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
+            password.inputType = if (visible) {
+                android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            } else {
+                android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            }
+            showPassword.text = if (visible) "SHOW" else "HIDE"
+            password.setSelection(password.text?.length ?: 0)
+        }
+        passwordRow.addView(showPassword, LinearLayout.LayoutParams(-2, -1))
+        content.addView(passwordRow, LinearLayout.LayoutParams(-1, dp(54)))
+        content.addView(gap(8))
 
         val recovery = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1934,16 +1975,16 @@ class MainActivity : AppCompatActivity() {
         val forgot = TextView(this).apply {
             text = "Forgot password?"
             textSize = 12f
-            setTextColor(0xFF315CF5.toInt())
-            setPadding(0, dp(6), dp(8), dp(6))
+            setTextColor(0xFFB9A5FF.toInt())
+            setPadding(dp(2), dp(8), dp(8), dp(8))
             setOnClickListener { sendCloudPasswordReset(email.text.toString().trim()) }
         }
         val resend = TextView(this).apply {
             text = "Resend verification"
             textSize = 12f
-            setTextColor(0xFF315CF5.toInt())
+            setTextColor(0xFFB9A5FF.toInt())
             gravity = Gravity.END
-            setPadding(dp(8), dp(6), 0, dp(6))
+            setPadding(dp(8), dp(8), dp(2), dp(8))
             setOnClickListener { resendCloudConfirmation(email.text.toString().trim()) }
         }
         recovery.addView(forgot, LinearLayout.LayoutParams(0, -2, 1f))
@@ -1957,50 +1998,56 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
-            background = gradient(0xFF5367F6.toInt(), 0xFF315CF5.toInt(), 14)
+            background = gradient(0xFF8B5CF6.toInt(), 0xFF4F46E5.toInt(), 14)
             backgroundTintList = null
-            layoutParams = LinearLayout.LayoutParams(-1, dp(52))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(54))
         }
         content.addView(submit)
-        content.addView(gap(12))
-        val socialLabel = label("OR CONTINUE WITH", 10f, 0xFF8A96AA.toInt(), true).apply {
+        content.addView(gap(17))
+        content.addView(label("OR CONTINUE WITH", 10f, 0xFF8E99B6.toInt(), true).apply {
             gravity = Gravity.CENTER
-        }
-        content.addView(socialLabel)
-        content.addView(gap(9))
+        })
+        content.addView(gap(10))
+
         val socialButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        fun socialButton(title: String, backgroundColor: Int, textColor: Int, provider: String): Button =
-            Button(this).apply {
+        fun socialButton(title: String, backgroundColor: Int, textColor: Int, provider: String): TextView =
+            TextView(this).apply {
                 text = title
-                isAllCaps = false
                 textSize = 13f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
                 setTextColor(textColor)
-                background = rounded(backgroundColor, 12, 0xFFDCE4F0.toInt())
-                backgroundTintList = null
-                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+                background = rounded(backgroundColor, 13, 0xFF414A69.toInt())
                 setOnClickListener { beginSocialSignIn(provider) }
             }
-        socialButtons.addView(socialButton("Google", 0xFFFFFFFF.toInt(), 0xFF263957.toInt(), "google"),
-            LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5) })
-        socialButtons.addView(socialButton("Facebook", 0xFF1877F2.toInt(), 0xFFFFFFFF.toInt(), "facebook"),
-            LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
+        socialButtons.addView(
+            socialButton("G   Google", 0xFFF8FAFF.toInt(), 0xFF26314C.toInt(), "google"),
+            LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(6) }
+        )
+        socialButtons.addView(
+            socialButton("f   Facebook", 0xFF1877F2.toInt(), 0xFFFFFFFF.toInt(), "facebook"),
+            LinearLayout.LayoutParams(0, dp(50), 1f).apply { leftMargin = dp(6) }
+        )
         content.addView(socialButtons)
-        content.addView(gap(10))
+        content.addView(gap(13))
+
         val guest = TextView(this).apply {
             text = "Continue as Guest"
             textSize = 13f
             gravity = Gravity.CENTER
-            setTextColor(0xFF52627A.toInt())
-            setPadding(dp(12), dp(12), dp(12), dp(8))
+            setTextColor(0xFFC6CDE0.toInt())
+            setPadding(dp(12), dp(12), dp(12), dp(10))
             setOnClickListener { dialog.dismiss() }
         }
         content.addView(guest)
-        content.addView(gap(8))
-        content.addView(label("By continuing, you agree to use DocNexa responsibly.", 10f, 0xFF9AA4B4.toInt()))
+        content.addView(gap(6))
+        content.addView(label(
+            "Your account is protected. Your password is securely handled by Supabase.",
+            10f, 0xFF7F8AA7.toInt()
+        ).apply { gravity = Gravity.CENTER })
         scroll.addView(content)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         dialog.setContentView(panel)
@@ -2008,12 +2055,16 @@ class MainActivity : AppCompatActivity() {
         fun renderMode() {
             name.visibility = if (signupMode) View.VISIBLE else View.GONE
             forgot.visibility = if (signupMode) View.GONE else View.VISIBLE
-            loginTab.setTextColor(if (signupMode) 0xFF758198.toInt() else 0xFF315CF5.toInt())
-            loginTab.background = if (signupMode) null else rounded(0xFFFFFFFF.toInt(), 11)
-            signupTab.setTextColor(if (signupMode) 0xFF315CF5.toInt() else 0xFF758198.toInt())
-            signupTab.background = if (signupMode) rounded(0xFFFFFFFF.toInt(), 11) else null
+            loginTab.setTextColor(if (signupMode) 0xFFAAB3CC.toInt() else 0xFF5B46C9.toInt())
+            loginTab.background = if (signupMode) null else rounded(0xFFF0ECFF.toInt(), 11)
+            signupTab.setTextColor(if (signupMode) 0xFF5B46C9.toInt() else 0xFFAAB3CC.toInt())
+            signupTab.background = if (signupMode) rounded(0xFFF0ECFF.toInt(), 11) else null
             submit.text = if (signupMode) "CREATE ACCOUNT  →" else "SIGN IN  →"
-            subtitle.text = if (signupMode) "Create an account and keep your PDFs backed up." else "Sign in to access your secure cloud documents."
+            subtitle.text = if (signupMode) {
+                "Create your secure account and sync your documents."
+            } else {
+                "Welcome back. Sign in to access your cloud documents."
+            }
         }
         loginTab.setOnClickListener { signupMode = false; renderMode() }
         signupTab.setOnClickListener { signupMode = true; renderMode() }
@@ -2026,6 +2077,7 @@ class MainActivity : AppCompatActivity() {
         renderMode()
         dialog.show()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         dialog.window?.setLayout(
             (resources.displayMetrics.widthPixels * 0.92f).toInt(),
             (resources.displayMetrics.heightPixels * 0.82f).toInt()
