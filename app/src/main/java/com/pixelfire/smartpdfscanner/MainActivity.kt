@@ -2411,6 +2411,14 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("OK", null))
         }
 
+        val accountEmail = prefs.getString("cloud_email", "").orEmpty()
+        if (accountEmail.equals("ravivadhiya76@gmail.com", ignoreCase = true)) {
+            section("ADMIN")
+            setting("✦", "Admin notification panel", "Compose an announcement for subscribed DocNexa users") {
+                showAdminNotificationPanel()
+            }
+        }
+
         section("NOTIFICATIONS")
         val updatesEnabled = prefs.getBoolean("admin_updates_enabled", false)
         setting("♧", "Important app updates", if (updatesEnabled) "Subscribed • Important DocNexa announcements are enabled" else "Off • Enable to receive important DocNexa announcements") {
@@ -2464,6 +2472,95 @@ class MainActivity : AppCompatActivity() {
         }
         showPremiumDialog(appDialog().setTitle("Settings • DocNexa")
             .setView(scroll).setNegativeButton("Close", null))
+    }
+
+
+    private fun showAdminNotificationPanel() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(10), dp(18), dp(8))
+            background = rounded(0xFFF3F7FF.toInt(), 18)
+        }
+        val titleInput = EditText(this).apply {
+            hint = "Notification title"
+            singleLine = true
+            setText("DocNexa Update")
+            textSize = 15f
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFDCE6F2.toInt())
+        }
+        val messageInput = EditText(this).apply {
+            hint = "Write your announcement..."
+            minLines = 3
+            maxLines = 5
+            textSize = 14f
+            gravity = Gravity.TOP
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFDCE6F2.toInt())
+        }
+        container.addView(label("TITLE", 11f, 0xFF3478D8.toInt(), true))
+        container.addView(titleInput, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(6) })
+        container.addView(gap(12))
+        container.addView(label("MESSAGE", 11f, 0xFF3478D8.toInt(), true))
+        container.addView(messageInput, LinearLayout.LayoutParams(-1, dp(116)).apply { topMargin = dp(6) })
+        container.addView(gap(12))
+        container.addView(label("AUDIENCE", 11f, 0xFF3478D8.toInt(), true))
+        container.addView(label("Users subscribed to Important App Updates", 13f, 0xFF52647A.toInt()).apply {
+            setPadding(0, dp(6), 0, dp(6))
+        })
+        container.addView(label("Preview", 12f, 0xFF3478D8.toInt(), true))
+        val preview = TextView(this).apply {
+            text = "Your notification preview will appear here."
+            textSize = 14f
+            setTextColor(0xFF24364B.toInt())
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFDCE6F2.toInt())
+        }
+        container.addView(preview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        fun updatePreview() {
+            preview.text = "${titleInput.text.toString().trim().ifBlank { "DocNexa Update" }}\n\n${messageInput.text.toString().trim().ifBlank { "Your message preview..." }}"
+        }
+        titleInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updatePreview() }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        messageInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updatePreview() }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        updatePreview()
+        val dialog = appDialog().setTitle("DocNexa • Admin Panel")
+            .setView(container)
+            .setNegativeButton("Close", null)
+            .setNeutralButton("Copy details", null)
+            .setPositiveButton("Open secure sender", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val title = titleInput.text.toString().trim()
+                val body = messageInput.text.toString().trim()
+                if (title.isBlank() || body.isBlank() || title.length > 80 || body.length > 500) {
+                    Toast.makeText(this, "Enter a title (max 80) and message (max 500 characters).", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DocNexa notification", "$title\n$body"))
+                Toast.makeText(this, "Title and message copied. Paste them in the secure sender.", Toast.LENGTH_LONG).show()
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val title = titleInput.text.toString().trim()
+                val body = messageInput.text.toString().trim()
+                if (title.isBlank() || body.isBlank() || title.length > 80 || body.length > 500) {
+                    Toast.makeText(this, "Enter a title (max 80) and message (max 500 characters).", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/RaviVadhiya11/smart-pdf-scanner-pro/actions/workflows/send-admin-notification.yml")))
+                Toast.makeText(this, "Paste your title and message in GitHub Actions, then review and send.", Toast.LENGTH_LONG).show()
+            }
+        }
+        dialog.show()
     }
 
     private fun shareApp() {
