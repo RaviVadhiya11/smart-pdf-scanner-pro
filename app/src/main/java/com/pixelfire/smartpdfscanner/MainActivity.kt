@@ -119,6 +119,8 @@ private class SignatureCanvas(context: android.content.Context) : View(context) 
         paint.strokeWidth = inkWidth
         strokes.forEach { canvas.drawPath(it, paint) }
     }
+    override fun performClick(): Boolean { super.performClick(); return true }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -128,7 +130,7 @@ private class SignatureCanvas(context: android.content.Context) : View(context) 
                 return true
             }
             MotionEvent.ACTION_MOVE -> { activePath?.lineTo(event.x, event.y); invalidate(); return true }
-            MotionEvent.ACTION_UP -> { activePath?.lineTo(event.x, event.y); activePath = null; invalidate(); return true }
+            MotionEvent.ACTION_UP -> { performClick(); activePath?.lineTo(event.x, event.y); activePath = null; invalidate(); return true }
         }
         return true
     }
@@ -170,7 +172,10 @@ private class ImageCropView(context: android.content.Context, private var source
         for (i in corners.indices step 2) canvas.drawCircle(corners[i], corners[i + 1], handleRadius / 2f, handlePaint)
     }
 
+    override fun performClick(): Boolean { super.performClick(); return true }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (imageRect.isEmpty) return false
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 val corners = arrayOf(
@@ -185,7 +190,7 @@ private class ImageCropView(context: android.content.Context, private var source
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val minSize = 48f
+                val minSize = minOf(48f, imageRect.width() * 0.4f, imageRect.height() * 0.4f)
                 when (activeCorner) {
                     0 -> { cropRect.left = event.x.coerceIn(imageRect.left, cropRect.right - minSize); cropRect.top = event.y.coerceIn(imageRect.top, cropRect.bottom - minSize) }
                     1 -> { cropRect.right = event.x.coerceIn(cropRect.left + minSize, imageRect.right); cropRect.top = event.y.coerceIn(imageRect.top, cropRect.bottom - minSize) }
@@ -195,7 +200,7 @@ private class ImageCropView(context: android.content.Context, private var source
                 invalidate()
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { activeCorner = -1; return true }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { activeCorner = -1; if (event.action == MotionEvent.ACTION_UP) performClick(); return true }
         }
         return true
     }
@@ -247,6 +252,15 @@ class MainActivity : AppCompatActivity() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val qrAlreadyRead = AtomicBoolean(false)
     private var qrCameraProvider: ProcessCameraProvider? = null
+    private var qrScannerClient: com.google.mlkit.vision.barcode.BarcodeScanner? = null
+    @Volatile private var qrCameraGeneration = 0
+
+    private fun closeQrCamera() {
+        qrCameraGeneration++
+        qrCameraProvider?.unbindAll()
+        qrScannerClient?.close()
+        qrScannerClient = null
+    }
     private val qrCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) openLiveQrCamera() else Toast.makeText(this, "Camera permission is required for live QR scanning.", Toast.LENGTH_LONG).show() }
 
     private val scanLauncher = registerForActivityResult(
@@ -704,6 +718,15 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putString("folder_assignments", folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }).apply()
     }
 
+    private fun styleSystemBars(statusColor: Int, lightStatus: Boolean) {
+        window.statusBarColor = statusColor
+        window.navigationBarColor = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 0xFFFFFFFF.toInt() else 0xFF172B4D.toInt()
+        androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = lightStatus
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) isAppearanceLightNavigationBars = true
+        }
+    }
+
     private fun buildScreen() {
         loadFolders()
         selectedFolder = "New Folder"
@@ -713,10 +736,7 @@ class MainActivity : AppCompatActivity() {
         val paleBlue = 0xFFEAF2FF.toInt()
         val muted = 0xFF718096.toInt()
 
-        window.statusBarColor = 0xFF082D72.toInt()
-        window.navigationBarColor = 0xFFFFFFFF.toInt()
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        styleSystemBars(0xFF082D72.toInt(), false)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1214,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         exportResultDialog?.dismiss()
         pagePreviewExecutor.shutdownNow()
-        qrCameraProvider?.unbindAll()
+        closeQrCamera()
         cameraExecutor.shutdownNow()
         loadedNativeAds.forEach { it.destroy() }
         loadedNativeAds.clear()
@@ -2173,10 +2193,7 @@ class MainActivity : AppCompatActivity() {
         val blue = 0xFF3478F6.toInt()
         val navy = 0xFF172B4D.toInt()
         val muted = 0xFF718096.toInt()
-        window.statusBarColor = bg
-        window.navigationBarColor = 0xFFFFFFFF.toInt()
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        styleSystemBars(bg, true)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -5374,41 +5391,52 @@ class MainActivity : AppCompatActivity() {
         val preview = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
         root.addView(preview, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(label("Keep the QR code inside the camera frame. It scans automatically.", 13f, 0xFFFFFFFF.toInt()).apply { setPadding(dp(8), dp(12), dp(8), dp(12)) })
-        val close = Button(this).apply { text = "Close scanner"; setOnClickListener { qrCameraProvider?.unbindAll(); buildScreen() } }
+        val close = Button(this).apply { text = "Close scanner"; setOnClickListener { closeQrCamera(); buildScreen() } }
         root.addView(close, LinearLayout.LayoutParams(-1, dp(48)))
         setScreenContent(root)
+        closeQrCamera()
+        val cameraGeneration = qrCameraGeneration
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
+            if (isFinishing || isDestroyed || cameraGeneration != qrCameraGeneration) return@addListener
             try {
                 val provider = providerFuture.get()
                 qrCameraProvider = provider
                 val cameraPreview = Preview.Builder().build().also { it.setSurfaceProvider(preview.surfaceProvider) }
                 val scanner = BarcodeScanning.getClient()
+                qrScannerClient = scanner
                 val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-                analysis.setAnalyzer(cameraExecutor) { proxy -> analyzeQrFrame(proxy, scanner) }
+                analysis.setAnalyzer(cameraExecutor) { proxy -> analyzeQrFrame(proxy, scanner, cameraGeneration) }
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, cameraPreview, analysis)
+                val camera = when {
+                    provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+                    provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+                    else -> error("No camera found. Use QR scanning from an image instead.")
+                }
+                provider.bindToLifecycle(this, camera, cameraPreview, analysis)
             } catch (e: Exception) {
                 Toast.makeText(this, e.localizedMessage ?: "Could not start camera", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun analyzeQrFrame(proxy: ImageProxy, scanner: com.google.mlkit.vision.barcode.BarcodeScanner) {
+    @androidx.annotation.OptIn(markerClass = [androidx.camera.core.ExperimentalGetImage::class])
+    private fun analyzeQrFrame(proxy: ImageProxy, scanner: com.google.mlkit.vision.barcode.BarcodeScanner, generation: Int) {
         val media = proxy.image
-        if (media == null || qrAlreadyRead.get()) { proxy.close(); return }
-        val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
-        scanner.process(image)
-            .addOnSuccessListener { codes ->
-                val value = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
-                if (value.isNotBlank() && qrAlreadyRead.compareAndSet(false, true)) {
-                    runOnUiThread {
-                        qrCameraProvider?.unbindAll()
+        if (media == null || qrAlreadyRead.get() || generation != qrCameraGeneration || isDestroyed) { proxy.close(); return }
+        try {
+            val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
+            scanner.process(image)
+                .addOnSuccessListener { codes ->
+                    if (generation != qrCameraGeneration || isFinishing || isDestroyed) return@addOnSuccessListener
+                    val value = codes.mapNotNull { it.rawValue }.distinct().joinToString("\n\n")
+                    if (value.isNotBlank() && qrAlreadyRead.compareAndSet(false, true)) {
+                        closeQrCamera()
                         showQrResult(value)
                     }
                 }
-            }
-            .addOnCompleteListener { proxy.close() }
+                .addOnCompleteListener { proxy.close() }
+        } catch (_: Exception) { proxy.close() }
     }
 
     private fun showQrResult(value: String) {
