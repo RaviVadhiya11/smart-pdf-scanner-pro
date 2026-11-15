@@ -258,10 +258,13 @@ private class ImageCropView(context: android.content.Context, private var source
 
 class MainActivity : AppCompatActivity() {
     private var pendingDocumentNotification: String? = null
+    private var pendingDocumentUri: Uri? = null
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val pending = pendingDocumentNotification
         pendingDocumentNotification = null
-        if (granted && pending != null) postDocumentReadyNotification(pending)
+        val uri = pendingDocumentUri
+        pendingDocumentUri = null
+        if (granted && pending != null && uri != null) postDocumentReadyNotification(pending, uri)
     }
 
     private fun createDocNexaNotificationChannels() {
@@ -276,26 +279,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun notifyDocumentReady(fileName: String) {
+    private fun notifyDocumentReady(uri: Uri) {
+        val fileName = uri.lastPathSegment ?: "Your PDF"
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             if (!prefs.getBoolean("notification_permission_asked", false)) {
                 pendingDocumentNotification = fileName
+                pendingDocumentUri = uri
                 prefs.edit().putBoolean("notification_permission_asked", true).apply()
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             return
         }
-        postDocumentReadyNotification(fileName)
+        postDocumentReadyNotification(fileName, uri)
     }
 
     @SuppressLint("MissingPermission")
-    private fun postDocumentReadyNotification(fileName: String) {
+    private fun postDocumentReadyNotification(fileName: String, uri: Uri) {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.pixelfire.smartpdfscanner.OPEN_NOTIFICATION_PDF"
+            putExtra("notification_pdf_uri", uri.toString())
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this, 2101, openIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
         val notification = androidx.core.app.NotificationCompat.Builder(this, "document_status")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Your document is ready")
             .setContentText(fileName)
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText("$fileName has been saved in DocNexa."))
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
         androidx.core.app.NotificationManagerCompat.from(this).notify(2101, notification)
@@ -349,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                         if (!isFinishing && !isDestroyed) {
                             if (saved != null) {
                                 lastPdf = saved
-                                notifyDocumentReady(saved.lastPathSegment ?: "Scanned document.pdf")
+                                notifyDocumentReady(saved)
                                 prefs.edit().putBoolean("has_completed_first_scan", true).apply()
                                 buildScreen()
                                 showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
@@ -490,6 +505,7 @@ class MainActivity : AppCompatActivity() {
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
+        openNotificationPdf(intent)
         initializeRemoteConfig()
         pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
         pendingResultName = savedInstanceState?.getString("result_pending_name")
@@ -1888,6 +1904,14 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleSocialAuthIntent(intent)
+        openNotificationPdf(intent)
+    }
+
+    private fun openNotificationPdf(intent: Intent?) {
+        val raw = intent?.getStringExtra("notification_pdf_uri") ?: return
+        intent.removeExtra("notification_pdf_uri")
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return
+        window.decorView.post { if (!isFinishing && !isDestroyed) openPdf(uri) }
     }
 
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
@@ -6741,7 +6765,7 @@ class MainActivity : AppCompatActivity() {
                 val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
                     lastPdf = output
-                    if (output != null) notifyDocumentReady(output.lastPathSegment ?: "Created PDF")
+                    if (output != null) notifyDocumentReady(output)
                     status.text = if (output != null) "PDF created • ${uris.size} page(s)" else "PDF save failed"
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
                     if (output != null) {
