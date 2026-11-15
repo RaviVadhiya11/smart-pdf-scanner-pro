@@ -801,7 +801,8 @@ class MainActivity : AppCompatActivity() {
         val paleBlue = 0xFFEAF2FF.toInt()
         val muted = 0xFF718096.toInt()
 
-        styleSystemBars(0xFF082D72.toInt(), false)
+        // Android 15+ draws edge-to-edge; use dark status icons over the light app background.
+        styleSystemBars(0xFFF5F8FF.toInt(), true)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
