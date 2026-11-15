@@ -245,7 +245,6 @@ class MainActivity : AppCompatActivity() {
             uri
         } catch (e: Exception) { null }
     }
-    private var pendingImagePdfSaveAs: Uri? = null
     private var signaturePng: ByteArray? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val qrAlreadyRead = AtomicBoolean(false)
@@ -274,28 +273,6 @@ class MainActivity : AppCompatActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) showImageImportPreview(uris)
     }
-
-    private val imagePdfSaveAsPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { destination ->
-        val source = pendingImagePdfSaveAs
-        pendingImagePdfSaveAs = null
-        if (destination != null && source != null) {
-            Thread {
-                try {
-                    contentResolver.openInputStream(source).use { input ->
-                        requireNotNull(input) { "Could not read generated PDF" }
-                        contentResolver.openOutputStream(destination, "w").use { output ->
-                            requireNotNull(output) { "Could not write to selected location" }
-                            input.copyTo(output)
-                        }
-                    }
-                    runOnUiThread { Toast.makeText(this, "PDF saved to your selected folder", Toast.LENGTH_LONG).show() }
-                } catch (e: Exception) {
-                    runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Save As failed", Toast.LENGTH_LONG).show() }
-                }
-            }.start()
-        }
-    }
-
 
     private val idCardPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) showIdCardImportPreview(uris.take(2))
@@ -385,6 +362,18 @@ class MainActivity : AppCompatActivity() {
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
+        pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
+        pendingResultName = savedInstanceState?.getString("result_pending_name")
+        val resultUris = savedInstanceState?.getStringArrayList("result_uris")
+        val resultNames = savedInstanceState?.getStringArrayList("result_names")
+        val resultMimes = savedInstanceState?.getStringArrayList("result_mimes")
+        if (resultUris != null && resultNames != null && resultMimes != null) window.decorView.post {
+            resultUris.indices.forEach { index ->
+                if (index < resultNames.size && index < resultMimes.size) showExportSuccess(Uri.parse(resultUris[index]), resultNames[index], resultMimes[index])
+            }
+            val index = savedInstanceState?.getInt("result_selected", 0) ?: 0
+            if (index in exportResults.items.indices) { exportResults.select(index); refreshExportResult?.invoke() }
+        }
     }
 
     private fun setScreenContent(root: View) {
@@ -1202,7 +1191,21 @@ class MainActivity : AppCompatActivity() {
         root.addView(footer)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingResultSource?.let { outState.putString("result_pending_source", it.toString()) }
+        outState.putString("result_pending_name", pendingResultName)
+        if (exportResultDialog?.isShowing == true) {
+            val files = exportResults.items
+            outState.putStringArrayList("result_uris", ArrayList(files.map { it.uri }))
+            outState.putStringArrayList("result_names", ArrayList(files.map { it.fileName }))
+            outState.putStringArrayList("result_mimes", ArrayList(files.map { it.mime }))
+            outState.putInt("result_selected", exportResults.selectedIndex)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
+        exportResultDialog?.dismiss()
         pagePreviewExecutor.shutdownNow()
         loadedNativeAds.forEach { it.destroy() }
         loadedNativeAds.clear()
@@ -3206,10 +3209,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved; status.text = "Blank PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
                         buildScreen()
-                        appDialog().setTitle("Blank PDF created")
-                            .setMessage("${count} blank page(s) saved as ${saved.lastPathSegment}")
-                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
-                            .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
+
                     } else Toast.makeText(this, "Could not save blank PDF", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -3306,10 +3306,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved; status.text = "Designed PDF created"; recent.text = "Latest: ${saved.lastPathSegment}"
                         buildScreen()
-                        appDialog().setTitle("Designed PDF created")
-                            .setMessage("Saved as ${saved.lastPathSegment}")
-                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
-                            .setNeutralButton("Share") { _, _ -> sharePdf(saved) }.setNegativeButton("Done", null).show()
+
                     } else Toast.makeText(this, "Could not save designed PDF", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -4772,13 +4769,7 @@ class MainActivity : AppCompatActivity() {
                         status.text = "Word DOCX document saved"
                         recent.text = "Latest: ${saved.lastPathSegment ?: fileName}"
                         buildScreen()
-                        appDialog()
-                            .setTitle("Word file created")
-                            .setMessage("Editable DOCX saved in Downloads/DocumentScanner. The original PDF is unchanged.")
-                            .setPositiveButton("Open") { _, _ -> openWordDocument(saved) }
-                            .setNeutralButton("Share") { _, _ -> shareWordDocument(saved) }
-                            .setNegativeButton("Done", null)
-                            .show()
+
                     } else {
                         status.text = "Word export failed"
                         Toast.makeText(this, "Could not save DOCX file", Toast.LENGTH_LONG).show()
@@ -4858,158 +4849,293 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Shared result screen. The original file remains inside DocNexa until the user exports it.
-    private fun showExportSuccess(uri: Uri, fileName: String, mime: String) {
-        runOnUiThread {
-            window.decorView.post {
-                try {
-                    val dialog = android.app.Dialog(this)
-                    val root = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setBackgroundColor(0xFFFFFFFF.toInt())
-                    }
-                    val header = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = android.view.Gravity.CENTER
-                        setPadding(dp(20), dp(26), dp(20), dp(24))
-                        setBackgroundColor(0xFF159F5A.toInt())
-                    }
-                    header.addView(label("✓", 54f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
-                    header.addView(label("Ready Successfully", 25f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
-                    header.addView(gap(14))
-                    header.addView(label(fileName, 15f, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
-                    header.addView(label("Stored securely inside DocNexa", 12f, 0xFFE8FFF1.toInt()).apply { gravity = android.view.Gravity.CENTER })
-                    root.addView(header)
-                    val details = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(20), dp(14), dp(20), dp(8))
-                    }
-                    details.addView(label("Your file is ready", 17f, 0xFF243247.toInt(), true))
-                    details.addView(label("File: $fileName", 13f, 0xFF667085.toInt()))
-                    details.addView(label("Type: $mime", 12f, 0xFF667085.toInt()))
-                    root.addView(details)
-                    val adArea = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(12), dp(4), dp(12), dp(4))
-                    }
-                    addNativeAdCard(adArea)
-                    root.addView(adArea)
-                    val actions = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(16), dp(8), dp(16), dp(18))
-                    }
-                    fun actionButton(title: String, onClick: () -> Unit) {
-                        val b = android.widget.Button(this).apply {
-                            text = title
-                            isAllCaps = false
-                            setOnClickListener { onClick() }
+    private val exportResults = ExportResultSession()
+    private var exportResultDialog: AlertDialog? = null
+    private var refreshExportResult: (() -> Unit)? = null
+    private var exportStatusView: TextView? = null
+    private var pendingResultSource: Uri? = null
+    private var pendingResultName: String? = null
+    private val resultCopyBusy = AtomicBoolean(false)
+    private val resultPreviewGeneration = java.util.concurrent.atomic.AtomicInteger()
+
+    private val resultSaveAsPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val source = pendingResultSource
+        val name = pendingResultName ?: "Document"
+        pendingResultSource = null
+        pendingResultName = null
+        val destination = result.data?.data
+        if (result.resultCode == RESULT_OK && destination != null && source != null) {
+            if (resultCopyBusy.compareAndSet(false, true)) {
+                updateResultStatus("Saving a copy…")
+                Thread {
+                    try {
+                        (contentResolver.openInputStream(source) ?: error("Cannot read the saved file.")).use { input ->
+                            (contentResolver.openOutputStream(destination, "wt") ?: error("Cannot write to this location.")).use { output -> input.copyTo(output) }
                         }
-                        actions.addView(b, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
-                    }
-                    actionButton("Save to Storage") {
-                        try {
-                            val sourceFile = privateDocumentFile(uri) ?: error("Private file is unavailable")
-                            val values = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                                put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/DocNexa")
-                                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                                }
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                updateResultStatus("Copy saved to your selected location.")
+                                Toast.makeText(this, "$name saved", Toast.LENGTH_SHORT).show()
                             }
-                            val target = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                                ?: error("Could not create Downloads file")
-                            sourceFile.inputStream().use { input ->
-                                contentResolver.openOutputStream(target).use { output ->
-                                    if (output == null) error("Could not write exported file")
-                                    input.copyTo(output)
-                                }
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-                            }
-                            showStorageSavedConfirmation(fileName, "Downloads/DocNexa")
-                        } catch (e: Exception) {
-                            Toast.makeText(this, e.localizedMessage ?: "Storage save failed", Toast.LENGTH_LONG).show()
                         }
-                    }
-                    if (mime.startsWith("image/")) actionButton("Save to Gallery") {
-                        try {
-                            val sourceFile = privateDocumentFile(uri) ?: error("Private image is unavailable")
-                            val values = ContentValues().apply {
-                                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                                put(MediaStore.Images.Media.MIME_TYPE, mime)
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
-                                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                                }
-                            }
-                            val target = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                                ?: error("Could not create Gallery image")
-                            sourceFile.inputStream().use { input ->
-                                contentResolver.openOutputStream(target).use { output ->
-                                    if (output == null) error("Could not copy image")
-                                    input.copyTo(output)
-                                }
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                contentResolver.update(target, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
-                            }
-                            Toast.makeText(this, "Saved to Pictures/DocNexa", Toast.LENGTH_LONG).show()
-                        } catch (e: Exception) {
-                            Toast.makeText(this, e.localizedMessage ?: "Gallery save failed", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) updateResultStatus(e.localizedMessage ?: "Save As failed. Your original file is still available.")
                         }
-                    }
-                    actionButton("Share") {
-                        try {
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = mime
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            startActivity(Intent.createChooser(send, "Share $fileName"))
-                        } catch (e: Exception) {
-                            Toast.makeText(this, e.localizedMessage ?: "Could not share file", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                    actionButton("Open File") {
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                        } catch (_: Exception) {
-                            Toast.makeText(this, "No compatible app found to open this file.", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                    actionButton("DONE") { dialog.dismiss(); buildScreen() }
-                    root.addView(actions)
-                    val scroll = ScrollView(this).apply { addView(root) }
-                    dialog.setContentView(scroll)
-                    dialog.setCancelable(true)
-                    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-                    dialog.show()
-                    dialog.window?.setLayout(-1, -1)
-                } catch (e: Exception) {
-                    Toast.makeText(this, "File created inside DocNexa", Toast.LENGTH_LONG).show()
-                }
+                    } finally { resultCopyBusy.set(false) }
+                }.start()
             }
+        } else if (source != null) updateResultStatus("Save As cancelled. Your saved file is still available.")
+    }
+
+    private fun updateResultStatus(message: String) {
+        if (exportResultDialog?.isShowing == true) exportStatusView?.text = message
+        else if (!isFinishing && !isDestroyed) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun saveResultAs(item: ExportResultItem) {
+        if (resultCopyBusy.get() || pendingResultSource != null) {
+            updateResultStatus("Please finish the current export first.")
+            return
+        }
+        pendingResultSource = Uri.parse(item.uri)
+        pendingResultName = item.fileName
+        try {
+            resultSaveAsPicker.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = item.mime
+                putExtra(Intent.EXTRA_TITLE, item.fileName)
+            })
+        } catch (e: Exception) {
+            pendingResultSource = null
+            pendingResultName = null
+            updateResultStatus(e.localizedMessage ?: "No file picker is available.")
         }
     }
 
-    private fun showStorageSavedConfirmation(fileName: String, destination: String) {
-        if (isFinishing || isDestroyed) return
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(10))
-            background = rounded(0xFFFFFFFF.toInt(), 18)
+    // One shared result card: additional output files join the existing card instead of stacking windows.
+    private fun showExportSuccess(uri: Uri, fileName: String, mime: String) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            exportResults.add(ExportResultItem(uri.toString(), fileName, mime))
+            if (exportResultDialog?.isShowing == true) {
+                refreshExportResult?.invoke()
+                return@runOnUiThread
+            }
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(12), dp(20), dp(10))
+            }
+            val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            header.addView(label("✓", 26f, 0xFF128268.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                background = rounded(0xFFE3F5EF.toInt(), 16)
+            }, LinearLayout.LayoutParams(dp(50), dp(50)))
+            val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+            heading.addView(label("File ready", 21f, 0xFF172B4D.toInt(), true))
+            heading.addView(label("Created successfully", 12f, 0xFF128268.toInt()))
+            header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+            panel.addView(header)
+            panel.addView(gap(16))
+            val fileCount = label("", 12f, 0xFF52627A.toInt(), true)
+            val selector = android.widget.Spinner(this)
+            panel.addView(fileCount)
+            panel.addView(selector)
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(14), dp(12), dp(14))
+                background = rounded(0xFFF3F7FF.toInt(), 16, 0xFFDCE7F6.toInt())
+            }
+            val frame = FrameLayout(this).apply { background = rounded(0xFFFFFFFF.toInt(), 10) }
+            val preview = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; contentDescription = "Saved file preview" }
+            val fileIcon = label("PDF", 17f, 0xFF2563EB.toInt(), true).apply { gravity = Gravity.CENTER }
+            frame.addView(preview, FrameLayout.LayoutParams(-1, -1))
+            frame.addView(fileIcon, FrameLayout.LayoutParams(-1, -1))
+            card.addView(frame, LinearLayout.LayoutParams(dp(72), dp(96)))
+            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+            val name = label("", 14f, 0xFF172B4D.toInt(), true).apply { setTextIsSelectable(true) }
+            val type = label("", 11f, 0xFF52627A.toInt())
+            val metadata = label("Reading file details…", 11f, 0xFF52627A.toInt())
+            val location = label("", 10f, 0xFF128268.toInt())
+            info.addView(name); info.addView(gap(5)); info.addView(type); info.addView(gap(4)); info.addView(metadata); info.addView(gap(5)); info.addView(location)
+            card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            panel.addView(card)
+            panel.addView(gap(14))
+            val statusText = label("Use Save As to choose a folder on your device.", 12f, 0xFF52627A.toInt()).apply {
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }
+            exportStatusView = statusText
+            panel.addView(statusText)
+            panel.addView(gap(12))
+            fun resultButton(title: String, primary: Boolean, action: () -> Unit): com.google.android.material.button.MaterialButton =
+                com.google.android.material.button.MaterialButton(this).apply {
+                    text = title; isAllCaps = false; textSize = 14f
+                    cornerRadius = dp(12)
+                    setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFF2563EB.toInt())
+                    backgroundTintList = android.content.res.ColorStateList.valueOf(if (primary) 0xFF2563EB.toInt() else 0xFFEAF2FF.toInt())
+                    setOnClickListener { action() }
+                }
+            val openButton = resultButton("Open file", true) {
+                exportResults.selected?.let { item ->
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(item.uri), item.mime)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    } catch (_: Exception) { updateResultStatus("No compatible app found. You can Save As or Share this file.") }
+                }
+            }
+            panel.addView(openButton, LinearLayout.LayoutParams(-1, dp(54)))
+            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            actions.addView(resultButton("Save As", false) { exportResults.selected?.let { saveResultAs(it) } },
+                LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
+            actions.addView(resultButton("Share", false) {
+                exportResults.selected?.let { item ->
+                    try {
+                        val source = Uri.parse(item.uri)
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = item.mime
+                            putExtra(Intent.EXTRA_STREAM, source)
+                            clipData = android.content.ClipData.newRawUri(item.fileName, source)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(send, "Share ${item.fileName}"))
+                    } catch (e: Exception) { updateResultStatus(e.localizedMessage ?: "Could not open sharing options.") }
+                }
+            }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
+            panel.addView(actions)
+            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
+            panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
+            val dialog = appDialog().setView(toolDialogScroll(panel)).setNegativeButton("Done", null).create()
+            exportResultDialog = dialog
+            var displayedUri: String? = null
+            var selectorEntries = emptyList<String>()
+            var bindingSelector = false
+            fun render() {
+                val item = exportResults.selected ?: return
+                val items = exportResults.items
+                fileCount.visibility = if (items.size > 1) View.VISIBLE else View.GONE
+                selector.visibility = if (items.size > 1) View.VISIBLE else View.GONE
+                fileCount.text = "${items.size} files created • Choose a file"
+                val labels = items.map { it.fileName }
+                if (labels != selectorEntries) {
+                    bindingSelector = true
+                    selectorEntries = labels
+                    selector.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+                    selector.setSelection(exportResults.selectedIndex, false)
+                    bindingSelector = false
+                }
+                name.text = item.fileName
+                type.text = ExportResultSession.typeLabel(item.mime)
+                location.text = if (privateDocumentFile(Uri.parse(item.uri)) != null) "Saved inside DocNexa" else "Saved file"
+                openButton.text = if (item.mime == "application/pdf") "Open PDF" else "Open file"
+                gallery.visibility = if (item.mime.startsWith("image/") && Build.VERSION.SDK_INT >= 29) View.VISIBLE else View.GONE
+                if (displayedUri == item.uri) return
+                displayedUri = item.uri
+                val token = resultPreviewGeneration.incrementAndGet()
+                preview.setImageDrawable(null)
+                fileIcon.visibility = View.VISIBLE
+                fileIcon.text = when {
+                    item.mime == "application/pdf" -> "PDF"
+                    item.mime.startsWith("image/") -> "IMG"
+                    item.mime.contains("word") -> "DOCX"
+                    item.mime.contains("zip") -> "ZIP"
+                    else -> "FILE"
+                }
+                metadata.text = "Reading file details…"
+                statusText.text = "Use Save As to choose a folder on your device."
+                if (pagePreviewExecutor.isShutdown) return
+                pagePreviewExecutor.execute {
+                    if (resultPreviewGeneration.get() != token || isDestroyed) return@execute
+                    var thumbnail: Bitmap? = null
+                    var pages: Int? = null
+                    val source = Uri.parse(item.uri)
+                    var size: Long? = null
+                    try {
+                        contentResolver.query(source, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            val column = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (column >= 0 && cursor.moveToFirst() && !cursor.isNull(column)) size = cursor.getLong(column).takeIf { it >= 0 }
+                        }
+                    } catch (_: Exception) { }
+                    try {
+                        if (item.mime == "application/pdf") {
+                            contentResolver.openFileDescriptor(source, "r")?.use { fd ->
+                                PdfRenderer(fd).use { renderer ->
+                                    pages = renderer.pageCount
+                                    if (renderer.pageCount > 0) renderer.openPage(0).use { page ->
+                                        val scale = minOf(180f / page.width, 240f / page.height)
+                                        thumbnail = Bitmap.createBitmap(maxOf(1, (page.width * scale).toInt()), maxOf(1, (page.height * scale).toInt()), Bitmap.Config.ARGB_8888).also { bitmap ->
+                                            Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (item.mime.startsWith("image/")) {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            contentResolver.openInputStream(source)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                            var sample = 1
+                            while (bounds.outWidth / sample > 360 || bounds.outHeight / sample > 480) sample *= 2
+                            contentResolver.openInputStream(source)?.use {
+                                thumbnail = BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                            }
+                        }
+                    } catch (_: Exception) { }
+                    val details = listOfNotNull(size?.let { formatFileSize(it) }, pages?.let { "$it ${if (it == 1) "page" else "pages"}" }).joinToString(" • ").ifBlank { "Preview not available" }
+                    runOnUiThread {
+                        if (dialog.isShowing && resultPreviewGeneration.get() == token) {
+                            metadata.text = details
+                            if (thumbnail != null) { preview.setImageBitmap(thumbnail); fileIcon.visibility = View.GONE }
+                        } else thumbnail?.recycle()
+                    }
+                }
+            }
+            selector.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (!bindingSelector && position == selector.selectedItemPosition && position in exportResults.items.indices && position != exportResults.selectedIndex) {
+                        exportResults.select(position); render()
+                    }
+                }
+            }
+            refreshExportResult = { render() }
+            dialog.setOnDismissListener {
+                resultPreviewGeneration.incrementAndGet()
+                if (exportResultDialog === dialog) {
+                    exportResultDialog = null; refreshExportResult = null; exportStatusView = null; exportResults.clear()
+                }
+            }
+            dialog.show()
+            render()
         }
-        panel.addView(label("✓  Saved Successfully!", 21f, 0xFF159F5A.toInt(), true))
-        panel.addView(gap(8))
-        panel.addView(label(fileName, 14f, 0xFF243247.toInt(), true))
-        panel.addView(label("Your file is now available in $destination.", 12f, 0xFF667085.toInt()))
-        panel.addView(gap(8))
-        addNativeAdCard(panel)
-        appDialog().setTitle("DocNexa").setView(panel).setPositiveButton("OK", null).show()
     }
+
+    private fun saveResultImageToGallery(item: ExportResultItem) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { saveResultAs(item); return }
+        if (!resultCopyBusy.compareAndSet(false, true)) { updateResultStatus("Please wait for the current export."); return }
+        updateResultStatus("Saving to Gallery…")
+        Thread {
+            var destination: Uri? = null
+            try {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, item.fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, item.mime)
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+                val target = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("Could not create Gallery image.")
+                destination = target
+                (contentResolver.openInputStream(Uri.parse(item.uri)) ?: error("Could not read image.")).use { input ->
+                    (contentResolver.openOutputStream(target) ?: error("Could not write image.")).use { output -> input.copyTo(output) }
+                }
+                contentResolver.update(target, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+                runOnUiThread { if (!isFinishing && !isDestroyed) updateResultStatus("Saved to Pictures/DocNexa.") }
+            } catch (e: Exception) {
+                destination?.let { try { contentResolver.delete(it, null, null) } catch (_: Exception) { } }
+                runOnUiThread { if (!isFinishing && !isDestroyed) updateResultStatus(e.localizedMessage ?: "Could not save image.") }
+            } finally { resultCopyBusy.set(false) }
+        }.start()
+    }
+
     private fun saveDocumentBytes(bytes: ByteArray, prefix: String, mime: String, extension: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "${prefix}_${stamp}.${extension}"
@@ -5504,13 +5630,7 @@ class MainActivity : AppCompatActivity() {
                                 recent.text = "Latest: ${saved?.lastPathSegment ?: "Merged PDF"}"
                                 if (saved != null) {
                                     buildScreen()
-                                    appDialog()
-                                        .setTitle("PDFs merged successfully")
-                                        .setMessage("${mergeOrder.size} files combined in your selected order into ${saved.lastPathSegment}")
-                                        .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
-                                        .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
-                                        .setNegativeButton("Done", null)
-                                        .show()
+
                                 } else Toast.makeText(this, "Could not save merged PDF", Toast.LENGTH_LONG).show()
                             }
                         } finally {
@@ -5823,11 +5943,7 @@ class MainActivity : AppCompatActivity() {
                     if (saved != null) {
                         lastPdf = saved
                         buildScreen()
-                        appDialog().setTitle("ID PDF Created")
-                            .setMessage("Your ID card PDF is saved in Downloads/DocumentScanner.")
-                            .setPositiveButton("Open PDF") { _, _ -> openPdf(saved) }
-                            .setNeutralButton("Share PDF") { _, _ -> sharePdf(saved) }
-                            .setNegativeButton("Done", null).show()
+
                     } else Toast.makeText(this, "Could not save ID PDF", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -5893,17 +6009,7 @@ class MainActivity : AppCompatActivity() {
                 doc.close()
                 val pdfUri = savePdfBytes(pdfBytes, "Passport_Photo_Sheet")
                 runOnUiThread {
-                    appDialog().setTitle("Passport Photo Sheet Ready")
-                        .setMessage("Photo sheet saved to Gallery and PDF saved to Downloads/DocumentScanner. Check print scaling before using for official documents.")
-                        .setPositiveButton("Open PDF") { _, _ -> if (pdfUri != null) openPdf(pdfUri) }
-                        .setNeutralButton("Share JPG") { _, _ ->
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "image/jpeg"
-                                putExtra(Intent.EXTRA_STREAM, jpgUri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            startActivity(Intent.createChooser(send, "Share passport photo sheet"))
-                        }.setNegativeButton("Done", null).show()
+                    showExportSuccess(jpgUri, displayName(jpgUri, 0), "image/jpeg")
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Passport photo sheet failed", Toast.LENGTH_LONG).show() }
@@ -6200,16 +6306,7 @@ class MainActivity : AppCompatActivity() {
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
                     if (output != null) {
                         buildScreen()
-                        appDialog()
-                            .setTitle("PDF created successfully")
-                            .setMessage("${uris.size} image page(s) saved as ${output.lastPathSegment}.")
-                            .setPositiveButton("Open PDF") { _, _ -> openPdf(output) }
-                            .setNeutralButton("Share PDF") { _, _ -> sharePdf(output) }
-                            .setNegativeButton("Save As") { _, _ ->
-                                pendingImagePdfSaveAs = output
-                                imagePdfSaveAsPicker.launch(output.lastPathSegment ?: "Images_to_PDF.pdf")
-                            }
-                            .show()
+
                     } else Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
