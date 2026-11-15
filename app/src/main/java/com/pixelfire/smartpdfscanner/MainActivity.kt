@@ -256,6 +256,49 @@ private class ImageCropView(context: android.content.Context, private var source
 }
 
 class MainActivity : AppCompatActivity() {
+    private var pendingDocumentNotification: String? = null
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val pending = pendingDocumentNotification
+        pendingDocumentNotification = null
+        if (granted && pending != null) postDocumentReadyNotification(pending)
+    }
+
+    private fun createDocNexaNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            manager.createNotificationChannel(android.app.NotificationChannel(
+                "important_updates", "Important updates", android.app.NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "Important DocNexa announcements and service updates" })
+            manager.createNotificationChannel(android.app.NotificationChannel(
+                "document_status", "Document status", android.app.NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Notifications when document work is completed" })
+        }
+    }
+
+    private fun notifyDocumentReady(fileName: String) {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            if (!prefs.getBoolean("notification_permission_asked", false)) {
+                pendingDocumentNotification = fileName
+                prefs.edit().putBoolean("notification_permission_asked", true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            return
+        }
+        postDocumentReadyNotification(fileName)
+    }
+
+    private fun postDocumentReadyNotification(fileName: String) {
+        val notification = androidx.core.app.NotificationCompat.Builder(this, "document_status")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Your document is ready")
+            .setContentText(fileName)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText("$fileName has been saved in DocNexa."))
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .build()
+        androidx.core.app.NotificationManagerCompat.from(this).notify(2101, notification)
+    }
+
     private val loadedNativeAds = mutableListOf<NativeAd>()
     private lateinit var status: TextView
     private lateinit var recent: TextView
@@ -304,6 +347,7 @@ class MainActivity : AppCompatActivity() {
                         if (!isFinishing && !isDestroyed) {
                             if (saved != null) {
                                 lastPdf = saved
+                                notifyDocumentReady(saved.lastPathSegment ?: "Scanned document.pdf")
                                 prefs.edit().putBoolean("has_completed_first_scan", true).apply()
                                 buildScreen()
                                 showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
@@ -440,6 +484,7 @@ class MainActivity : AppCompatActivity() {
             })
             FirebaseCrashlytics.getInstance().setCustomKey("app_section", "main")
         }
+        createDocNexaNotificationChannels()
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
@@ -6694,6 +6739,7 @@ class MainActivity : AppCompatActivity() {
                 val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
                     lastPdf = output
+                    if (output != null) notifyDocumentReady(output.lastPathSegment ?: "Created PDF")
                     status.text = if (output != null) "PDF created • ${uris.size} page(s)" else "PDF save failed"
                     recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
                     if (output != null) {
