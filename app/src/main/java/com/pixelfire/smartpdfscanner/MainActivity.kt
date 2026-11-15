@@ -62,6 +62,8 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.gms.ads.nativead.NativeAdView
 import com.google.android.gms.ads.MobileAds
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -401,6 +403,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Firebase Analytics records a lightweight app-open event. Crashlytics
+        // automatically captures uncaught crashes after Firebase initialization.
+        runCatching {
+            FirebaseAnalytics.getInstance(this).logEvent("docnexa_app_open", Bundle().apply {
+                putString("app_section", "main")
+            })
+            FirebaseCrashlytics.getInstance().setCustomKey("app_section", "main")
+        }
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
