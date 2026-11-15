@@ -122,15 +122,35 @@ private class SignatureCanvas(context: android.content.Context) : View(context) 
     override fun performClick(): Boolean { super.performClick(); return true }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // The signature pad sits inside a ScrollView. Keep the parent from
+                // stealing finger movement while the user is drawing a signature.
+                parent?.requestDisallowInterceptTouchEvent(true)
                 activePath = Path().apply { moveTo(event.x, event.y) }
                 activePath?.let { strokes.add(it) }
                 invalidate()
                 return true
             }
-            MotionEvent.ACTION_MOVE -> { activePath?.lineTo(event.x, event.y); invalidate(); return true }
-            MotionEvent.ACTION_UP -> { performClick(); activePath?.lineTo(event.x, event.y); activePath = null; invalidate(); return true }
+            MotionEvent.ACTION_MOVE -> {
+                activePath?.lineTo(event.x, event.y)
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                activePath?.lineTo(event.x, event.y)
+                activePath = null
+                parent?.requestDisallowInterceptTouchEvent(false)
+                performClick()
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                activePath = null
+                parent?.requestDisallowInterceptTouchEvent(false)
+                invalidate()
+                return true
+            }
         }
         return true
     }
