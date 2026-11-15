@@ -31,8 +31,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Build installable debug APK
-        run: gradle :app:assembleDebug
+      - name: Test page tools and build installable debug APK
+        run: gradle :app:testDebugUnitTest :app:assembleDebug
       - name: Build release AAB
         run: gradle :app:bundleRelease
       - name: Upload Android builds

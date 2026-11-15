@@ -360,6 +360,25 @@ class MainActivity : AppCompatActivity() {
     private val passwordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) passwordDialog(uri, false) }
     private val removePasswordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) passwordDialog(uri, true) }
     private val zipPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) zipPdf(uri) }
+    private val reorderPagesPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPageOrganizer(uri, PdfPagePlan.Operation.REORDER)
+    }
+    private val deletePagesPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPageOrganizer(uri, PdfPagePlan.Operation.DELETE)
+    }
+    private val extractPagesPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPageOrganizer(uri, PdfPagePlan.Operation.EXTRACT)
+    }
+    private val duplicatePagesPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPageOrganizer(uri, PdfPagePlan.Operation.DUPLICATE)
+    }
+    private val pageNumbersPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showPageNumbersDialog(uri)
+    }
+    private val watermarkPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) addWatermarkDialog(uri)
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -2647,6 +2666,16 @@ class MainActivity : AppCompatActivity() {
         )
         val pdfTools = listOf(
             PdfTool("Create PDF", "＋", 0xFF2563EB.toInt()) { showCreatePdfHub() },
+            PdfTool("Reorder Pages", "⇅", 0xFF2563EB.toInt()) { reorderPagesPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Delete Pages", "−", 0xFFDC4D58.toInt()) { deletePagesPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Extract Pages", "⇱", 0xFF0891B2.toInt()) { extractPagesPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Duplicate Pages", "▣", 0xFF7C3AED.toInt()) { duplicatePagesPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Page Numbers", "#", 0xFF0D9488.toInt()) { pageNumbersPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Compress PDF", "↓", 0xFFEA580C.toInt()) { compressPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF to Word", "W", 0xFF2563EB.toInt()) { pdfToWordPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("OCR Image", "Aa", 0xFF7C3AED.toInt()) { ocrPicker.launch("image/*") },
+            PdfTool("Watermark", "▧", 0xFF64748B.toInt()) { watermarkPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF Editor", "✎", 0xFF2563EB.toInt()) { pdfEditorPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Split", "↔", 0xFF078F83.toInt()) { splitPicker.launch(arrayOf("application/pdf")) },
@@ -2733,8 +2762,9 @@ class MainActivity : AppCompatActivity() {
         body.addView(toolGrid)
         fun toolCategory(tool: PdfTool): String = when (tool.title) {
             "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery" -> "Create"
-            "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature" -> "Edit"
-            "PDF to Image", "PDF To Text", "PDF To ZIP" -> "Convert"
+            "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers" -> "Edit"
+            "Reorder Pages", "Delete Pages", "Extract Pages", "Duplicate Pages" -> "Organize"
+            "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF" -> "Convert"
             "Add Password", "Remove Password" -> "Protect"
             else -> "View & share"
         }
@@ -2757,7 +2787,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        listOf("All", "Create", "Edit", "Convert", "Protect", "View & share").forEach { name ->
+        listOf("All", "Create", "Organize", "Edit", "Convert", "Protect", "View & share").forEach { name ->
             chips.addView(Button(this).apply {
                 text = name
                 textSize = 11f
@@ -3145,6 +3175,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pdfToolDescription(title: String): String = when (title) {
+        "Reorder Pages" -> "Custom page order or reverse all pages"
+        "Delete Pages" -> "Remove selected pages from a copy"
+        "Extract Pages" -> "Save selected pages in your chosen order"
+        "Duplicate Pages" -> "Insert a copy after selected pages"
+        "Page Numbers" -> "Number selected pages at top or bottom"
+        "Compress PDF" -> "Choose size, quality and custom compression"
+        "PDF to Word" -> "Export searchable text to a Word document"
+        "OCR Image" -> "Recognize and copy text from an image"
+        "Watermark" -> "Add a text watermark to your PDF"
+        "PDF Editor" -> "Text, signature, shapes and page tools"
         "Open PDF" -> "Open and read a PDF document"
         "Page Details", "PDF Details" -> "View pages and metadata"
         "Signature" -> "Draw, save and place your signature"
@@ -3792,6 +3832,245 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private fun inspectPageTool(uri: Uri, onReady: (Int) -> Unit) {
+        val progress = AlertDialog.Builder(this).setTitle("Opening PDF")
+            .setView(android.widget.ProgressBar(this).apply { setPadding(dp(24), dp(20), dp(24), dp(20)) })
+            .setCancelable(false).show()
+        Thread {
+            try {
+                val count = (contentResolver.openInputStream(uri) ?: error("Cannot open this PDF.")).use { input ->
+                    PDDocument.load(input).use { doc ->
+                        require(doc.numberOfPages > 0) { "This PDF has no pages." }
+                        require(doc.currentAccessPermission.canAssembleDocument() && doc.currentAccessPermission.canModify()) {
+                            "This PDF restricts editing. Use an unlocked copy you are allowed to edit."
+                        }
+                        doc.numberOfPages
+                    }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) { progress.dismiss(); onReady(count) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        progress.dismiss()
+                        AlertDialog.Builder(this).setTitle("Cannot edit this PDF")
+                            .setMessage(e.localizedMessage ?: "Unlock password-protected PDFs before using this tool.")
+                            .setPositiveButton("Close", null).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun showPageOrganizer(uri: Uri, operation: PdfPagePlan.Operation) {
+        inspectPageTool(uri) { count ->
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(8), dp(20), dp(8))
+            }
+            panel.addView(label("$count pages • Original stays unchanged", 12f, 0xFF2563EB.toInt(), true))
+            panel.addView(gap(12))
+            val instructions = when (operation) {
+                PdfPagePlan.Operation.REORDER -> "Enter every page once in the desired order. Reverse ranges work too: 5-1."
+                PdfPagePlan.Operation.DELETE -> "Enter pages to remove, for example 2-4, 7. At least one page must remain."
+                PdfPagePlan.Operation.EXTRACT -> "Enter pages to keep in your chosen order, for example 3, 1-2."
+                PdfPagePlan.Operation.DUPLICATE -> "Enter pages to duplicate, for example 1, 3-5. A copy is inserted immediately after each selected page."
+            }
+            panel.addView(label(instructions, 13f, 0xFF475569.toInt()))
+            val field = EditText(this).apply {
+                hint = "Page numbers / ranges"
+                setSingleLine(true)
+                inputType = android.text.InputType.TYPE_CLASS_TEXT
+                contentDescription = "Page numbers and ranges"
+                if (operation == PdfPagePlan.Operation.REORDER) setText(if (count == 1) "1" else "1-$count")
+            }
+            panel.addView(field)
+            val preview = label("", 12f, 0xFF475569.toInt())
+            panel.addView(preview)
+            panel.addView(gap(12))
+            panel.addView(label("The new PDF copies page artwork. Annotations, bookmarks and interactive form fields are not copied.", 11f, 0xFF718096.toInt()))
+            val dialog = AlertDialog.Builder(this).setTitle(operation.title)
+                .setView(ScrollView(this).apply { addView(panel) })
+                .setPositiveButton("Save new PDF", null)
+                .setNegativeButton("Cancel", null)
+                .apply { if (operation == PdfPagePlan.Operation.REORDER) setNeutralButton("Reverse order", null) }
+                .create()
+            fun updatePreview() {
+                val plan = runCatching { PdfPagePlan.build(operation, field.text.toString(), count) }.getOrNull()
+                preview.text = if (plan == null) "Enter a valid selection to preview the output." else {
+                    val sample = plan.take(12).joinToString(", ") { (it + 1).toString() }
+                    "Output: ${plan.size} pages\nOrder: $sample${if (plan.size > 12) ", …" else ""}"
+                }
+            }
+            field.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun afterTextChanged(s: android.text.Editable?) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { field.error = null; updatePreview() }
+            })
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                    field.setText(if (count == 1) "1" else "$count-1")
+                }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    try {
+                        val plan = PdfPagePlan.build(operation, field.text.toString(), count)
+                        dialog.dismiss()
+                        runPagePdfOperation(uri, operation.title, operation.outputPrefix) { source ->
+                            require(source.numberOfPages == count) { "The PDF changed. Select it again before editing." }
+                            PDDocument().use { output ->
+                                plan.forEach { index ->
+                                    val original = source.getPage(index)
+                                    output.importPage(original).apply {
+                                        // importPage does not copy inherited resources; keep fonts and images intact.
+                                        resources = original.resources
+                                        mediaBox = original.mediaBox
+                                        cropBox = original.cropBox
+                                        rotation = original.rotation
+                                        // Page annotations may point at the old page tree or AcroForm.
+                                        setAnnotations(emptyList())
+                                    }
+                                }
+                                ByteArrayOutputStream().also { output.save(it) }.toByteArray()
+                            }
+                        }
+                    } catch (e: IllegalArgumentException) {
+                        field.error = e.message
+                        field.requestFocus()
+                    }
+                }
+            }
+            updatePreview()
+            dialog.show()
+        }
+    }
+
+    private fun showPageNumbersDialog(uri: Uri) {
+        inspectPageTool(uri) { count ->
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(8), dp(20), dp(8))
+            }
+            panel.addView(label("$count pages • Saves a new numbered copy", 12f, 0xFF2563EB.toInt(), true))
+            panel.addView(gap(10))
+            val range = EditText(this).apply {
+                hint = "Pages to number (blank = all)"
+                setSingleLine(true)
+                contentDescription = "Pages to number, leave blank for all pages"
+            }
+            val start = EditText(this).apply {
+                hint = "First number"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText("1")
+                contentDescription = "Starting page number"
+            }
+            val top = android.widget.CheckBox(this).apply { text = "Place numbers at the top (default: bottom)" }
+            val prefix = android.widget.CheckBox(this).apply { text = "Use Page prefix, for example Page 1"; isChecked = true }
+            panel.addView(range)
+            panel.addView(label("Numbers follow document order, even if a range is typed in reverse.", 11f, 0xFF718096.toInt()))
+            panel.addView(start)
+            panel.addView(top)
+            panel.addView(prefix)
+            panel.addView(label("Numbers are centered on each visible page and respect page rotation.", 12f, 0xFF475569.toInt()))
+            val dialog = AlertDialog.Builder(this).setTitle("Add Page Numbers")
+                .setView(ScrollView(this).apply { addView(panel) })
+                .setPositiveButton("Save numbered PDF", null).setNegativeButton("Cancel", null).create()
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    val pages = try {
+                        if (range.text.isBlank()) (0 until count).toList()
+                        else PdfPagePlan.selection(range.text.toString(), count).sorted()
+                    } catch (e: IllegalArgumentException) {
+                        range.error = e.message
+                        return@setOnClickListener
+                    }
+                    val first = start.text.toString().toIntOrNull()
+                    if (first == null || first < 1 || first.toLong() + pages.size - 1 > Int.MAX_VALUE) {
+                        start.error = "Enter a positive starting number within the supported range."
+                        return@setOnClickListener
+                    }
+                    val atTop = top.isChecked
+                    val withPrefix = prefix.isChecked
+                    dialog.dismiss()
+                    runPagePdfOperation(uri, "Adding page numbers", "Numbered") { doc ->
+                        require(doc.numberOfPages == count) { "The PDF changed. Select it again before editing." }
+                        pages.forEachIndexed { index, pageIndex ->
+                            val page = doc.getPage(pageIndex)
+                            val box = page.cropBox
+                            val rotation = ((page.rotation % 360) + 360) % 360
+                            val width = if (rotation == 90 || rotation == 270) box.height else box.width
+                            val height = if (rotation == 90 || rotation == 270) box.width else box.height
+                            require(width >= 40f && height >= 40f) { "This PDF contains a page too small for page numbers." }
+                            val text = (if (withPrefix) "Page " else "") + (first + index)
+                            val font = PDType1Font.HELVETICA
+                            val fontSize = minOf(12f, (width - 16f) / (font.getStringWidth(text) / 1000f))
+                            val x = (width - font.getStringWidth(text) / 1000f * fontSize) / 2f
+                            val y = if (atTop) height - 22f else 14f
+                            PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
+                                stream.saveGraphicsState()
+                                stream.transform(com.tom_roush.pdfbox.util.Matrix.getTranslateInstance(box.lowerLeftX, box.lowerLeftY))
+                                val transform = when (rotation) {
+                                    90 -> com.tom_roush.pdfbox.util.Matrix(0f, 1f, -1f, 0f, box.width, 0f)
+                                    180 -> com.tom_roush.pdfbox.util.Matrix(-1f, 0f, 0f, -1f, box.width, box.height)
+                                    270 -> com.tom_roush.pdfbox.util.Matrix(0f, -1f, 1f, 0f, 0f, box.height)
+                                    else -> com.tom_roush.pdfbox.util.Matrix()
+                                }
+                                stream.transform(transform)
+                                stream.beginText()
+                                stream.setFont(font, fontSize)
+                                stream.setNonStrokingColor(40, 50, 65)
+                                stream.newLineAtOffset(x, y)
+                                stream.showText(text)
+                                stream.endText()
+                                stream.restoreGraphicsState()
+                            }
+                        }
+                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                    }
+                }
+            }
+            dialog.show()
+        }
+    }
+
+    private fun runPagePdfOperation(uri: Uri, title: String, prefix: String, transform: (PDDocument) -> ByteArray) {
+        val progress = AlertDialog.Builder(this).setTitle(title)
+            .setMessage("Processing your PDF…")
+            .setView(android.widget.ProgressBar(this).apply { setPadding(dp(24), dp(16), dp(24), dp(16)) })
+            .setCancelable(false).show()
+        Thread {
+            try {
+                val bytes = (contentResolver.openInputStream(uri) ?: error("Cannot open this PDF.")).use { input ->
+                    PDDocument.load(input).use { doc ->
+                        require(doc.currentAccessPermission.canModify() && doc.currentAccessPermission.canAssembleDocument()) {
+                            "This PDF does not allow editing."
+                        }
+                        transform(doc)
+                    }
+                }
+                // A unique name prevents two operations in the same second from overwriting each other.
+                val name = "${prefix}_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(8)}.pdf"
+                val saved = saveBytesPrivately(bytes, name) ?: error("Could not save the new PDF. Check available storage.")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        progress.dismiss()
+                        lastPdf = saved
+                        showExportSuccess(saved, name, "application/pdf")
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        progress.dismiss()
+                        AlertDialog.Builder(this).setTitle("PDF operation failed")
+                            .setMessage(e.localizedMessage ?: "Try another PDF or a smaller page selection.")
+                            .setPositiveButton("Close", null).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
     private fun showPdfEditor(uri: Uri) {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -3827,6 +4106,11 @@ class MainActivity : AppCompatActivity() {
             row.addView(label("›", 24f, 0xFFB8C0CC.toInt()))
             list.addView(row); list.addView(gap(8))
         }
+        editorAction("Reorder Pages", "Choose a custom order or reverse the PDF", "⇅") { showPageOrganizer(uri, PdfPagePlan.Operation.REORDER) }
+        editorAction("Delete Pages", "Remove selected pages from a new copy", "−") { showPageOrganizer(uri, PdfPagePlan.Operation.DELETE) }
+        editorAction("Extract Pages", "Keep selected pages in your chosen order", "⇱") { showPageOrganizer(uri, PdfPagePlan.Operation.EXTRACT) }
+        editorAction("Duplicate Pages", "Insert a copy after selected pages", "▣") { showPageOrganizer(uri, PdfPagePlan.Operation.DUPLICATE) }
+        editorAction("Page Numbers", "Add page numbers at the top or bottom", "#") { showPageNumbersDialog(uri) }
         editorAction("Add Text", "Place text on the first page", "T") { addTextToPdfDialog(uri) }
         editorAction("Signature", "Draw and apply your signature", "✍") { openSignatureEditor(uri) }
         editorAction("Watermark", "Add a text watermark to every page", "▧") { addWatermarkDialog(uri) }
