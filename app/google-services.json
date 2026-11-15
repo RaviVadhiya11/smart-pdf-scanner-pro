@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1049210050828",
+    "project_id": "docnexa-f428d",
+    "storage_bucket": "docnexa-f428d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1049210050828:android:5f9e3151373beb0c6f1129",
+        "android_client_info": {
+          "package_name": "com.pixelfire.smartpdfscanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhsigZqXIXLOOTd0cUEnQWMJUY33r3WU4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
