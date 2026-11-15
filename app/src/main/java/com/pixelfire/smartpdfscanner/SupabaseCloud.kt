@@ -14,6 +14,39 @@ internal object SupabaseCloud {
     private const val BUCKET = "docnexa-pdfs"
 
     data class AuthResult(val accessToken: String, val userId: String, val message: String)
+    data class OAuthResult(val accessToken: String, val refreshToken: String, val userId: String, val email: String)
+
+    fun buildOAuthUrl(provider: String, redirectUri: String, codeChallenge: String, state: String): String {
+        require(provider == "google" || provider == "facebook") { "Unsupported sign-in provider." }
+        val query = listOf(
+            "provider" to provider,
+            "redirect_to" to redirectUri,
+            "code_challenge" to codeChallenge,
+            "code_challenge_method" to "s256",
+            "state" to state
+        ).joinToString("&") { (key, value) ->
+            URLEncoder.encode(key, "UTF-8") + "=" + URLEncoder.encode(value, "UTF-8")
+        }
+        return "$BASE_URL/auth/v1/authorize?$query"
+    }
+
+    fun exchangeOAuthCode(code: String, verifier: String): OAuthResult {
+        val payload = JSONObject()
+            .put("auth_code", code)
+            .put("code_verifier", verifier)
+            .toString().toByteArray()
+        val response = request("POST", "/auth/v1/token?grant_type=pkce", payload, "application/json")
+        val json = JSONObject(response)
+        val user = json.optJSONObject("user") ?: JSONObject()
+        val access = json.optString("access_token")
+        if (access.isBlank()) throw IllegalStateException("Supabase did not return a sign-in session.")
+        return OAuthResult(
+            accessToken = access,
+            refreshToken = json.optString("refresh_token"),
+            userId = user.optString("id"),
+            email = user.optString("email")
+        )
+    }
 
     fun authenticate(email: String, password: String, signUp: Boolean, fullName: String = ""): AuthResult {
         val endpoint = if (signUp) "/auth/v1/signup" else "/auth/v1/token?grant_type=password"
