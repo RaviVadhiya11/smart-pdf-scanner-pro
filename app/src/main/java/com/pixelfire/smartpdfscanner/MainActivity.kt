@@ -503,6 +503,10 @@ class MainActivity : AppCompatActivity() {
             FirebaseCrashlytics.getInstance().setCustomKey("app_section", "main")
         }
         createDocNexaNotificationChannels()
+        // Subscribe every installation to important app announcements by default.
+        // Users can still control notification visibility in Android system settings.
+        FirebaseMessaging.getInstance().subscribeToTopic("docnexa_announcements")
+            .addOnFailureListener { error -> android.util.Log.w("DocNexa", "Announcement topic subscription failed", error) }
         PDFBoxResourceLoader.init(applicationContext)
         MobileAds.initialize(this) {}
         buildScreen()
@@ -2417,28 +2421,6 @@ class MainActivity : AppCompatActivity() {
             setting("✦", "Admin notification panel", "Compose an announcement for subscribed DocNexa users") {
                 showAdminNotificationPanel()
             }
-        }
-
-        section("NOTIFICATIONS")
-        val updatesEnabled = prefs.getBoolean("admin_updates_enabled", false)
-        setting("♧", "Important app updates", if (updatesEnabled) "Subscribed • Important DocNexa announcements are enabled" else "Off • Enable to receive important DocNexa announcements") {
-            val enabled = prefs.getBoolean("admin_updates_enabled", false)
-            appDialog().setTitle(if (enabled) "Turn off app updates?" else "Enable important app updates?")
-                .setMessage(if (enabled) "You will stop receiving DocNexa announcement notifications. Document completion notifications will continue." else "Receive occasional important DocNexa announcements, such as major feature and service updates. No promotions or daily messages.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton(if (enabled) "Turn off" else "Enable") { _, _ ->
-                    val task = if (enabled) FirebaseMessaging.getInstance().unsubscribeFromTopic("docnexa_announcements")
-                        else FirebaseMessaging.getInstance().subscribeToTopic("docnexa_announcements")
-                    task.addOnCompleteListener { result ->
-                        if (result.isSuccessful) {
-                            prefs.edit().putBoolean("admin_updates_enabled", !enabled).apply()
-                            Toast.makeText(this, if (enabled) "Important updates turned off" else "Important updates enabled", Toast.LENGTH_LONG).show()
-                            showSettingsDialog()
-                        } else {
-                            Toast.makeText(this, "Could not update notification preference. Please try again.", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }.show()
         }
 
         section("APP & SUPPORT")
