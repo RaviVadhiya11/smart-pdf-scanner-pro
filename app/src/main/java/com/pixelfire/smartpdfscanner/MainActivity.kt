@@ -2465,7 +2465,7 @@ class MainActivity : AppCompatActivity() {
         }
         val titleInput = EditText(this).apply {
             hint = "Notification title"
-            singleLine = true
+            setSingleLine(true)
             setText("DocNexa Update")
             textSize = 15f
             setPadding(dp(12), dp(12), dp(12), dp(12))
