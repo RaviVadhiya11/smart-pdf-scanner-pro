@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.camera.core.CameraSelector
@@ -1853,7 +1854,13 @@ class MainActivity : AppCompatActivity() {
                 .putString("oauth_provider", provider)
                 .apply()
             val url = SupabaseCloud.buildOAuthUrl(provider, socialRedirectUri, challenge, state)
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            // Secure Chrome Custom Tab keeps OAuth visually attached to DocNexa.
+            // Google sign-in must use a trusted browser surface, not an embedded WebView.
+            val customTab = CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setToolbarColor(android.graphics.Color.rgb(16, 20, 38))
+                .build()
+            customTab.launchUrl(this, Uri.parse(url))
         } catch (e: Exception) {
             prefs.edit().remove("oauth_pkce_verifier").remove("oauth_state").remove("oauth_provider").apply()
             Toast.makeText(this, e.localizedMessage ?: "Could not start social sign-in.", Toast.LENGTH_LONG).show()
