@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug overlays this resource with Google's native test ad unit. -->
+    <string name="native_ad_unit_id" translatable="false">ca-app-pub-9813341758678162/4201916450</string>
+</resources>

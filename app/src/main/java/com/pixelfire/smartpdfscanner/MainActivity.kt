@@ -3150,7 +3150,7 @@ class MainActivity : AppCompatActivity() {
         slot.addView(label("Loading advertisement…", 11f, 0xFF718096.toInt()))
         parent.addView(slot, insertIndex.coerceIn(0, parent.childCount))
 
-        val loader = AdLoader.Builder(this, "ca-app-pub-3940256099942544/2247696110")
+        val loader = AdLoader.Builder(this, getString(R.string.native_ad_unit_id))
             .forNativeAd { nativeAd ->
                 if (disposed.get() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                     nativeAd.destroy()
