@@ -87,6 +87,9 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.security.MessageDigest
+import java.security.SecureRandom
+import android.util.Base64
 
 
 private class SignatureCanvas(context: android.content.Context) : View(context) {
@@ -428,6 +431,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleSocialAuthIntent(intent)
         // Firebase Analytics records a lightweight app-open event. Crashlytics
         // automatically captures uncaught crashes after Firebase initialization.
         runCatching {
@@ -1761,6 +1765,83 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val socialRedirectUri = "docnexa://auth-callback"
+
+    private fun base64Url(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+
+    private fun beginSocialSignIn(provider: String) {
+        if (!requireInternet("Social sign-in")) return
+        try {
+            val random = SecureRandom()
+            val verifierBytes = ByteArray(32).also { random.nextBytes(it) }
+            val verifier = base64Url(verifierBytes)
+            val challenge = base64Url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
+            val state = base64Url(ByteArray(24).also { random.nextBytes(it) })
+            prefs.edit()
+                .putString("oauth_pkce_verifier", verifier)
+                .putString("oauth_state", state)
+                .putString("oauth_provider", provider)
+                .apply()
+            val url = SupabaseCloud.buildOAuthUrl(provider, socialRedirectUri, challenge, state)
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            prefs.edit().remove("oauth_pkce_verifier").remove("oauth_state").remove("oauth_provider").apply()
+            Toast.makeText(this, e.localizedMessage ?: "Could not start social sign-in.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleSocialAuthIntent(intent: Intent?) {
+        val callback = intent?.data ?: return
+        if (callback.scheme != "docnexa" || callback.host != "auth-callback") return
+        val error = callback.getQueryParameter("error_description")
+            ?: callback.getQueryParameter("error")
+        if (!error.isNullOrBlank()) {
+            prefs.edit().remove("oauth_pkce_verifier").remove("oauth_state").remove("oauth_provider").apply()
+            Toast.makeText(this, error, Toast.LENGTH_LONG).show()
+            return
+        }
+        val code = callback.getQueryParameter("code")
+        val returnedState = callback.getQueryParameter("state")
+        val expectedState = prefs.getString("oauth_state", null)
+        val verifier = prefs.getString("oauth_pkce_verifier", null)
+        if (code.isNullOrBlank() || returnedState.isNullOrBlank() || expectedState.isNullOrBlank() ||
+            verifier.isNullOrBlank() || !MessageDigest.isEqual(returnedState.toByteArray(), expectedState.toByteArray())) {
+            Toast.makeText(this, "Sign-in callback could not be verified. Please try again.", Toast.LENGTH_LONG).show()
+            return
+        }
+        prefs.edit().remove("oauth_state").remove("oauth_pkce_verifier").remove("oauth_provider").apply()
+        Toast.makeText(this, "Completing secure sign-in…", Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val result = SupabaseCloud.exchangeOAuthCode(code, verifier)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    prefs.edit()
+                        .putString("cloud_access_token", result.accessToken)
+                        .putString("cloud_refresh_token", result.refreshToken)
+                        .putString("cloud_user_id", result.userId)
+                        .putString("cloud_email", result.email)
+                        .apply()
+                    Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
+                    syncCloudNow()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        Toast.makeText(this, e.localizedMessage ?: "Social sign-in failed.", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSocialAuthIntent(intent)
+    }
+
     private fun cloudToken(): String = prefs.getString("cloud_access_token", "") ?: ""
 
     private fun showCloudLoginDialog(startWithSignup: Boolean = false) {
@@ -1881,6 +1962,33 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(-1, dp(52))
         }
         content.addView(submit)
+        content.addView(gap(12))
+        val socialLabel = label("OR CONTINUE WITH", 10f, 0xFF8A96AA.toInt(), true).apply {
+            gravity = Gravity.CENTER
+        }
+        content.addView(socialLabel)
+        content.addView(gap(9))
+        val socialButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun socialButton(title: String, backgroundColor: Int, textColor: Int, provider: String): Button =
+            Button(this).apply {
+                text = title
+                isAllCaps = false
+                textSize = 13f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(textColor)
+                background = rounded(backgroundColor, 12, 0xFFDCE4F0.toInt())
+                backgroundTintList = null
+                layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+                setOnClickListener { beginSocialSignIn(provider) }
+            }
+        socialButtons.addView(socialButton("Google", 0xFFFFFFFF.toInt(), 0xFF263957.toInt(), "google"),
+            LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5) })
+        socialButtons.addView(socialButton("Facebook", 0xFF1877F2.toInt(), 0xFFFFFFFF.toInt(), "facebook"),
+            LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
+        content.addView(socialButtons)
         content.addView(gap(10))
         val guest = TextView(this).apply {
             text = "Continue as Guest"
