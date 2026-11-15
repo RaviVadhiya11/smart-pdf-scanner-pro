@@ -1,6 +1,7 @@
 package com.pixelfire.smartpdfscanner
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
@@ -287,6 +288,7 @@ class MainActivity : AppCompatActivity() {
         postDocumentReadyNotification(fileName)
     }
 
+    @SuppressLint("MissingPermission")
     private fun postDocumentReadyNotification(fileName: String) {
         val notification = androidx.core.app.NotificationCompat.Builder(this, "document_status")
             .setSmallIcon(R.mipmap.ic_launcher)
