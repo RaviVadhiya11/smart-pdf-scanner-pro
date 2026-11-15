@@ -237,13 +237,11 @@ class MainActivity : AppCompatActivity() {
     }
     private fun saveBytesPrivately(bytes: ByteArray, name: String): Uri? {
         return try {
-            val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100).ifBlank { "Document_${System.currentTimeMillis()}" }
-            val target = java.io.File(privateDocumentsDir(), safeName)
-            java.io.FileOutputStream(target).use { it.write(bytes) }
+            val target = PrivateDocumentStore.save(privateDocumentsDir(), bytes, name)
             val uri = privateDocumentUri(target)
-            if (safeName.endsWith(".pdf", true)) assignPdf(uri)
+            if (target.extension.equals("pdf", true)) assignPdf(uri)
             uri
-        } catch (e: Exception) { null }
+        } catch (_: Exception) { null }
     }
     private var signaturePng: ByteArray? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -258,14 +256,23 @@ class MainActivity : AppCompatActivity() {
             val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
             val pdf = scan?.pdf
             if (pdf != null) {
-                lastPdf = copyPdfToDownloads(pdf.uri)
-                if (lastPdf != null) {
-                    prefs.edit().putBoolean("has_completed_first_scan", true).apply()
-                    showExportSuccess(lastPdf!!, lastPdf!!.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
-                    buildScreen()
-                } else {
-                    Toast.makeText(this, "PDF could not be saved. Please scan again.", Toast.LENGTH_LONG).show()
-                }
+                status.text = "Saving scanned PDF…"
+                Thread {
+                    val saved = copyScannedPdf(pdf.uri)
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            if (saved != null) {
+                                lastPdf = saved
+                                prefs.edit().putBoolean("has_completed_first_scan", true).apply()
+                                buildScreen()
+                                showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
+                            } else {
+                                status.text = "PDF save failed"
+                                Toast.makeText(this, "PDF could not be saved. Please try again.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }.start()
             } else status.text = "No PDF was returned."
         } else status.text = "Scan cancelled."
     }
@@ -1207,6 +1214,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         exportResultDialog?.dismiss()
         pagePreviewExecutor.shutdownNow()
+        qrCameraProvider?.unbindAll()
+        cameraExecutor.shutdownNow()
         loadedNativeAds.forEach { it.destroy() }
         loadedNativeAds.clear()
         super.onDestroy()
@@ -3122,16 +3131,21 @@ class MainActivity : AppCompatActivity() {
                 }
             })
             .build()
-        loader.loadAd(AdRequest.Builder().build())
-        return {
+        fun releaseAd() {
             if (disposed.compareAndSet(false, true)) {
                 displayedAdView?.destroy()
                 displayedAdView = null
-                displayedAd?.let { ad -> loadedNativeAds.remove(ad); ad.destroy() }
+                displayedAd?.let { ad -> if (loadedNativeAds.remove(ad)) ad.destroy() }
                 displayedAd = null
-                (slot.parent as? ViewGroup)?.removeView(slot)
+                slot.visibility = View.GONE
             }
         }
+        slot.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) = Unit
+            override fun onViewDetachedFromWindow(view: View) { releaseAd() }
+        })
+        loader.loadAd(AdRequest.Builder().build())
+        return { releaseAd(); (slot.parent as? ViewGroup)?.removeView(slot) }
     }
 
     private fun showCreatePdfHub() {
@@ -4129,12 +4143,7 @@ class MainActivity : AppCompatActivity() {
                             PDDocument().use { output ->
                                 plan.forEach { index ->
                                     val original = source.getPage(index)
-                                    output.importPage(original).apply {
-                                        // importPage does not copy inherited resources; keep fonts and images intact.
-                                        resources = original.resources
-                                        mediaBox = original.mediaBox
-                                        cropBox = original.cropBox
-                                        rotation = original.rotation
+                                    importPdfPageWithResources(output, original).apply {
                                         // Page annotations may point at the old page tree or AcroForm.
                                         setAnnotations(emptyList())
                                     }
@@ -4269,7 +4278,7 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing && !isDestroyed) {
                         progress.dismiss()
                         lastPdf = saved
-                        showExportSuccess(saved, name, "application/pdf")
+                        showExportSuccess(saved, saved.lastPathSegment ?: name, "application/pdf")
                     }
                 }
             } catch (e: Exception) {
@@ -5165,7 +5174,7 @@ class MainActivity : AppCompatActivity() {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "${prefix}_${stamp}.${extension}"
         val uri = saveBytesPrivately(bytes, name) ?: return null
-        showExportSuccess(uri, name, mime)
+        showExportSuccess(uri, uri.lastPathSegment ?: name, mime)
         return uri
     }
 
@@ -5720,6 +5729,14 @@ class MainActivity : AppCompatActivity() {
     private fun parsePageRanges(value: String, total: Int): List<Int> =
         runCatching { PdfPagePlan.selection(value, total).sorted() }.getOrDefault(emptyList())
 
+    private fun importPdfPageWithResources(output: PDDocument, original: com.tom_roush.pdfbox.pdmodel.PDPage): com.tom_roush.pdfbox.pdmodel.PDPage =
+        output.importPage(original).apply {
+            resources = original.resources
+            mediaBox = original.mediaBox
+            cropBox = original.cropBox
+            rotation = original.rotation
+        }
+
     private fun splitPdfPages(uri: Uri, selectedPages: List<Int>) {
         status.text = "Splitting selected pages…"
         Thread {
@@ -5730,19 +5747,19 @@ class MainActivity : AppCompatActivity() {
                 val remaining = PDDocument()
                 try {
                     for (i in 0 until source.numberOfPages) {
-                        if (i in selectedPages) picked.importPage(source.getPage(i))
-                        else remaining.importPage(source.getPage(i))
+                        if (i in selectedPages) importPdfPageWithResources(picked, source.getPage(i))
+                        else importPdfPageWithResources(remaining, source.getPage(i))
                     }
                     val firstBytes = ByteArrayOutputStream().also { picked.save(it) }.toByteArray()
-                    val savedA = savePdfBytes(firstBytes, "Selected_Pages")
+                    val savedA = savePdfBytes(firstBytes, "Selected_Pages") ?: error("Could not save the selected pages.")
                     val savedB = if (remaining.numberOfPages > 0) {
                         val secondBytes = ByteArrayOutputStream().also { remaining.save(it) }.toByteArray()
-                        savePdfBytes(secondBytes, "Remaining_Pages")
+                        savePdfBytes(secondBytes, "Remaining_Pages") ?: error("Selected pages were saved, but the remaining pages could not be saved.")
                     } else null
                     runOnUiThread {
                         status.text = "Custom page split complete"
                         recent.text = if (savedB != null) "Saved selected pages and remaining pages" else "Saved extracted pages as a separate PDF"
-                        val message = if (savedB != null) "Selected pages and remaining pages saved in Downloads/DocumentScanner" else "All selected pages saved as a PDF in Downloads/DocumentScanner"
+                        val message = if (savedB != null) "Selected pages and remaining pages saved inside DocNexa" else "All selected pages saved as a PDF inside DocNexa"
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                     }
                 } finally { picked.close(); remaining.close(); source.close() }
@@ -5753,35 +5770,14 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun saveCloudPdf(fileName: String, bytes: ByteArray): Uri? {
-        val safeName = fileName.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100)
-            .ifBlank { "Cloud_Document.pdf" }
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, safeName)
-            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/DocumentScanner")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        contentResolver.openOutputStream(uri).use { output ->
-            if (output == null) throw IllegalStateException("Unable to save downloaded PDF")
-            output.write(bytes)
-        }
-        assignPdf(uri)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-            contentResolver.update(uri, done, null, null)
-        }
-        return uri
-    }
+    private fun saveCloudPdf(fileName: String, bytes: ByteArray): Uri? =
+        saveBytesPrivately(bytes, fileName.substringAfterLast('/').ifBlank { "Cloud_Document.pdf" })
 
     private fun savePdfBytes(bytes: ByteArray, prefix: String): Uri? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "${prefix}_${stamp}.pdf"
         val uri = saveBytesPrivately(bytes, name) ?: return null
-        showExportSuccess(uri, name, "application/pdf")
+        showExportSuccess(uri, uri.lastPathSegment ?: name, "application/pdf")
         return uri
     }
 
@@ -6042,6 +6038,42 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun decodeImageSafely(uri: Uri, maxEdge: Int = 2400): Bitmap {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        (contentResolver.openInputStream(uri) ?: error("Cannot open this image.")).use { BitmapFactory.decodeStream(it, null, bounds) }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = ImageDecodePlan.sampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+        }
+        val bitmap = (contentResolver.openInputStream(uri) ?: error("Cannot open this image.")).use {
+            BitmapFactory.decodeStream(it, null, options)
+        } ?: error("Cannot decode this image.")
+        val orientation = try {
+            contentResolver.openInputStream(uri)?.use {
+                androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
+                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } ?: 1
+        } catch (_: Exception) { 1 }
+        val matrix = android.graphics.Matrix().apply {
+            when (orientation) {
+                2 -> setScale(-1f, 1f)
+                3 -> setRotate(180f)
+                4 -> { setRotate(180f); postScale(-1f, 1f) }
+                5 -> { setRotate(90f); postScale(-1f, 1f) }
+                6 -> setRotate(90f)
+                7 -> { setRotate(-90f); postScale(-1f, 1f) }
+                8 -> setRotate(-90f)
+            }
+        }
+        if (matrix.isIdentity) return bitmap
+        return try {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
+                if (it !== bitmap) bitmap.recycle()
+            }
+        } catch (e: Exception) { bitmap.recycle(); throw e }
+    }
+
     private fun showImageImportPreview(uris: List<Uri>) {
         val orderedUris = uris.toMutableList()
         val croppedBitmaps = MutableList<Bitmap?>(uris.size) { null }
@@ -6083,7 +6115,7 @@ class MainActivity : AppCompatActivity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
                 clipToOutline = true
-                try { contentResolver.openInputStream(uri).use { input -> setImageBitmap(if (input != null) BitmapFactory.decodeStream(input) else null) } }
+                try { setImageBitmap(decodeImageSafely(uri, 360)) }
                 catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
                 layoutParams = LinearLayout.LayoutParams(dp(170), dp(164))
             }
@@ -6098,9 +6130,7 @@ class MainActivity : AppCompatActivity() {
                 val p = rows.indexOf(row)
                 if (p >= 0) {
                     try {
-                        val source = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input ->
-                            if (input != null) BitmapFactory.decodeStream(input) else null
-                        } ?: throw IllegalStateException("Preview unavailable")
+                        val source = croppedBitmaps[p] ?: decodeImageSafely(orderedUris[p]) ?: throw IllegalStateException("Preview unavailable")
                         val large = ImageView(this@MainActivity).apply {
                             setImageBitmap(source)
                             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -6120,11 +6150,11 @@ class MainActivity : AppCompatActivity() {
             actions.addView(action("Rotate") {
                 val p = rows.indexOf(row)
                 try {
-                    val source = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input -> if (input != null) BitmapFactory.decodeStream(input) else null }
+                    val source = croppedBitmaps[p] ?: decodeImageSafely(orderedUris[p])
                         ?: throw IllegalStateException("Could not read image")
                     val matrix = android.graphics.Matrix().apply { postRotate(90f) }
                     val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-                    if (croppedBitmaps[p] != null && croppedBitmaps[p] !== rotated) source.recycle()
+                    if (source !== rotated && croppedBitmaps[p] == null) source.recycle()
                     croppedBitmaps[p] = rotated
                     thumb.setImageBitmap(rotated)
                 } catch (e: Exception) { Toast.makeText(this@MainActivity, e.localizedMessage ?: "Rotate failed", Toast.LENGTH_LONG).show() }
@@ -6132,7 +6162,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(action("Crop") {
                 val p = rows.indexOf(row)
                 try {
-                    val original = croppedBitmaps[p] ?: contentResolver.openInputStream(orderedUris[p]).use { input -> if (input != null) BitmapFactory.decodeStream(input) else null }
+                    val original = croppedBitmaps[p] ?: decodeImageSafely(orderedUris[p])
                         ?: throw IllegalStateException("Could not open image")
                     val cropView = ImageCropView(this@MainActivity, original)
                     val panel = LinearLayout(this@MainActivity).apply {
@@ -6171,9 +6201,7 @@ class MainActivity : AppCompatActivity() {
                         background = rounded(0xFFFFFFFF.toInt(), 10, 0xFFDCE7FA.toInt())
                         clipToOutline = true
                         try {
-                            val preview = croppedBitmaps[p + 1] ?: contentResolver.openInputStream(orderedUris[p + 1]).use { input ->
-                                if (input != null) BitmapFactory.decodeStream(input) else null
-                            }
+                            val preview = croppedBitmaps[p + 1] ?: decodeImageSafely(orderedUris[p + 1], 360)
                             setImageBitmap(preview)
                         } catch (_: Exception) { setImageResource(android.R.drawable.ic_menu_report_image) }
                         layoutParams = LinearLayout.LayoutParams(dp(170), dp(164))
@@ -6302,9 +6330,9 @@ class MainActivity : AppCompatActivity() {
             try {
                 document = PdfDocument()
                 uris.forEachIndexed { index, uri ->
-                    val bitmap = croppedBitmaps.getOrNull(index) ?: (contentResolver.openInputStream(uri).use { input ->
-                        if (input == null) null else BitmapFactory.decodeStream(input)
-                    }) ?: throw IllegalStateException("Could not read selected image")
+                    val cached = croppedBitmaps.getOrNull(index)
+                    require(cached == null || !cached.isRecycled) { "This image preview has expired. Select the image again." }
+                    val bitmap = cached ?: decodeImageSafely(uri, (maxOf(pageWidth, pageHeight) * 3).coerceAtMost(3072))
                     val w = if (autoFit && bitmap.width > bitmap.height) pageHeight else pageWidth
                     val h = if (autoFit && bitmap.width > bitmap.height) pageWidth else pageHeight
                     val pageInfo = PdfDocument.PageInfo.Builder(w, h, index + 1).create()
@@ -6322,7 +6350,7 @@ class MainActivity : AppCompatActivity() {
                     } else fitRect(bitmap.width, bitmap.height, availableW, availableH, margin, margin)
                     page.canvas.drawBitmap(bitmap, null, bounds, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                     document.finishPage(page)
-                    bitmap.recycle()
+                    if (cached == null) bitmap.recycle()
                 }
                 val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
@@ -6359,18 +6387,17 @@ class MainActivity : AppCompatActivity() {
         return try {
             val bytes = ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray()
             saveBytesPrivately(bytes, name)?.also { uri ->
-                showExportSuccess(uri, name, "application/pdf")
+                showExportSuccess(uri, uri.lastPathSegment ?: name, "application/pdf")
             }
         } catch (_: Exception) { null }
     }
 
-    private fun copyPdfToDownloads(source: Uri): Uri? {
+    private fun copyScannedPdf(source: Uri): Uri? {
         return try {
             val name = "Document_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
             val bytes = contentResolver.openInputStream(source)?.use { it.readBytes() } ?: error("Unable to read scanned PDF")
             saveBytesPrivately(bytes, name)
         } catch (e: Exception) {
-            Toast.makeText(this, "Save failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
             null
         }
     }

@@ -33,6 +33,8 @@ jobs:
           gradle-version: '8.13'
       - name: Test page tools and build installable debug APK
         run: gradle :app:testDebugUnitTest :app:assembleDebug
+      - name: Check Android lint
+        run: gradle :app:lintDebug
       - name: Build release AAB
         run: gradle :app:bundleRelease
       - name: Upload Android builds
@@ -43,3 +45,13 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Smart-PDF-Scanner-Pro-Validation
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore
