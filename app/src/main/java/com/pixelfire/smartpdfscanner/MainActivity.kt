@@ -2630,8 +2630,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(16), dp(14), dp(28))
         }
-        addPdfSectionTitle(body, "Quick Access")
-        addPdfToolHorizontal(body, listOf(
+        val quickTools = listOf(
             PdfTool("Open PDF", "▣", 0xFFE9433A.toInt()) { pdfPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Page Details", "↔", 0xFF4CAF50.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { openSignatureEditor() },
@@ -2645,11 +2644,8 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent.createChooser(share, "Share PDF"))
                 } ?: pdfPicker.launch(arrayOf("application/pdf"))
             }
-        ))
-
-        addNativeAdCard(body)
-        addPdfSectionTitle(body, "PDF Tools")
-        addPdfToolGrid(body, listOf(
+        )
+        val pdfTools = listOf(
             PdfTool("Create PDF", "＋", 0xFF2563EB.toInt()) { showCreatePdfHub() },
             PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add Page from Gallery", "▧+", 0xFFB8D52B.toInt()) { imagePicker.launch(arrayOf("image/*")) },
@@ -2661,7 +2657,126 @@ class MainActivity : AppCompatActivity() {
             PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { zipPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() },
             PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) }
-        ), ink, muted)
+        )
+        val catalog = (quickTools + pdfTools).distinctBy { it.title }
+        val defaultPins = quickTools.map { it.title }.toSet()
+        var pinned = (prefs.getStringSet("pdf_tool_pins", defaultPins) ?: defaultPins).toSet()
+        var category = "All"
+        var query = ""
+
+        val quickHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        quickHeader.addView(label("Quick Access", 17f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val customize = Button(this).apply {
+            text = "Customize"
+            textSize = 11f
+            isAllCaps = false
+            contentDescription = "Choose Quick Access tools"
+        }
+        quickHeader.addView(customize)
+        body.addView(quickHeader)
+        body.addView(label("Your favorite tools, always within reach", 11f, muted))
+        val quickGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(quickGrid)
+        fun renderQuickAccess() {
+            quickGrid.removeAllViews()
+            val favorites = catalog.filter { it.title in pinned }
+            if (favorites.isEmpty()) {
+                quickGrid.addView(label("Tap Customize to pin your favorite tools.", 12f, muted))
+            } else addPdfQuickGrid(quickGrid, favorites)
+        }
+        customize.setOnClickListener {
+            val selected = catalog.map { it.title in pinned }.toBooleanArray()
+            AlertDialog.Builder(this)
+                .setTitle("Customize Quick Access")
+                .setMultiChoiceItems(catalog.map { it.title }.toTypedArray(), selected) { _, which, checked ->
+                    selected[which] = checked
+                }
+                .setPositiveButton("Save") { _, _ ->
+                    pinned = catalog.filterIndexed { index, _ -> selected[index] }.map { it.title }.toSet()
+                    prefs.edit().putStringSet("pdf_tool_pins", pinned).apply()
+                    renderQuickAccess()
+                }
+                .setNeutralButton("Reset") { _, _ ->
+                    pinned = defaultPins
+                    prefs.edit().remove("pdf_tool_pins").apply()
+                    renderQuickAccess()
+                }
+                .setNegativeButton("Cancel", null).show()
+        }
+        renderQuickAccess()
+        addNativeAdCard(body)
+        addPdfSectionTitle(body, "PDF Tools")
+        val search = EditText(this).apply {
+            hint = "Search tools: merge, split, password…"
+            textSize = 14f
+            setSingleLine(true)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(0xFFFFFFFF.toInt(), 12, 0xFFD6E3F5.toInt())
+            contentDescription = "Search PDF tools"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        }
+        body.addView(search, LinearLayout.LayoutParams(-1, -2))
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val chipScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(chips)
+        }
+        body.addView(chipScroll)
+        val results = label("", 11f, muted)
+        results.setPadding(dp(4), dp(6), dp(4), dp(10))
+        body.addView(results)
+        val toolGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(toolGrid)
+        fun toolCategory(tool: PdfTool): String = when (tool.title) {
+            "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery" -> "Create"
+            "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature" -> "Edit"
+            "PDF to Image", "PDF To Text", "PDF To ZIP" -> "Convert"
+            "Add Password", "Remove Password" -> "Protect"
+            else -> "View & share"
+        }
+        fun renderTools() {
+            val matching = catalog.filter {
+                (category == "All" || toolCategory(it) == category) &&
+                    (it.title + " " + pdfToolDescription(it.title)).contains(query, ignoreCase = true)
+            }
+            results.text = "${matching.size} tools • Choose a tool to get started"
+            toolGrid.removeAllViews()
+            if (matching.isEmpty()) {
+                toolGrid.addView(label("No matching tools. Try another search or choose All.", 13f, muted))
+            } else addPdfToolGrid(toolGrid, matching, ink, muted)
+            for (i in 0 until chips.childCount) {
+                (chips.getChildAt(i) as Button).apply {
+                    val active = text.toString() == category
+                    setTextColor(if (active) 0xFFFFFFFF.toInt() else ink)
+                    background = rounded(if (active) 0xFF2563EB.toInt() else 0xFFE7EEFA.toInt(), 18)
+                    isSelected = active
+                }
+            }
+        }
+        listOf("All", "Create", "Edit", "Convert", "Protect", "View & share").forEach { name ->
+            chips.addView(Button(this).apply {
+                text = name
+                textSize = 11f
+                isAllCaps = false
+                minHeight = dp(48)
+                setOnClickListener { category = name; renderTools() }
+            }, LinearLayout.LayoutParams(-2, dp(48)).apply {
+                rightMargin = dp(6); topMargin = dp(10)
+            })
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                query = s?.toString()?.trim().orEmpty()
+                renderTools()
+            }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
+        renderTools()
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -2993,49 +3108,60 @@ class MainActivity : AppCompatActivity() {
         val action: () -> Unit
     )
 
-    private fun addPdfToolHorizontal(parent: LinearLayout, tools: List<PdfTool>) {
-        val horizontal = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            clipToPadding = false
-            setPadding(0, dp(2), 0, dp(4))
-        }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-        }
-        tools.forEachIndexed { index, tool ->
-            val item = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                setPadding(dp(4), dp(8), dp(4), dp(10))
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { tool.action() }
-            }
-            val circle = TextView(this).apply {
-                text = tool.symbol
-                textSize = 19f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-                setTextColor(0xFFFFFFFF.toInt())
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(tool.color)
+    private fun addPdfQuickGrid(parent: LinearLayout, tools: List<PdfTool>) {
+        tools.chunked(3).forEach { group ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            group.forEach { tool ->
+                val item = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(5), dp(12), dp(5), dp(12))
+                    background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFDCE6F5.toInt())
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = tool.title
+                    setOnClickListener { tool.action() }
                 }
-                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
-                elevation = dp(2).toFloat()
+                item.addView(TextView(this).apply {
+                    text = tool.symbol
+                    textSize = 22f
+                    gravity = Gravity.CENTER
+                    setTextColor(tool.color)
+                    background = rounded(0xFFEAF2FF.toInt(), 12)
+                }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                item.addView(gap(7))
+                item.addView(label(tool.title, 12f, 0xFF263957.toInt(), true).apply {
+                    gravity = Gravity.CENTER
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    minLines = 2
+                })
+                row.addView(item, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    setMargins(dp(3), dp(5), dp(3), dp(5))
+                })
             }
-            item.addView(circle)
-            item.addView(gap(5))
-            val caption = label(tool.title, 9.5f, 0xFF777777.toInt())
-            caption.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
-            caption.maxLines = 2
-            item.addView(caption)
-            row.addView(item, LinearLayout.LayoutParams(dp(82), dp(82)))
+            repeat(3 - group.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f)) }
+            parent.addView(row, LinearLayout.LayoutParams(-1, -2))
         }
-        horizontal.addView(row)
-        parent.addView(horizontal)
+    }
+
+    private fun pdfToolDescription(title: String): String = when (title) {
+        "Open PDF" -> "Open and read a PDF document"
+        "Page Details", "PDF Details" -> "View pages and metadata"
+        "Signature" -> "Draw, save and place your signature"
+        "PDF to Image" -> "Export PDF pages as images"
+        "Image to PDF" -> "Turn gallery images into a PDF"
+        "Share PDF" -> "Share your most recent PDF"
+        "Add/Merge PDF Files" -> "Combine multiple PDFs"
+        "Add Page from Gallery" -> "Create PDF pages from gallery photos"
+        "Split" -> "Extract custom page ranges"
+        "Rotate all pages" -> "Rotate selected pages"
+        "Add Password" -> "Protect with a password"
+        "Remove Password" -> "Unlock an accessible PDF"
+        "PDF To Text" -> "Extract and copy text"
+        "PDF To ZIP" -> "Package PDF for sharing"
+        "Text To PDF" -> "Create a PDF from notes"
+        "Create PDF" -> "Images • Text • Blank • Design"
+        else -> "Open PDF utility"
     }
 
     private fun addPdfToolGrid(parent: LinearLayout, tools: List<PdfTool>, titleColor: Int, subtitleColor: Int) {
@@ -3048,8 +3174,10 @@ class MainActivity : AppCompatActivity() {
                     setPadding(dp(10), dp(12), dp(10), dp(12))
                     background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE1EAF7.toInt())
                     elevation = dp(1).toFloat()
+                    minimumHeight = dp(148)
                     isClickable = true
                     isFocusable = true
+                    contentDescription = tool.title + ". " + pdfToolDescription(tool.title)
                     setOnClickListener { tool.action() }
                 }
                 val icon = TextView(this).apply {
@@ -3063,36 +3191,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 item.addView(icon)
                 item.addView(gap(8))
-                val caption = label(tool.title, 12f, 0xFF263957.toInt(), true)
+                val caption = label(tool.title, 13f, titleColor, true)
                 caption.gravity = Gravity.CENTER
                 caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
-                caption.maxLines = 2
                 item.addView(caption)
                 item.addView(gap(4))
-                val descriptions = mapOf(
-                    "Add/Merge PDF Files" to "Combine multiple PDFs",
-                    "Add Page from Gallery" to "Insert photos as pages",
-                    "Split" to "Extract custom page ranges",
-                    "Rotate all pages" to "Rotate selected pages",
-                    "Add Password" to "Protect with a password",
-                    "Remove Password" to "Unlock an accessible PDF",
-                    "PDF To Text" to "Extract and copy text",
-                    "PDF To ZIP" to "Package PDF for sharing",
-                    "Text To PDF" to "Create a PDF from notes",
-                    "PDF Details" to "View pages and metadata",
-                    "Create PDF" to "Images • Text • Blank • Design"
-                )
-                val sub = label(descriptions[tool.title] ?: "Open PDF utility", 9.5f, 0xFF718096.toInt())
+                val sub = label(pdfToolDescription(tool.title), 11f, subtitleColor)
                 sub.gravity = Gravity.CENTER
                 sub.textAlignment = View.TEXT_ALIGNMENT_CENTER
-                sub.maxLines = 2
                 item.addView(sub)
-                row.addView(item, LinearLayout.LayoutParams(0, dp(124), 1f).apply {
+                row.addView(item, LinearLayout.LayoutParams(0, -1, 1f).apply {
                     leftMargin = dp(4); rightMargin = dp(4); bottomMargin = dp(9)
                 })
             }
             if (rowTools.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-            parent.addView(row)
+            parent.addView(row, LinearLayout.LayoutParams(-1, -2))
         }
     }
 
