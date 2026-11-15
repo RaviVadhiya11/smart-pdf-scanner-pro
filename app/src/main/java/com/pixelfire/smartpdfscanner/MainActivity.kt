@@ -3503,6 +3503,17 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             addView(Button(this@MainActivity).apply { text = "Undo"; setOnClickListener { canvas.undo() } })
             addView(Button(this@MainActivity).apply { text = "Clear"; setOnClickListener { canvas.clear(); typed.setText("") } })
+            addView(Button(this@MainActivity).apply {
+                text = "Save PNG"
+                setOnClickListener {
+                    val bitmap = buildSignatureBitmap(canvas, typed.text.toString(), selectedSignatureFont)
+                    if (bitmap == null) Toast.makeText(this@MainActivity, "Please draw or type a signature first.", Toast.LENGTH_LONG).show()
+                    else {
+                        saveSignaturePng(bitmap)
+                        bitmap.recycle()
+                    }
+                }
+            })
         }
         layout.addView(toolbar)
         addNativeAdCard(layout)
@@ -3514,6 +3525,24 @@ class MainActivity : AppCompatActivity() {
         return if (value.isNotEmpty()) renderTypedSignature(value, fontName)
         else if (canvas.hasSignature()) canvas.toBitmap()
         else null
+    }
+
+    private fun saveSignaturePng(signature: Bitmap) {
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "DocNexa_Signature_${System.currentTimeMillis()}.png")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DocNexa")
+            }
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("Could not create PNG file")
+            contentResolver.openOutputStream(uri)?.use { output ->
+                if (!signature.compress(Bitmap.CompressFormat.PNG, 100, output)) error("PNG export failed")
+            } ?: error("Could not write PNG file")
+            Toast.makeText(this, "Transparent signature PNG saved to Pictures/DocNexa", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Could not save signature PNG", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun saveSignatureOnlyPdf(signature: Bitmap) {
@@ -3571,34 +3600,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySignatureToPdf(uri: Uri, png: ByteArray) {
-        Thread {
-            try {
-                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
-                val bytes = input.use { stream ->
-                    PDDocument.load(stream).use { doc ->
-                        val page = doc.getPage(0)
-                        val image = PDImageXObject.createFromByteArray(doc, png, "signature")
-                        val box = page.mediaBox
-                        val width = minOf(box.width * 0.35f, 180f)
-                        val height = width * image.height.toFloat() / image.width.toFloat()
-                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
-                            cs.drawImage(image, box.width - width - 36f, 36f, width, height)
+        val pageNumber = EditText(this).apply {
+            hint = "Page number (1 to total pages)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("1")
+        }
+        val widthControl = SeekBar(this).apply { max = 70; progress = 35 }
+        val xControl = SeekBar(this).apply { max = 100; progress = 78 }
+        val yControl = SeekBar(this).apply { max = 100; progress = 8 }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(4))
+            addView(label("Choose where your signature should appear", 13f, 0xFF263957.toInt(), true))
+            addView(gap(8))
+            addView(label("PDF page number", 12f, 0xFF64748B.toInt(), true))
+            addView(pageNumber)
+            addView(gap(8))
+            addView(label("Signature size", 12f, 0xFF64748B.toInt(), true))
+            addView(widthControl)
+            addView(label("Horizontal position • left to right", 12f, 0xFF64748B.toInt(), true))
+            addView(xControl)
+            addView(label("Vertical position • top to bottom", 12f, 0xFF64748B.toInt(), true))
+            addView(yControl)
+            addView(label("Tip: Position values are relative to the selected PDF page.", 11f, 0xFF718096.toInt()))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("DocNexa • Place Signature")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Apply Signature", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val selectedPage = pageNumber.text.toString().toIntOrNull()
+                        if (selectedPage == null || selectedPage < 1) {
+                            pageNumber.error = "Enter a valid page number"
+                            return@setOnClickListener
                         }
-                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                        dialog.dismiss()
+                        Thread {
+                            try {
+                                val input = contentResolver.openInputStream(uri) ?: error("Cannot open PDF")
+                                val bytes = input.use { stream ->
+                                    PDDocument.load(stream).use { doc ->
+                                        require(selectedPage <= doc.numberOfPages) { "This PDF has only ${doc.numberOfPages} page(s)." }
+                                        val page = doc.getPage(selectedPage - 1)
+                                        val image = PDImageXObject.createFromByteArray(doc, png, "signature")
+                                        val box = page.mediaBox
+                                        val width = (box.width * (0.12f + widthControl.progress / 100f * 0.55f)).coerceAtMost(box.width * 0.8f)
+                                        val height = width * image.height.toFloat() / image.width.toFloat()
+                                        val maxX = (box.width - width).coerceAtLeast(0f)
+                                        val maxY = (box.height - height).coerceAtLeast(0f)
+                                        val x = maxX * (xControl.progress / 100f)
+                                        val yFromTop = maxY * (yControl.progress / 100f)
+                                        val y = maxY - yFromTop
+                                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                                            cs.drawImage(image, x, y, width, height)
+                                        }
+                                        ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                                    }
+                                }
+                                val saved = savePdfBytes(bytes, "Signed")
+                                runOnUiThread {
+                                    lastPdf = saved
+                                    status.text = if (saved != null) "Signature added to PDF" else "Could not save signed PDF"
+                                    recent.text = "Latest: ${saved?.lastPathSegment ?: "Signed PDF"}"
+                                    Toast.makeText(this, if (saved != null) "Signed PDF saved successfully" else "Could not save signed PDF", Toast.LENGTH_LONG).show()
+                                    if (saved != null) buildScreen()
+                                }
+                            } catch (e: Exception) {
+                                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not sign PDF", Toast.LENGTH_LONG).show() }
+                            } finally { signaturePng = null }
+                        }.start()
                     }
                 }
-                val saved = savePdfBytes(bytes, "Signed")
-                runOnUiThread {
-                    lastPdf = saved
-                    status.text = "Signature added to PDF"
-                    recent.text = "Latest: ${saved?.lastPathSegment ?: "Signed PDF"}"
-                    Toast.makeText(this, "Signed PDF saved in Downloads/DocumentScanner", Toast.LENGTH_LONG).show()
-                    buildScreen()
-                }
-            } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "Could not sign PDF", Toast.LENGTH_LONG).show() }
-            } finally { signaturePng = null }
-        }.start()
+                dialog.show()
+            }
     }
 
 
