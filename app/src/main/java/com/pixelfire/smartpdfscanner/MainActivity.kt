@@ -2610,7 +2610,8 @@ class MainActivity : AppCompatActivity() {
                     PdfRenderer(pfd).use { renderer ->
                         require(renderer.pageCount > 0) { "PDF has no pages" }
                         val totalPages = renderer.pageCount
-                        PdfDocument().use { output ->
+                        val output = PdfDocument()
+                        try {
                             val columns = if (perSheet == 4) 2 else 1
                             val cellWidth = (595 - 48) / columns
                             val cellHeight = (842 - 48) / 2
@@ -2648,7 +2649,7 @@ class MainActivity : AppCompatActivity() {
                                     showExportSuccess(saved, file.name, "application/pdf")
                                 }
                             }
-                        }
+                        } finally { output.close() }
                     }
                 }
             } catch (e: Exception) {
@@ -3069,7 +3070,7 @@ class MainActivity : AppCompatActivity() {
         val toolGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(toolGrid)
         fun toolCategory(tool: PdfTool): String = when (tool.title) {
-            "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery" -> "Create"
+            "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery", "Page Collage" -> "Create"
             "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers" -> "Edit"
             "Reorder Pages", "Delete Pages", "Extract Pages", "Duplicate Pages" -> "Organize"
             "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF" -> "Convert"
@@ -3501,6 +3502,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pdfToolDescription(title: String): String = when (title) {
+        "Page Collage" -> "Arrange 2 or 4 PDF pages per A4 sheet"
         "Reorder Pages" -> "Custom page order or reverse all pages"
         "Delete Pages" -> "Remove selected pages from a copy"
         "Extract Pages" -> "Save selected pages in your chosen order"
