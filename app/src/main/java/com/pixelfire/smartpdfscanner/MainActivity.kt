@@ -67,6 +67,7 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
@@ -2408,6 +2409,28 @@ class MainActivity : AppCompatActivity() {
                 .setTitle("DocNexa storage")
                 .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nInternal storage / Download / DocumentScanner\n\nCurrently indexed: ${docs.size} PDF(s).\n\nYou can open this folder from your phone's Files app.")
                 .setPositiveButton("OK", null))
+        }
+
+        section("NOTIFICATIONS")
+        val updatesEnabled = prefs.getBoolean("admin_updates_enabled", false)
+        setting("♧", "Important app updates", if (updatesEnabled) "Subscribed • Important DocNexa announcements are enabled" else "Off • Enable to receive important DocNexa announcements") {
+            val enabled = prefs.getBoolean("admin_updates_enabled", false)
+            appDialog().setTitle(if (enabled) "Turn off app updates?" else "Enable important app updates?")
+                .setMessage(if (enabled) "You will stop receiving DocNexa announcement notifications. Document completion notifications will continue." else "Receive occasional important DocNexa announcements, such as major feature and service updates. No promotions or daily messages.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton(if (enabled) "Turn off" else "Enable") { _, _ ->
+                    val task = if (enabled) FirebaseMessaging.getInstance().unsubscribeFromTopic("docnexa_announcements")
+                        else FirebaseMessaging.getInstance().subscribeToTopic("docnexa_announcements")
+                    task.addOnCompleteListener { result ->
+                        if (result.isSuccessful) {
+                            prefs.edit().putBoolean("admin_updates_enabled", !enabled).apply()
+                            Toast.makeText(this, if (enabled) "Important updates turned off" else "Important updates enabled", Toast.LENGTH_LONG).show()
+                            showSettingsDialog()
+                        } else {
+                            Toast.makeText(this, "Could not update notification preference. Please try again.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.show()
         }
 
         section("APP & SUPPORT")
