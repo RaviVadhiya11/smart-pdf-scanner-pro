@@ -357,11 +357,11 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK) {
             val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            val pdf = scan?.pdf
-            if (pdf != null) {
-                status.text = "Saving scanned PDF…"
+            val pages = scan?.pages
+            if (!pages.isNullOrEmpty()) {
+                status.text = "Creating print-ready A4 PDF…"
                 Thread {
-                    val saved = copyScannedPdf(pdf.uri)
+                    val saved = createPrintReadyScanPdf(pages.map { it.imageUri })
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
                             if (saved != null) {
@@ -372,12 +372,34 @@ class MainActivity : AppCompatActivity() {
                                 showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
                             } else {
                                 status.text = "PDF save failed"
-                                Toast.makeText(this, "PDF could not be saved. Please try again.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this, "High-quality PDF could not be created. Please scan again.", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
                 }.start()
-            } else status.text = "No PDF was returned."
+            } else {
+                val pdf = scan?.pdf
+                if (pdf != null) {
+                    status.text = "Saving scanned PDF…"
+                    Thread {
+                        val saved = copyScannedPdf(pdf.uri)
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                if (saved != null) {
+                                    lastPdf = saved
+                                    notifyDocumentReady(saved)
+                                    prefs.edit().putBoolean("has_completed_first_scan", true).apply()
+                                    buildScreen()
+                                    showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
+                                } else {
+                                    status.text = "PDF save failed"
+                                    Toast.makeText(this, "PDF could not be saved. Please try again.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }.start()
+                } else status.text = "No scanned pages were returned."
+            }
         } else status.text = "Scan cancelled."
     }
 
@@ -6930,6 +6952,64 @@ class MainActivity : AppCompatActivity() {
                 showExportSuccess(uri, uri.lastPathSegment ?: name, "application/pdf")
             }
         } catch (_: Exception) { null }
+    }
+
+    /**
+     * Builds an A4-printable PDF from the scanner's original JPEG page files.
+     * Each page is decoded at up to 4800px on its longest edge, never JPEG-recompressed,
+     * fitted proportionally to an A4 page, and kept inside printer-safe margins.
+     */
+    private fun createPrintReadyScanPdf(pageUris: List<Uri>): Uri? {
+        var document: PdfDocument? = null
+        return try {
+            require(pageUris.isNotEmpty()) { "No scanned pages" }
+            document = PdfDocument()
+            pageUris.forEachIndexed { index, uri ->
+                val bitmap = decodeImageSafely(uri, 4800)
+                try {
+                    val landscape = bitmap.width > bitmap.height
+                    val pageWidth = if (landscape) 842 else 595
+                    val pageHeight = if (landscape) 595 else 842
+                    val margin = 18f
+                    val availableWidth = pageWidth - margin * 2f
+                    val availableHeight = pageHeight - margin * 2f
+                    val scale = minOf(
+                        availableWidth / bitmap.width.toFloat(),
+                        availableHeight / bitmap.height.toFloat()
+                    )
+                    val drawWidth = bitmap.width * scale
+                    val drawHeight = bitmap.height * scale
+                    val left = (pageWidth - drawWidth) / 2f
+                    val top = (pageHeight - drawHeight) / 2f
+                    val page = document.startPage(
+                        PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
+                    )
+                    page.canvas.drawColor(android.graphics.Color.WHITE)
+                    page.canvas.drawBitmap(
+                        bitmap,
+                        null,
+                        android.graphics.RectF(left, top, left + drawWidth, top + drawHeight),
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                            isDither = true
+                        }
+                    )
+                    document.finishPage(page)
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+            val bytes = ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray()
+            val name = "DocNexa_Print_Ready_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
+            saveBytesPrivately(bytes, name)
+        } catch (e: Exception) {
+            runOnUiThread {
+                status.text = "Print-ready PDF creation failed"
+                Toast.makeText(this, e.localizedMessage ?: "Could not create print-ready PDF", Toast.LENGTH_LONG).show()
+            }
+            null
+        } finally {
+            document?.close()
+        }
     }
 
     private fun copyScannedPdf(source: Uri): Uri? {
