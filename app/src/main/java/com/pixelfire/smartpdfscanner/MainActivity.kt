@@ -6309,7 +6309,7 @@ class MainActivity : AppCompatActivity() {
                 GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
                 GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
             )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
             .build()
         GmsDocumentScanning.getClient(options)
             .getStartScanIntent(this)
