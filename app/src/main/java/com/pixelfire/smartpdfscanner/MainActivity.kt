@@ -1716,6 +1716,7 @@ class MainActivity : AppCompatActivity() {
         section("Other")
         item("?", "Help and FAQ") { showHelpAndFaq() }
         item("✉", "Contact us") { openFeedbackEmail(false) }
+        item("★", "Send feedback") { openFeedbackEmail(false, true) }
         item("⚑", "Report a bug") { openFeedbackEmail(true) }
         item("ⓘ", "About us") { showAboutDocNexa() }
         separator()
@@ -1785,21 +1786,31 @@ class MainActivity : AppCompatActivity() {
             .setView(panel).setNegativeButton("Close", null))
     }
 
-    private fun openFeedbackEmail(reportBug: Boolean) {
-        val subject = if (reportBug) "DocNexa bug report" else "DocNexa support request"
+    private fun openFeedbackEmail(reportBug: Boolean, feedback: Boolean = false) {
+        val recipient = "docnexa.support@gmail.com"
+        val subject = when {
+            reportBug -> "DocNexa bug report"
+            feedback -> "DocNexa app feedback"
+            else -> "DocNexa support request"
+        }
         val appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" }
-        val body = if (reportBug) {
-            "Please describe the problem below:\n\nApp version: ${appVersion}\nAndroid: ${Build.VERSION.RELEASE}\nDevice: ${Build.MANUFACTURER} ${Build.MODEL}\n\nSteps to reproduce:\n\nExpected result:\n\nActual result:"
-        } else {
-            "Hello DocNexa team,\n\nI need help with:\n\nApp version: ${appVersion}"
+        val body = when {
+            reportBug -> "Please describe the problem below:\n\nApp version: ${appVersion}\nAndroid: ${Build.VERSION.RELEASE}\nDevice: ${Build.MANUFACTURER} ${Build.MODEL}\n\nSteps to reproduce:\n\nExpected result:\n\nActual result:"
+            feedback -> "Hello DocNexa team,\n\nMy feedback or suggestion:\n\nWhat I like about DocNexa:\n\nWhat could be improved:\n\nApp version: ${appVersion}"
+            else -> "Hello DocNexa team,\n\nI need help with:\n\nApp version: ${appVersion}"
         }
         val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:")
+            data = Uri.parse("mailto:$recipient")
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
             putExtra(Intent.EXTRA_SUBJECT, subject)
             putExtra(Intent.EXTRA_TEXT, body)
         }
         try {
-            startActivity(Intent.createChooser(intent, if (reportBug) "Send bug report" else "Contact DocNexa"))
+            startActivity(Intent.createChooser(intent, when {
+                reportBug -> "Send bug report"
+                feedback -> "Send feedback"
+                else -> "Contact DocNexa"
+            }))
         } catch (_: Exception) {
             appDialog().setTitle("Email app not found")
                 .setMessage("Please install or set up an email app on your phone, then try again.")
