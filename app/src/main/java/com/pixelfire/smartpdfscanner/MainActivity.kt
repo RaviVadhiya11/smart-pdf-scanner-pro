@@ -6326,21 +6326,102 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDocumentScan() {
-        // Default to Natural Color so outdoor photos and colored documents are
-        // not forced through aggressive document-cleaning filters.
-        appDialog()
-            .setTitle("Choose scan quality")
-            .setItems(arrayOf(
-                "Natural Color • Recommended",
-                "Enhanced Document • Filters & cleanup"
-            )) { _, choice ->
-                val mode = if (choice == 1) {
-                    GmsDocumentScannerOptions.SCANNER_MODE_FULL
-                } else {
-                    GmsDocumentScannerOptions.SCANNER_MODE_BASE
-                }
-                launchDocumentScan(mode)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(10))
+            background = rounded(0xFFF7F9FE.toInt(), 24)
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = gradient(0xFF092B63.toInt(), 0xFF126A91.toInt(), 20)
+        }
+        header.addView(label("✦  DOCNEXA SMART SCAN", 12f, 0xFFBDEBFF.toInt(), true))
+        header.addView(gap(8))
+        header.addView(label("Choose your scan style", 22f, android.graphics.Color.WHITE, true))
+        header.addView(gap(5))
+        header.addView(label("Select the finish that suits your document.", 13f, 0xFFDCEBFF.toInt()))
+        panel.addView(header, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(gap(16))
+
+        fun optionCard(
+            icon: String,
+            title: String,
+            description: String,
+            tag: String,
+            accent: Int,
+            onChoose: () -> Unit
+        ): LinearLayout {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(15), dp(16), dp(15))
+                background = rounded(0xFFFFFFFF.toInt(), 18, 0xFFDCE5F2.toInt())
+                isClickable = true
+                isFocusable = true
+                elevation = dp(2).toFloat()
+                setOnClickListener { onChoose() }
             }
+            val top = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val symbol = TextView(this).apply {
+                text = icon
+                textSize = 25f
+                gravity = Gravity.CENTER
+                setTextColor(accent)
+                background = rounded(0xFFEAF2FF.toInt(), 13)
+                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+            }
+            top.addView(symbol)
+            val titleColumn = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+            }
+            titleColumn.addView(label(title, 16f, 0xFF142B4D.toInt(), true))
+            titleColumn.addView(gap(3))
+            titleColumn.addView(label(description, 12f, 0xFF61718A.toInt()))
+            top.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
+            val pill = TextView(this).apply {
+                text = tag
+                textSize = 10f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(accent)
+                setPadding(dp(9), dp(6), dp(9), dp(6))
+                background = rounded(0xFFEAF2FF.toInt(), 20)
+            }
+            top.addView(pill)
+            card.addView(top)
+            card.addView(gap(10))
+            card.addView(label("Tap to continue  →", 12f, accent, true))
+            return card
+        }
+
+        panel.addView(optionCard(
+            "◉",
+            "Natural Color",
+            "Keeps the original look and colors.",
+            "RECOMMENDED",
+            0xFF087F9B
+        ) {
+            launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+        }, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(gap(12))
+        panel.addView(optionCard(
+            "✧",
+            "Enhanced Document",
+            "Document cleanup and edge enhancement.",
+            "CLEANUP",
+            0xFF6546C8
+        ) {
+            launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+        }, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(gap(14))
+        panel.addView(label("Tip: Use Natural Color for photos, receipts and colored pages. Choose Enhanced for printed text documents.", 12f, 0xFF64748B.toInt()))
+
+        appDialog()
+            .setView(panel)
             .setNegativeButton("Cancel", null)
             .show()
     }
