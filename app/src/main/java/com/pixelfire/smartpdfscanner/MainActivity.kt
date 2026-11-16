@@ -6913,10 +6913,10 @@ class MainActivity : AppCompatActivity() {
                         Rect(left, top, left + outW, top + outH)
                     } else fitRect(bitmap.width, bitmap.height, availableW, availableH, margin, margin)
                     page.canvas.drawBitmap(bitmap, null, bounds, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                    outputDocument.finishPage(page)
+                    document.finishPage(page)
                     if (cached == null) bitmap.recycle()
                 }
-                val output = savePdfBytes(ByteArrayOutputStream().also { outputDocument.writeTo(it) }.toByteArray(), fileName)
+                val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
                     lastPdf = output
                     if (output != null) notifyDocumentReady(output)
@@ -7016,12 +7016,12 @@ class MainActivity : AppCompatActivity() {
                             isDither = true
                         }
                     )
-                    document.finishPage(page)
+                    outputDocument.finishPage(page)
                 } finally {
                     bitmap.recycle()
                 }
             }
-            val bytes = ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray()
+            val bytes = ByteArrayOutputStream().also { outputDocument.writeTo(it) }.toByteArray()
             val name = "DocNexa_Print_Ready_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
             saveBytesPrivately(bytes, name)
         } catch (e: Exception) {
