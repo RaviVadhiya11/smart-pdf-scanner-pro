@@ -6301,6 +6301,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDocumentScan() {
+        // Default to Natural Color so outdoor photos and colored documents are
+        // not forced through aggressive document-cleaning filters.
+        appDialog()
+            .setTitle("Choose scan quality")
+            .setItems(arrayOf(
+                "Natural Color • Recommended",
+                "Enhanced Document • Filters & cleanup"
+            )) { _, choice ->
+                val mode = if (choice == 1) {
+                    GmsDocumentScannerOptions.SCANNER_MODE_FULL
+                } else {
+                    GmsDocumentScannerOptions.SCANNER_MODE_BASE
+                }
+                launchDocumentScan(mode)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun launchDocumentScan(scannerMode: Int) {
         status.text = "Opening scanner…"
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
@@ -6309,7 +6329,7 @@ class MainActivity : AppCompatActivity() {
                 GmsDocumentScannerOptions.RESULT_FORMAT_PDF,
                 GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
             )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            .setScannerMode(scannerMode)
             .build()
         GmsDocumentScanning.getClient(options)
             .getStartScanIntent(this)
