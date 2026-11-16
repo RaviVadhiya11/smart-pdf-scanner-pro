@@ -6910,10 +6910,10 @@ class MainActivity : AppCompatActivity() {
                         Rect(left, top, left + outW, top + outH)
                     } else fitRect(bitmap.width, bitmap.height, availableW, availableH, margin, margin)
                     page.canvas.drawBitmap(bitmap, null, bounds, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                    document.finishPage(page)
+                    outputDocument.finishPage(page)
                     if (cached == null) bitmap.recycle()
                 }
-                val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
+                val output = savePdfBytes(ByteArrayOutputStream().also { outputDocument.writeTo(it) }.toByteArray(), fileName)
                 runOnUiThread {
                     lastPdf = output
                     if (output != null) notifyDocumentReady(output)
@@ -6963,7 +6963,8 @@ class MainActivity : AppCompatActivity() {
         var document: PdfDocument? = null
         return try {
             require(pageUris.isNotEmpty()) { "No scanned pages" }
-            document = PdfDocument()
+            val outputDocument = PdfDocument()
+            document = outputDocument
             pageUris.forEachIndexed { index, uri ->
                 val bitmap = decodeImageSafely(uri, 4800)
                 try {
@@ -6981,7 +6982,7 @@ class MainActivity : AppCompatActivity() {
                     val drawHeight = bitmap.height * scale
                     val left = (pageWidth - drawWidth) / 2f
                     val top = (pageHeight - drawHeight) / 2f
-                    val page = document.startPage(
+                    val page = outputDocument.startPage(
                         PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
                     )
                     page.canvas.drawColor(android.graphics.Color.WHITE)
