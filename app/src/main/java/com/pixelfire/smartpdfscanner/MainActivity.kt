@@ -361,7 +361,9 @@ class MainActivity : AppCompatActivity() {
             if (!pages.isNullOrEmpty()) {
                 status.text = "Creating print-ready A4 PDF…"
                 Thread {
-                    val saved = createPrintReadyScanPdf(pages.map { it.imageUri })
+                    val pageUris = pages.map { it.imageUri }
+                    val savedImages = saveOriginalScannedImages(pageUris)
+                    val saved = createPrintReadyScanPdf(pageUris)
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
                             if (saved != null) {
@@ -370,6 +372,7 @@ class MainActivity : AppCompatActivity() {
                                 prefs.edit().putBoolean("has_completed_first_scan", true).apply()
                                 buildScreen()
                                 showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
+                                if (savedImages > 0) Toast.makeText(this, "$savedImages original high-quality scan image(s) also saved in DocNexa storage.", Toast.LENGTH_LONG).show()
                             } else {
                                 status.text = "PDF save failed"
                                 Toast.makeText(this, "High-quality PDF could not be created. Please scan again.", Toast.LENGTH_LONG).show()
@@ -6952,6 +6955,25 @@ class MainActivity : AppCompatActivity() {
                 showExportSuccess(uri, uri.lastPathSegment ?: name, "application/pdf")
             }
         } catch (_: Exception) { null }
+    }
+
+    /**
+     * Saves the scanner's original JPEG page files without resizing or recompressing them.
+     * This preserves the best image quality provided by the document scanner.
+     */
+    private fun saveOriginalScannedImages(pageUris: List<Uri>): Int {
+        var savedCount = 0
+        pageUris.forEachIndexed { index, uri ->
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: error("Cannot read scanned page")
+                val name = "DocNexa_Scan_Page_${index + 1}_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+                if (saveBytesPrivately(bytes, name) != null) savedCount++
+            } catch (_: Exception) {
+                // Keep processing remaining pages; PDF creation is independent.
+            }
+        }
+        return savedCount
     }
 
     /**
