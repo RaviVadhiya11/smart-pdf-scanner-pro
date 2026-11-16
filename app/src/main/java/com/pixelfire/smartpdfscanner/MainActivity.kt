@@ -565,6 +565,10 @@ class MainActivity : AppCompatActivity() {
     private fun showPremiumDialog(builder: AlertDialog.Builder): AlertDialog = builder.show()
 
     /** Shared dialog appearance without replacing each tool's validation or button callbacks. */
+    /**
+     * One shared DocNexa premium dialog skin. All appDialog() call sites inherit
+     * the same rounded surface, typography, input styling and clear action hierarchy.
+     */
     private fun appDialog(): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
         override fun create(): AlertDialog {
             val dialog = super.create()
@@ -575,30 +579,69 @@ class MainActivity : AppCompatActivity() {
                         dialog.window?.apply {
                             setLayout(minOf(dp(560), resources.displayMetrics.widthPixels - dp(32)), -2)
                             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                            setBackgroundDrawable(rounded(0xFFF8FAFF.toInt(), 26, 0xFFE0E8F4.toInt()))
                         }
-                        fun styleInputs(view: View) {
-                            if (view is NativeAdView) return
-                            if (view is EditText) {
-                                view.setTextColor(0xFF172B4D.toInt())
-                                view.setHintTextColor(0xFF64748B.toInt())
-                                view.textSize = maxOf(view.textSize / resources.displayMetrics.scaledDensity, 14f)
-                                view.setPadding(dp(14), dp(12), dp(14), dp(12))
-                                view.minimumHeight = dp(48)
-                                view.background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFD4E2F4.toInt())
-                                (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
+                        fun styleDialogTree(node: View) {
+                            if (node is NativeAdView) return
+                            when (node.id) {
+                                android.R.id.alertTitle -> if (node is TextView) {
+                                    node.setTextColor(0xFF102B52.toInt())
+                                    node.textSize = 21f
+                                    node.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+                                }
+                                android.R.id.message -> if (node is TextView) {
+                                    node.setTextColor(0xFF53657E.toInt())
+                                    node.textSize = 14f
+                                    node.setLineSpacing(dp(2).toFloat(), 1.04f)
+                                }
+                                android.R.id.text1 -> if (node is TextView) {
+                                    node.setTextColor(0xFF243B5A.toInt())
+                                    node.textSize = 15f
+                                    node.setPadding(dp(8), dp(13), dp(8), dp(13))
+                                }
+                            }
+                            if (node is EditText) {
+                                node.setTextColor(0xFF172B4D.toInt())
+                                node.setHintTextColor(0xFF64748B.toInt())
+                                node.textSize = maxOf(node.textSize / resources.displayMetrics.scaledDensity, 14f)
+                                node.setPadding(dp(14), dp(12), dp(14), dp(12))
+                                node.minimumHeight = dp(48)
+                                node.background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFD4E2F4.toInt())
+                                (node.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
                                     it.topMargin = dp(8); it.bottomMargin = dp(8)
                                 }
                             }
-                            if (view is android.widget.CompoundButton) {
-                                view.setTextColor(0xFF172B4D.toInt())
-                                view.buttonTintList = android.content.res.ColorStateList(
+                            if (node is android.widget.CompoundButton) {
+                                node.setTextColor(0xFF243B5A.toInt())
+                                node.buttonTintList = android.content.res.ColorStateList(
                                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                                     intArrayOf(0xFF2563EB.toInt(), 0xFF64748B.toInt())
                                 )
                             }
-                            if (view is ViewGroup) for (i in 0 until view.childCount) styleInputs(view.getChildAt(i))
+                            if (node is ViewGroup) for (i in 0 until node.childCount) styleDialogTree(node.getChildAt(i))
                         }
-                        styleInputs(view)
+                        styleDialogTree(view)
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+                            isAllCaps = false
+                            textSize = 14f
+                            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+                            setTextColor(android.graphics.Color.WHITE)
+                            background = gradient(0xFF1557B0.toInt(), 0xFF087F9B.toInt(), 14)
+                            minHeight = dp(46)
+                            setPadding(dp(16), dp(8), dp(16), dp(8))
+                        }
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+                            isAllCaps = false
+                            textSize = 14f
+                            setTextColor(0xFF31547F.toInt())
+                            background = rounded(0xFFEAF1FA.toInt(), 14)
+                            minHeight = dp(46)
+                        }
+                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
+                            isAllCaps = false
+                            textSize = 14f
+                            setTextColor(0xFF087F9B.toInt())
+                        }
                     }
                 }
                 override fun onViewDetachedFromWindow(view: View) = Unit
