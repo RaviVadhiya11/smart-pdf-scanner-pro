@@ -584,11 +584,6 @@ class MainActivity : AppCompatActivity() {
                         fun styleDialogTree(node: View) {
                             if (node is NativeAdView) return
                             when (node.id) {
-                                android.R.id.alertTitle -> if (node is TextView) {
-                                    node.setTextColor(0xFF102B52.toInt())
-                                    node.textSize = 21f
-                                    node.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
-                                }
                                 android.R.id.message -> if (node is TextView) {
                                     node.setTextColor(0xFF53657E.toInt())
                                     node.textSize = 14f
@@ -6446,7 +6441,7 @@ class MainActivity : AppCompatActivity() {
             "Natural Color",
             "Keeps the original look and colors.",
             "RECOMMENDED",
-            0xFF087F9B
+            0xFF087F9B.toInt()
         ) {
             launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
         }, LinearLayout.LayoutParams(-1, -2))
@@ -6456,7 +6451,7 @@ class MainActivity : AppCompatActivity() {
             "Enhanced Document",
             "Document cleanup and edge enhancement.",
             "CLEANUP",
-            0xFF6546C8
+            0xFF6546C8.toInt()
         ) {
             launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
         }, LinearLayout.LayoutParams(-1, -2))
