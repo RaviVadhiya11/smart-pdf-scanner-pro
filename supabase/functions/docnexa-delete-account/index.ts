@@ -13,46 +13,9 @@ function jsonResponse(status: number, body: Record<string, unknown>) {
   });
 }
 
-async function collectObjectPaths(
-  storage: ReturnType<ReturnType<typeof createClient>["storage"]["from"]>,
-  folder: string,
-): Promise<string[]> {
-  const paths: string[] = [];
-  let offset = 0;
-  const pageSize = 1000;
-
-  while (true) {
-    const { data, error } = await storage.list(folder, {
-      limit: pageSize,
-      offset,
-      sortBy: { column: "name", order: "asc" },
-    });
-    if (error) throw new Error(`Could not list account files: ${error.message}`);
-    if (!data || data.length === 0) break;
-
-    for (const item of data) {
-      const path = folder ? `${folder}/${item.name}` : item.name;
-      // Storage folders have a null id; files have an id.
-      if (item.id === null) {
-        paths.push(...await collectObjectPaths(storage, path));
-      } else {
-        paths.push(path);
-      }
-    }
-
-    if (data.length < pageSize) break;
-    offset += data.length;
-  }
-  return paths;
-}
-
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-  if (req.method !== "POST") {
-    return jsonResponse(405, { success: false, error: "Method not allowed." });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return jsonResponse(405, { success: false, error: "Method not allowed." });
 
   try {
     const authorization = req.headers.get("Authorization") ?? "";
@@ -74,7 +37,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(400, { success: false, error: "Explicit account deletion confirmation is required." });
     }
 
-    // Validate the caller's access token with Supabase Auth before using admin privileges.
+    // Verify the caller's JWT before using the server-side admin client.
     const userClient = createClient(projectUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: `Bearer ${match[1]}` } },
@@ -88,24 +51,47 @@ Deno.serve(async (req: Request) => {
     const adminClient = createClient(projectUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-
-    // The app stores each user's cloud PDFs under a folder named with that user's UUID.
     const bucket = adminClient.storage.from("docnexa-pdfs");
-    const objectPaths = await collectObjectPaths(bucket, userId);
 
-    // Remove files in manageable batches. If storage cleanup fails, keep the Auth account intact.
-    for (let i = 0; i < objectPaths.length; i += 100) {
-      const batch = objectPaths.slice(i, i + 100);
-      const { error } = await bucket.remove(batch);
-      if (error) {
-        throw new Error(`Could not remove cloud documents: ${error.message}`);
+    // Recursively collect only objects inside this authenticated user's UUID folder.
+    async function collectPaths(folder: string): Promise<string[]> {
+      const paths: string[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await bucket.list(folder, {
+          limit: pageSize,
+          offset,
+          sortBy: { column: "name", order: "asc" },
+        });
+        if (error) throw new Error("Could not list cloud documents.");
+        if (!data || data.length === 0) break;
+
+        for (const item of data) {
+          const path = `${folder}/${item.name}`;
+          if (item.id === null) paths.push(...await collectPaths(path));
+          else paths.push(path);
+        }
+        if (data.length < pageSize) break;
+        offset += data.length;
       }
+      return paths;
     }
 
-    // Delete only the authenticated caller's account.
+    const objectPaths = await collectPaths(userId);
+    for (let i = 0; i < objectPaths.length; i += 100) {
+      const { error } = await bucket.remove(objectPaths.slice(i, i + 100));
+      if (error) throw new Error("Could not remove all cloud documents. The account was not deleted.");
+    }
+
+    // Delete only the account whose access token was verified above.
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
     if (deleteError) {
-      throw new Error(`Cloud files were removed, but account deletion failed: ${deleteError.message}`);
+      console.error("Supabase Auth account deletion failed:", deleteError);
+      return jsonResponse(500, {
+        success: false,
+        error: "Cloud files were removed, but account deletion could not be completed. Please contact support.",
+      });
     }
 
     return jsonResponse(200, {
@@ -114,7 +100,9 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     console.error("DocNexa account deletion failed:", error);
-    const message = error instanceof Error ? error.message : "Account deletion could not be completed.";
-    return jsonResponse(500, { success: false, error: message });
+    return jsonResponse(500, {
+      success: false,
+      error: error instanceof Error ? error.message : "Account deletion could not be completed.",
+    });
   }
 });
