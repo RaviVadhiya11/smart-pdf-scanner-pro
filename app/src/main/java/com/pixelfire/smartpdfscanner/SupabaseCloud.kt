@@ -68,6 +68,28 @@ internal object SupabaseCloud {
         return AuthResult(token, userId, "Signed in")
     }
 
+
+    fun generateAi(token: String, task: String, prompt: String, documentText: String): String {
+        require(token.isNotBlank()) { "Please sign in to DocNexa first." }
+        val payload = JSONObject()
+            .put("task", task)
+            .put("prompt", prompt)
+            .put("documentText", documentText)
+            .toString().toByteArray(Charsets.UTF_8)
+        val response = request(
+            "POST",
+            "/functions/v1/docnexa-ai",
+            payload,
+            "application/json",
+            token
+        )
+        val json = JSONObject(response)
+        if (!json.optBoolean("success", false)) {
+            throw IllegalStateException(json.optString("error").ifBlank { "AI request failed." })
+        }
+        return json.optString("answer").ifBlank { "The AI service returned an empty answer." }
+    }
+
     fun resendConfirmation(email: String) {
         val body = JSONObject().put("type", "signup").put("email", email).toString().toByteArray()
         request("POST", "/auth/v1/resend", body, "application/json")
