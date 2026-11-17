@@ -30,3 +30,14 @@ To enable signed releases, create an upload keystore privately and configure Git
 
 ## Scope and testing
 This is a first native scanning version, not yet a full PDF editor. OCR/search, merging existing PDFs, compression settings, password protection, persistent scan history and in-app PDF editing are not included. Test on physical devices before Play submission.
+
+
+## Play Store readiness checklist
+- The app targets Android 16 / API 36, as required for new mobile apps submitted from 31 August 2026.
+- The public privacy policy and account-deletion request pages are in `docs/`.
+- To publish those pages, open **Repository Settings → Pages**, select **GitHub Actions** as the build/deployment source, then run the **Publish DocNexa policy pages** workflow. The intended URLs are:
+  - `https://ravivadhiya11.github.io/smart-pdf-scanner-pro/privacy-policy.html`
+  - `https://ravivadhiya11.github.io/smart-pdf-scanner-pro/delete-account.html`
+- The app contains Google Mobile Ads and must be declared as **Contains ads** in Play Console. Complete the Data safety, target audience, content rating, app access and account deletion declarations accurately.
+- The current release bundle is unsigned unless an upload keystore is configured. Create a private upload keystore and add the four GitHub Actions secrets documented above before attempting a Play Console upload. Never commit the keystore or its passwords.
+- Complete a physical-device test of sign-up, email confirmation, sign-in, account switching, scan/save/open/share, cloud sync, account deletion, notifications, offline behaviour and ads before production release.
