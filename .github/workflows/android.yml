@@ -39,7 +39,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13'
+          gradle-version: '8.14.4'
       - name: Test page tools and build installable debug APK
         run: gradle :app:testDebugUnitTest :app:assembleDebug
       - name: Check Android lint
