@@ -463,6 +463,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private val pdfTextPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) extractPdfText(uri) }
+    private var pendingAiTask: String = "summary"
+    private var pendingAiPrompt: String = ""
+    private val aiPdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) runAiForPdf(uri, pendingAiTask, pendingAiPrompt)
+    }
     private val collagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPageCollage(uri) }
     private val detailsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) showPdfDetails(uri) }
     private val rotatePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) rotatePdfPages(uri) }
@@ -1708,6 +1713,7 @@ class MainActivity : AppCompatActivity() {
         separator()
         section("Tools")
         item("⚒", "PDF Tools") { showPdfTools() }
+        item("✦", "AI Document Assistant") { showAiAssistant() }
         item("▣", "Edit/Create PDF") { imagePicker.launch(arrayOf("image/*")) }
         item("✍", "Signature") { openSignatureEditor() }
         item("▦", "QR Scanner") { showQrScanner() }
@@ -4089,6 +4095,116 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
             }
             .setPositiveButton("Close", null))
+    }
+
+
+    private fun showAiAssistant() {
+        if (cloudToken().isBlank()) {
+            appDialog().setTitle("Sign in required")
+                .setMessage("Sign in to your DocNexa account before using online AI features. Your PDF will be sent securely to DocNexa AI only after you choose a document.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Sign in") { _, _ -> showCloudLoginDialog() }
+                .show()
+            return
+        }
+        if (!requireInternet("DocNexa AI")) return
+        val titles = arrayOf(
+            "PDF Summary",
+            "Ask a question about PDF",
+            "Translate PDF text",
+            "Smart OCR text cleanup",
+            "AI Document Assistant"
+        )
+        val tasks = arrayOf("summary", "ask", "translate", "ocr", "assistant")
+        appDialog().setTitle("DocNexa AI")
+            .setItems(titles) { _, which ->
+                pendingAiTask = tasks[which]
+                val hint = when (pendingAiTask) {
+                    "ask" -> "Ask a question about this PDF"
+                    "translate" -> "Enter target language, e.g. Gujarati"
+                    "ocr" -> "Optional instruction for cleaning extracted text"
+                    "assistant" -> "What would you like help with?"
+                    else -> "Optional summary instructions"
+                }
+                val field = EditText(this).apply {
+                    this.hint = hint
+                    minLines = if (pendingAiTask == "ask" || pendingAiTask == "assistant") 2 else 1
+                    maxLines = 4
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                }
+                appDialog().setTitle(titles[which])
+                    .setMessage("Choose a PDF on the next screen. Text from that PDF will be sent to the AI service for processing.")
+                    .setView(field)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Choose PDF") { _, _ ->
+                        pendingAiPrompt = field.text.toString().trim().ifBlank {
+                            when (pendingAiTask) {
+                                "summary" -> "Summarize this document with headings and key points."
+                                "ask" -> ""
+                                "translate" -> "Translate the document into Gujarati."
+                                "ocr" -> "Correct OCR spacing and formatting while preserving the original meaning."
+                                else -> "Help me understand this document and identify its important points."
+                            }
+                        }
+                        if (pendingAiTask == "ask" && pendingAiPrompt.isBlank()) {
+                            Toast.makeText(this, "Please enter your question.", Toast.LENGTH_LONG).show()
+                        } else if (pendingAiTask == "translate" && pendingAiPrompt.isBlank()) {
+                            Toast.makeText(this, "Please enter the target language.", Toast.LENGTH_LONG).show()
+                        } else {
+                            aiPdfPicker.launch(arrayOf("application/pdf"))
+                        }
+                    }.show()
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun runAiForPdf(uri: Uri, task: String, prompt: String) {
+        if (cloudToken().isBlank()) {
+            Toast.makeText(this, "Your DocNexa session has expired. Please sign in again.", Toast.LENGTH_LONG).show()
+            showCloudLoginDialog()
+            return
+        }
+        val progress = appDialog().setTitle("DocNexa AI")
+            .setMessage("Reading PDF and preparing your request…")
+            .setCancelable(false).create()
+        progress.show()
+        Thread {
+            try {
+                val extracted = contentResolver.openInputStream(uri)?.use { stream ->
+                    PDDocument.load(stream).use { document ->
+                        PDFTextStripper().apply { sortByPosition = true }.getText(document)
+                    }
+                } ?: error("Could not open the selected PDF.")
+                if (extracted.isBlank()) {
+                    throw IllegalStateException("No selectable text was found. For a scanned PDF, run Image To Text (OCR) first, then use the AI assistant with the extracted text.")
+                }
+                if (extracted.length > 30000) {
+                    throw IllegalStateException("This PDF contains too much text for the current AI request. Please split it into smaller PDFs and try again.")
+                }
+                val answer = SupabaseCloud.generateAi(cloudToken(), task, prompt, extracted)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        progress.dismiss()
+                        val title = when (task) {
+                            "summary" -> "DocNexa AI • PDF Summary"
+                            "ask" -> "DocNexa AI • Ask PDF"
+                            "translate" -> "DocNexa AI • Translation"
+                            "ocr" -> "DocNexa AI • Smart Text Cleanup"
+                            else -> "DocNexa AI • Assistant"
+                        }
+                        showLongTextReport(title, answer, "Copy Answer")
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        progress.dismiss()
+                        appDialog().setTitle("DocNexa AI")
+                            .setMessage(error.localizedMessage ?: "AI request failed. Please try again.")
+                            .setPositiveButton("OK", null).show()
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun extractPdfText(uri: Uri) {
