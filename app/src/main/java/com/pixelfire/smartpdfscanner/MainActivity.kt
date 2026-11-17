@@ -2054,7 +2054,7 @@ class MainActivity : AppCompatActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(22), dp(22), dp(18))
-            background = rounded(0xFF101426.toInt(), 26, 0xFF343B62.toInt())
+            background = rounded(0xFFFFFFFF.toInt(), 26, 0xFFDCE8FF.toInt())
         }
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val content = LinearLayout(this).apply {
@@ -2068,16 +2068,16 @@ class MainActivity : AppCompatActivity() {
             typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt())
-            background = gradient(0xFF8B5CF6.toInt(), 0xFF4F46E5.toInt(), 20)
+            background = gradient(0xFF073B91.toInt(), 0xFF3478F6.toInt(), 18)
             layoutParams = LinearLayout.LayoutParams(dp(58), dp(58))
         }
         content.addView(logo)
         content.addView(gap(10))
-        content.addView(label("DOCNEXA", 22f, 0xFFF8FAFF.toInt(), true))
+        content.addView(label("DOCNEXA", 22f, 0xFF172B4D.toInt(), true))
         content.addView(gap(5))
         val subtitle = label(
             "Your documents, securely organised.",
-            12f, 0xFFAEB8D2.toInt()
+            12f, 0xFF718096.toInt()
         )
         content.addView(subtitle)
         content.addView(gap(16))
@@ -2085,7 +2085,7 @@ class MainActivity : AppCompatActivity() {
         val tabs = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = rounded(0xFF1B2138.toInt(), 14)
+            background = rounded(0xFFEAF2FF.toInt(), 14)
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         fun tabButton(text: String): TextView = TextView(this).apply {
@@ -2106,11 +2106,11 @@ class MainActivity : AppCompatActivity() {
             hint = hintText
             setSingleLine(true)
             textSize = 14f
-            setTextColor(0xFFF7F8FF.toInt())
-            setHintTextColor(0xFF8791AE.toInt())
+            setTextColor(0xFF172B4D.toInt())
+            setHintTextColor(0xFF8A98AD.toInt())
             this.inputType = inputType
             setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(0xFF1A2035.toInt(), 13, 0xFF39415F.toInt())
+            background = rounded(0xFFF5F8FF.toInt(), 13, 0xFFD4E1F5.toInt())
         }
 
         val name = authField(
@@ -2126,7 +2126,7 @@ class MainActivity : AppCompatActivity() {
             android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         )
 
-        fun captionView(text: String): TextView = label(text, 10f, 0xFFB9C3DC.toInt(), true).apply {
+        fun captionView(text: String): TextView = label(text, 10f, 0xFF52627D.toInt(), true).apply {
             gravity = Gravity.START
             setPadding(dp(2), 0, 0, dp(6))
         }
@@ -2143,7 +2143,7 @@ class MainActivity : AppCompatActivity() {
         val passwordRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = rounded(0xFF1A2035.toInt(), 13, 0xFF39415F.toInt())
+            background = rounded(0xFFF5F8FF.toInt(), 13, 0xFFD4E1F5.toInt())
             clipToOutline = true
         }
         password.background = null
@@ -2154,7 +2154,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 10f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setTextColor(0xFFB9A5FF.toInt())
+            setTextColor(0xFF3478F6.toInt())
             setPadding(dp(10), 0, dp(14), 0)
         }
         showPassword.setOnClickListener {
@@ -2178,14 +2178,14 @@ class MainActivity : AppCompatActivity() {
         val forgot = TextView(this).apply {
             text = "Forgot password?"
             textSize = 12f
-            setTextColor(0xFFB9A5FF.toInt())
+            setTextColor(0xFF3478F6.toInt())
             setPadding(dp(2), dp(8), dp(8), dp(8))
             setOnClickListener { sendCloudPasswordReset(email.text.toString().trim()) }
         }
         val resend = TextView(this).apply {
             text = "Resend verification"
             textSize = 12f
-            setTextColor(0xFFB9A5FF.toInt())
+            setTextColor(0xFF3478F6.toInt())
             gravity = Gravity.END
             setPadding(dp(8), dp(8), dp(2), dp(8))
             setOnClickListener { resendCloudConfirmation(email.text.toString().trim()) }
@@ -2201,13 +2201,13 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(0xFFFFFFFF.toInt())
-            background = gradient(0xFF8B5CF6.toInt(), 0xFF4F46E5.toInt(), 14)
+            background = gradient(0xFF073B91.toInt(), 0xFF3478F6.toInt(), 14)
             backgroundTintList = null
             layoutParams = LinearLayout.LayoutParams(-1, dp(50))
         }
         content.addView(submit)
         content.addView(gap(11))
-        content.addView(label("OR CONTINUE WITH", 10f, 0xFF8E99B6.toInt(), true).apply {
+        content.addView(label("OR CONTINUE WITH", 10f, 0xFF718096.toInt(), true).apply {
             gravity = Gravity.CENTER
         })
         content.addView(gap(7))
@@ -2223,15 +2223,15 @@ class MainActivity : AppCompatActivity() {
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
                 setTextColor(textColor)
-                background = rounded(backgroundColor, 13, 0xFF414A69.toInt())
+                background = rounded(backgroundColor, 13, 0xFFD4E1F5.toInt())
                 setOnClickListener { beginSocialSignIn(provider) }
             }
         socialButtons.addView(
-            socialButton("G   Google", 0xFFF8FAFF.toInt(), 0xFF26314C.toInt(), "google"),
+            socialButton("G   Google", 0xFFFFFFFF.toInt(), 0xFF172B4D.toInt(), "google"),
             LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) }
         )
         socialButtons.addView(
-            socialButton("f   Facebook", 0xFF1877F2.toInt(), 0xFFFFFFFF.toInt(), "facebook"),
+            socialButton("f   Facebook", 0xFFEAF2FF.toInt(), 0xFF073B91.toInt(), "facebook"),
             LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) }
         )
         content.addView(socialButtons)
@@ -2241,7 +2241,7 @@ class MainActivity : AppCompatActivity() {
             text = "Continue as Guest"
             textSize = 13f
             gravity = Gravity.CENTER
-            setTextColor(0xFFC6CDE0.toInt())
+            setTextColor(0xFF3478F6.toInt())
             setPadding(dp(12), dp(12), dp(12), dp(10))
             setOnClickListener { dialog.dismiss() }
         }
@@ -2249,7 +2249,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(gap(2))
         content.addView(label(
             "Your account is protected. Your password is securely handled by Supabase.",
-            10f, 0xFF7F8AA7.toInt()
+            10f, 0xFF718096.toInt()
         ).apply { gravity = Gravity.CENTER })
         scroll.addView(content)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, -1))
@@ -2259,10 +2259,10 @@ class MainActivity : AppCompatActivity() {
             nameCaption.visibility = if (signupMode) View.VISIBLE else View.GONE
             name.visibility = if (signupMode) View.VISIBLE else View.GONE
             forgot.visibility = if (signupMode) View.GONE else View.VISIBLE
-            loginTab.setTextColor(if (signupMode) 0xFFAAB3CC.toInt() else 0xFF5B46C9.toInt())
-            loginTab.background = if (signupMode) null else rounded(0xFFF0ECFF.toInt(), 11)
-            signupTab.setTextColor(if (signupMode) 0xFF5B46C9.toInt() else 0xFFAAB3CC.toInt())
-            signupTab.background = if (signupMode) rounded(0xFFF0ECFF.toInt(), 11) else null
+            loginTab.setTextColor(if (signupMode) 0xFF718096.toInt() else 0xFF073B91.toInt())
+            loginTab.background = if (signupMode) null else rounded(0xFFFFFFFF.toInt(), 11)
+            signupTab.setTextColor(if (signupMode) 0xFF073B91.toInt() else 0xFF718096.toInt())
+            signupTab.background = if (signupMode) rounded(0xFFFFFFFF.toInt(), 11) else null
             submit.text = if (signupMode) "CREATE ACCOUNT  →" else "SIGN IN  →"
             subtitle.text = if (signupMode) {
                 "Create your secure account and sync your documents."
