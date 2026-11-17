@@ -4108,53 +4108,137 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!requireInternet("DocNexa AI")) return
-        val titles = arrayOf(
-            "PDF Summary",
-            "Ask a question about PDF",
-            "Translate PDF text",
-            "Smart OCR text cleanup",
-            "AI Document Assistant"
+
+        val tasks = listOf(
+            Triple("summary", "PDF Summary", "Get key points and a clear overview", "▤"),
+            Triple("ask", "Ask your PDF", "Ask questions and find answers", "?"),
+            Triple("translate", "Translate PDF", "Convert document text to your language", "文"),
+            Triple("ocr", "Smart OCR Cleanup", "Clean and organize extracted text", "✧"),
+            Triple("assistant", "AI Document Assistant", "Get help understanding your document", "✦")
         )
-        val tasks = arrayOf("summary", "ask", "translate", "ocr", "assistant")
-        appDialog().setTitle("DocNexa AI")
-            .setItems(titles) { _, which ->
-                pendingAiTask = tasks[which]
-                val hint = when (pendingAiTask) {
-                    "ask" -> "Ask a question about this PDF"
-                    "translate" -> "Enter target language, e.g. Gujarati"
-                    "ocr" -> "Optional instruction for cleaning extracted text"
-                    "assistant" -> "What would you like help with?"
-                    else -> "Optional summary instructions"
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = gradient(0xFF102E66.toInt(), 0xFF087F9B.toInt(), 20)
+        }
+        val heroIcon = TextView(this).apply {
+            text = "✦"
+            textSize = 27f
+            gravity = Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(0x33FFFFFF, 14)
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+        }
+        hero.addView(heroIcon)
+        val heroText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(13), 0, 0, 0)
+        }
+        heroText.addView(label("DocNexa AI", 20f, 0xFFFFFFFF.toInt(), true))
+        heroText.addView(gap(3))
+        heroText.addView(label("Your intelligent PDF workspace", 12f, 0xFFE0F5FF.toInt()))
+        hero.addView(heroText, LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(hero)
+        content.addView(gap(14))
+        content.addView(label("CHOOSE AN AI TOOL", 10f, 0xFF718096.toInt(), true))
+        content.addView(gap(9))
+
+        fun openTask(task: String, title: String) {
+            val hint = when (task) {
+                "ask" -> "Ask a question about this PDF"
+                "translate" -> "Enter target language, e.g. Gujarati"
+                "ocr" -> "Optional instruction for cleaning extracted text"
+                "assistant" -> "What would you like help with?"
+                else -> "Optional summary instructions"
+            }
+            showAiPromptDialog(task, title, hint)
+        }
+        fun makeCard(item: Triple<String, String, String, String>): LinearLayout {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(13), dp(10), dp(13))
+                background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE1E9F4.toInt())
+                elevation = dp(1).toFloat()
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { openTask(item.first, item.second) }
+            }
+            val symbol = TextView(this).apply {
+                text = item.fourth
+                textSize = 19f
+                gravity = Gravity.CENTER
+                setTextColor(0xFF087F9B.toInt())
+                background = rounded(0xFFE8F6FA.toInt(), 12)
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            }
+            card.addView(symbol)
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+            }
+            textCol.addView(label(item.second, 13f, 0xFF1C3150.toInt(), true))
+            textCol.addView(gap(3))
+            textCol.addView(label(item.third, 10f, 0xFF718096.toInt()))
+            card.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
+            card.addView(label("›", 23f, 0xFF7890AB.toInt(), true))
+            return card
+        }
+        val firstRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        firstRow.addView(makeCard(tasks[0]), LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+        firstRow.addView(makeCard(tasks[1]), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
+        content.addView(firstRow)
+        content.addView(gap(10))
+        val secondRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        secondRow.addView(makeCard(tasks[2]), LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+        secondRow.addView(makeCard(tasks[3]), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
+        content.addView(secondRow)
+        content.addView(gap(10))
+        content.addView(makeCard(tasks[4]))
+        content.addView(gap(12))
+        content.addView(label("🔒  Your document is sent only when you choose a PDF.", 10f, 0xFF6B7C93.toInt()))
+
+        appDialog()
+            .setView(content)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showAiPromptDialog(task: String, title: String, hint: String) {
+        val field = EditText(this).apply {
+            this.hint = hint
+            minLines = if (task == "ask" || task == "assistant") 2 else 1
+            maxLines = 4
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+        }
+        appDialog().setTitle(title)
+            .setMessage("Choose a PDF on the next screen. Text from that PDF will be sent to the AI service for processing.")
+            .setView(field)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Choose PDF") { _, _ ->
+                pendingAiTask = task
+                pendingAiPrompt = field.text.toString().trim().ifBlank {
+                    when (task) {
+                        "summary" -> "Summarize this document with headings and key points."
+                        "ask" -> ""
+                        "translate" -> "Translate the document into Gujarati."
+                        "ocr" -> "Correct OCR spacing and formatting while preserving the original meaning."
+                        else -> "Help me understand this document and identify its important points."
+                    }
                 }
-                val field = EditText(this).apply {
-                    this.hint = hint
-                    minLines = if (pendingAiTask == "ask" || pendingAiTask == "assistant") 2 else 1
-                    maxLines = 4
-                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                if ((task == "ask" || task == "translate") && pendingAiPrompt.isBlank()) {
+                    Toast.makeText(this, if (task == "ask") "Please enter your question." else "Please enter the target language.", Toast.LENGTH_LONG).show()
+                } else {
+                    aiPdfPicker.launch(arrayOf("application/pdf"))
                 }
-                appDialog().setTitle(titles[which])
-                    .setMessage("Choose a PDF on the next screen. Text from that PDF will be sent to the AI service for processing.")
-                    .setView(field)
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Choose PDF") { _, _ ->
-                        pendingAiPrompt = field.text.toString().trim().ifBlank {
-                            when (pendingAiTask) {
-                                "summary" -> "Summarize this document with headings and key points."
-                                "ask" -> ""
-                                "translate" -> "Translate the document into Gujarati."
-                                "ocr" -> "Correct OCR spacing and formatting while preserving the original meaning."
-                                else -> "Help me understand this document and identify its important points."
-                            }
-                        }
-                        if (pendingAiTask == "ask" && pendingAiPrompt.isBlank()) {
-                            Toast.makeText(this, "Please enter your question.", Toast.LENGTH_LONG).show()
-                        } else if (pendingAiTask == "translate" && pendingAiPrompt.isBlank()) {
-                            Toast.makeText(this, "Please enter the target language.", Toast.LENGTH_LONG).show()
-                        } else {
-                            aiPdfPicker.launch(arrayOf("application/pdf"))
-                        }
-                    }.show()
-            }.setNegativeButton("Close", null).show()
+            }.show()
     }
 
     private fun runAiForPdf(uri: Uri, task: String, prompt: String) {
