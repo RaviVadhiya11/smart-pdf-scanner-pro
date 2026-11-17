@@ -1,3 +1,11 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
+    id("com.google.firebase.firebase-perf")
+}
+
 val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
@@ -8,13 +16,6 @@ val hasReleaseSigning = !releaseStorePath.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank() &&
     java.io.File(releaseStorePath).isFile
 
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
-    id("com.google.firebase.crashlytics")
-    id("com.google.firebase.firebase-perf")
-}
 android {
     signingConfigs {
         if (hasReleaseSigning) {
