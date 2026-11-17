@@ -331,8 +331,17 @@ class MainActivity : AppCompatActivity() {
     private fun privateDocumentUri(file: java.io.File): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
     private fun privateDocumentFile(uri: Uri): java.io.File? {
         if (uri.authority != "$packageName.fileprovider") return null
-        val name = uri.lastPathSegment ?: return null
-        return java.io.File(privateDocumentsDir(), name).takeIf { it.exists() }
+        val segments = uri.pathSegments
+        val accountIndex = segments.indexOf("accounts")
+        if (accountIndex < 0 || accountIndex + 2 != segments.lastIndex) return null
+        val uriAccount = segments[accountIndex + 1]
+        val currentAccount = signedInUserId().replace(Regex("[^A-Za-z0-9_-]"), "_")
+        if (uriAccount != currentAccount) return null
+        val name = segments.lastOrNull() ?: return null
+        val directory = privateDocumentsDir()
+        return java.io.File(directory, name).takeIf {
+            it.isFile && runCatching { it.canonicalFile.parentFile == directory.canonicalFile }.getOrDefault(false)
+        }
     }
     private fun saveBytesPrivately(bytes: ByteArray, name: String): Uri? {
         return try {
