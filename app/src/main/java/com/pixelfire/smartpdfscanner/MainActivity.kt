@@ -1307,7 +1307,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(label("Recent Documents (" + savedDocs.size + ")", 16f, navy, true))
         content.addView(gap(8))
         if (savedDocs.isEmpty()) content.addView(label("Your scanned PDFs will appear here automatically.", 11f, muted))
-        else savedDocs.take(20).forEach { item -> content.addView(documentCard(item[0], item[1])) }
+        else savedDocs.take(20).forEach { item -> content.addView(documentCard(item.first, item.second)) }
         content.addView(gap(16))
 
         scroll.addView(content)
@@ -4167,7 +4167,7 @@ class MainActivity : AppCompatActivity() {
                 elevation = dp(1).toFloat()
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { openTask(item.first, item.second) }
+                setOnClickListener { openTask(item[0], item[1]) }
             }
             val symbol = TextView(this).apply {
                 text = item[3]
