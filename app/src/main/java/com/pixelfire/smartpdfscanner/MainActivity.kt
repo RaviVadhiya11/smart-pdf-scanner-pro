@@ -2322,6 +2322,7 @@ class MainActivity : AppCompatActivity() {
                     submit.text = if (signUp) "CREATE ACCOUNT  →" else "SIGN IN  →"
                     if (result.accessToken.isNotBlank()) {
                         prefs.edit().putString("cloud_access_token", result.accessToken)
+                            .putString("cloud_refresh_token", result.refreshToken)
                             .putString("cloud_user_id", result.userId)
                             .putString("cloud_email", email).apply()
                         dialog.dismiss()
@@ -2424,6 +2425,8 @@ class MainActivity : AppCompatActivity() {
                                     .remove("cloud_user_id")
                                     .remove("cloud_email")
                                     .apply()
+                                lastPdf = null
+                                loadFolders()
                                 Toast.makeText(this, "Your DocNexa Cloud account was deleted.", Toast.LENGTH_LONG).show()
                                 buildScreen()
                             }
@@ -2453,19 +2456,35 @@ class MainActivity : AppCompatActivity() {
         status.text = "Syncing this account with DocNexa Cloud…"
         Thread {
             try {
+                var activeToken = token
+                val refreshToken = prefs.getString("cloud_refresh_token", "") ?: ""
+                if (refreshToken.isNotBlank()) {
+                    try {
+                        val refreshed = SupabaseCloud.refreshSession(refreshToken)
+                        if (refreshed.userId != userId) throw IllegalStateException("The refreshed session belongs to a different account. Please sign in again.")
+                        activeToken = refreshed.accessToken
+                        prefs.edit()
+                            .putString("cloud_access_token", refreshed.accessToken)
+                            .putString("cloud_refresh_token", refreshed.refreshToken)
+                            .putString("cloud_email", refreshed.email)
+                            .apply()
+                    } catch (refreshError: Exception) {
+                        android.util.Log.w("DocNexa", "Session refresh failed; trying the current access token", refreshError)
+                    }
+                }
                 var uploaded = 0
                 for ((name, uri) in localDocs) {
                     val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("Could not read $name")
-                    SupabaseCloud.upload(token, userId, name, bytes)
+                    SupabaseCloud.upload(activeToken, userId, name, bytes)
                     uploaded++
                 }
-                val remoteFiles = SupabaseCloud.list(token, userId)
+                val remoteFiles = SupabaseCloud.list(activeToken, userId)
                 var downloaded = 0
                 val localNames = getSavedPdfs().map { it.first }.toMutableSet()
                 for (name in remoteFiles) {
                     if (name !in localNames && name.endsWith(".pdf", true)) {
-                        val bytes = SupabaseCloud.download(token, userId, name)
+                        val bytes = SupabaseCloud.download(activeToken, userId, name)
                         val saved = saveCloudPdf(name, bytes)
                         if (saved != null) { downloaded++; localNames.add(name) }
                     }
