@@ -323,6 +323,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
     private fun signedInUserId(): String = prefs.getString("cloud_user_id", "")?.takeIf { it.isNotBlank() } ?: "guest"
+    private fun accountPrefKey(key: String): String = "${key}_${signedInUserId().replace(Regex("[^A-Za-z0-9_-]"), "_")}"
     private fun privateDocumentsDir(): java.io.File {
         val root = java.io.File(filesDir, "accounts").apply { if (!exists()) mkdirs() }
         val folder = java.io.File(root, signedInUserId().replace(Regex("[^A-Za-z0-9_-]"), "_")).apply { if (!exists()) mkdirs() }
@@ -917,7 +918,7 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("scanner_data", MODE_PRIVATE) }
     private val homeFolders = mutableListOf<String>()
     private var selectedFolder: String = "New Folder"
-    private val folderAssignments by lazy { java.util.Collections.synchronizedMap(prefs.getString("folder_assignments", "")?.split("\\n")?.filter { it.contains("|") }?.associate { it.substringBefore("|") to it.substringAfter("|") }?.toMutableMap() ?: mutableMapOf()) }
+    private val folderAssignments by lazy { java.util.Collections.synchronizedMap(prefs.getString(accountPrefKey("folder_assignments"), "")?.split("\\n")?.filter { it.contains("|") }?.associate { it.substringBefore("|") to it.substringAfter("|") }?.toMutableMap() ?: mutableMapOf()) }
 
     private fun folderAssignmentSnapshot(): String = synchronized(folderAssignments) {
         folderAssignments.entries.joinToString("\\n") { "${it.key}|${it.value}" }
@@ -925,13 +926,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadFolders() {
         homeFolders.clear()
-        homeFolders.addAll(prefs.getStringSet("folders", setOf("New Folder", "ID Cards", "Bills")) ?: setOf("New Folder", "ID Cards", "Bills"))
+        homeFolders.addAll(prefs.getStringSet(accountPrefKey("folders"), setOf("New Folder", "ID Cards", "Bills")) ?: setOf("New Folder", "ID Cards", "Bills"))
         if (homeFolders.isEmpty()) homeFolders.add("New Folder")
     }
-    private fun saveFolders() { prefs.edit().putStringSet("folders", homeFolders.toSet()).apply() }
+    private fun saveFolders() { prefs.edit().putStringSet(accountPrefKey("folders"), homeFolders.toSet()).apply() }
     private fun assignPdf(uri: Uri) {
         folderAssignments[uri.toString()] = selectedFolder
-        prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
+        prefs.edit().putString(accountPrefKey("folder_assignments"), folderAssignmentSnapshot()).apply()
     }
 
     private fun styleSystemBars(statusColor: Int, lightStatus: Boolean) {
@@ -3262,7 +3263,7 @@ class MainActivity : AppCompatActivity() {
         val old = oldUri.toString()
         val new = newUri.toString()
         folderAssignments.remove(old)?.let { folderAssignments[new] = it }
-        val editor = prefs.edit().putString("folder_assignments", folderAssignmentSnapshot())
+        val editor = prefs.edit().putString(accountPrefKey("folder_assignments"), folderAssignmentSnapshot())
         for (key in listOf("favourite_uris", "trash_uris")) {
             val values = prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet()
             if (values.remove(old)) { values.add(new); editor.putStringSet(key, values) }
@@ -3280,7 +3281,7 @@ class MainActivity : AppCompatActivity() {
         val folders = homeFolders.toTypedArray()
         appDialog().setTitle("Move to Folder").setItems(folders) { _, which ->
             folderAssignments[uri.toString()] = folders[which]
-            prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
+            prefs.edit().putString(accountPrefKey("folder_assignments"), folderAssignmentSnapshot()).apply()
             Toast.makeText(this, "Moved to ${folders[which]}", Toast.LENGTH_SHORT).show()
             buildScreen()
         }.setNegativeButton("Cancel", null).show()
@@ -3406,7 +3407,7 @@ class MainActivity : AppCompatActivity() {
                     homeFolders[index] = name
                     saveFolders()
                     synchronized(folderAssignments) { folderAssignments.entries.filter { it.value == oldName }.forEach { folderAssignments[it.key] = name } }
-                    prefs.edit().putString("folder_assignments", folderAssignmentSnapshot()).apply()
+                    prefs.edit().putString(accountPrefKey("folder_assignments"), folderAssignmentSnapshot()).apply()
                     buildScreen()
                 }
             }.setNegativeButton("Cancel", null).show()
