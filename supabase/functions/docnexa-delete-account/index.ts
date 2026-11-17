@@ -25,9 +25,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const projectUrl = Deno.env.get("SUPABASE_URL");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!projectUrl || !anonKey || !serviceRoleKey) {
+    const publishableKeys = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ?? "{}");
+    const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+    const publishableKey = publishableKeys["default"];
+    const secretKey = secretKeys["default"];
+    if (!projectUrl || !publishableKey || !secretKey) {
       console.error("Required Supabase environment variables are missing.");
       return jsonResponse(500, { success: false, error: "Account deletion is not configured yet. Please contact support." });
     }
@@ -38,7 +40,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Verify the caller's JWT before using the server-side admin client.
-    const userClient = createClient(projectUrl, anonKey, {
+    const userClient = createClient(projectUrl, publishableKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: `Bearer ${match[1]}` } },
     });
@@ -48,7 +50,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const userId = userData.user.id;
-    const adminClient = createClient(projectUrl, serviceRoleKey, {
+    const adminClient = createClient(projectUrl, secretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
     const bucket = adminClient.storage.from("docnexa-pdfs");
