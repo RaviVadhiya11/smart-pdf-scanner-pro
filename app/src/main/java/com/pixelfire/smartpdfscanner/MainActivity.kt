@@ -322,7 +322,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
-    private fun privateDocumentsDir(): java.io.File = java.io.File(filesDir, "documents").apply { if (!exists()) mkdirs() }
+    private fun signedInUserId(): String = prefs.getString("cloud_user_id", "")?.takeIf { it.isNotBlank() } ?: "guest"
+    private fun privateDocumentsDir(): java.io.File {
+        val root = java.io.File(filesDir, "accounts").apply { if (!exists()) mkdirs() }
+        val folder = java.io.File(root, signedInUserId().replace(Regex("[^A-Za-z0-9_-]"), "_")).apply { if (!exists()) mkdirs() }
+        return folder
+    }
     private fun privateDocumentUri(file: java.io.File): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
     private fun privateDocumentFile(uri: Uri): java.io.File? {
         if (uri.authority != "$packageName.fileprovider") return null
@@ -2360,14 +2365,17 @@ class MainActivity : AppCompatActivity() {
     private fun confirmCloudSignOut() {
         appDialog()
             .setTitle("Sign out of DocNexa?")
-            .setMessage("Your cloud account will be disconnected on this device. Your locally saved PDFs will not be deleted.")
+            .setMessage("Your cloud account will be disconnected on this device. Its PDFs stay safely stored under that account and will appear again when you sign back into the same email.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Sign out") { _, _ ->
                 prefs.edit().remove("cloud_access_token")
+                    .remove("cloud_refresh_token")
                     .remove("cloud_user_id")
                     .remove("cloud_email")
                     .apply()
-                Toast.makeText(this, "Signed out. Local PDFs are unchanged.", Toast.LENGTH_LONG).show()
+                lastPdf = null
+                loadFolders()
+                Toast.makeText(this, "Signed out. This account’s PDFs are kept separate and safe.", Toast.LENGTH_LONG).show()
                 buildScreen()
             }
             .show()
@@ -2425,7 +2433,7 @@ class MainActivity : AppCompatActivity() {
         val userId = prefs.getString("cloud_user_id", "") ?: ""
         if (token.isBlank() || userId.isBlank()) { showCloudLoginDialog(); return }
         val localDocs = getSavedPdfs()
-        status.text = "Syncing with DocNexa Cloud…"
+        status.text = "Syncing this account with DocNexa Cloud…"
         Thread {
             try {
                 var uploaded = 0
@@ -3348,24 +3356,9 @@ class MainActivity : AppCompatActivity() {
                 val uri = privateDocumentUri(file)
                 if (!trashed.contains(uri.toString())) { results.add(file.name to uri); modified[uri] = file.lastModified() }
             }
-            // Keep documents created by earlier app versions visible during migration.
-            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external")
-            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED)
-            val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.MIME_TYPE} = ?" else "${MediaStore.MediaColumns.MIME_TYPE} = ?"
-            val args = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) arrayOf("Download/DocumentScanner/", "application/pdf") else arrayOf("application/pdf")
-            contentResolver.query(collection, projection, selection, args, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
-                val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
-                val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idIndex)
-                    val name = cursor.getString(nameIndex) ?: "Document.pdf"
-                    val itemUri = Uri.withAppendedPath(collection, id.toString())
-                    if (!trashed.contains(itemUri.toString()) && results.none { it.second == itemUri }) {
-                        results.add(name to itemUri)
-                        modified[itemUri] = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)) * 1000L
-                    }
-                }
-            }
+            // Do not enumerate shared Downloads/MediaStore files here: they have no
+            // trustworthy account owner and must never leak into another signed-in account.
+            // Existing exported copies remain in Downloads and are not deleted by sign-out.
         } catch (_: Exception) { }
         return when (prefs.getInt("document_sort_order", 2)) {
             0 -> results.sortedBy { it.first.lowercase(Locale.ROOT) }
