@@ -19,7 +19,7 @@ export default {
       }
 
       // The wrapper verifies the user's JWT. Never accept a user ID from the request.
-      const userId = ctx.userClaims?.sub;
+      const userId = ctx.userClaims?.id;
       if (!userId) {
         return Response.json(
           { success: false, error: "Please sign in again before deleting your account." },
