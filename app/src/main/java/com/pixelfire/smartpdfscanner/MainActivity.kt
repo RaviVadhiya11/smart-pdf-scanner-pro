@@ -1307,7 +1307,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(label("Recent Documents (" + savedDocs.size + ")", 16f, navy, true))
         content.addView(gap(8))
         if (savedDocs.isEmpty()) content.addView(label("Your scanned PDFs will appear here automatically.", 11f, muted))
-        else savedDocs.take(20).forEach { item -> content.addView(documentCard(item.first, item.second)) }
+        else savedDocs.take(20).forEach { item -> content.addView(documentCard(item[0], item[1])) }
         content.addView(gap(16))
 
         scroll.addView(content)
@@ -4110,11 +4110,11 @@ class MainActivity : AppCompatActivity() {
         if (!requireInternet("DocNexa AI")) return
 
         val tasks = listOf(
-            Triple("summary", "PDF Summary", "Get key points and a clear overview", "▤"),
-            Triple("ask", "Ask your PDF", "Ask questions and find answers", "?"),
-            Triple("translate", "Translate PDF", "Convert document text to your language", "文"),
-            Triple("ocr", "Smart OCR Cleanup", "Clean and organize extracted text", "✧"),
-            Triple("assistant", "AI Document Assistant", "Get help understanding your document", "✦")
+            arrayOf("summary", "PDF Summary", "Get key points and a clear overview", "▤"),
+            arrayOf("ask", "Ask your PDF", "Ask questions and find answers", "?"),
+            arrayOf("translate", "Translate PDF", "Convert document text to your language", "文"),
+            arrayOf("ocr", "Smart OCR Cleanup", "Clean and organize extracted text", "✧"),
+            arrayOf("assistant", "AI Document Assistant", "Get help understanding your document", "✦")
         )
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -4158,7 +4158,7 @@ class MainActivity : AppCompatActivity() {
             }
             showAiPromptDialog(task, title, hint)
         }
-        fun makeCard(item: Triple<String, String, String, String>): LinearLayout {
+        fun makeCard(item: Array<String>): LinearLayout {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -4170,7 +4170,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { openTask(item.first, item.second) }
             }
             val symbol = TextView(this).apply {
-                text = item.fourth
+                text = item[3]
                 textSize = 19f
                 gravity = Gravity.CENTER
                 setTextColor(0xFF087F9B.toInt())
@@ -4182,9 +4182,9 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(10), 0, 0, 0)
             }
-            textCol.addView(label(item.second, 13f, 0xFF1C3150.toInt(), true))
+            textCol.addView(label(item[1], 13f, 0xFF1C3150.toInt(), true))
             textCol.addView(gap(3))
-            textCol.addView(label(item.third, 10f, 0xFF718096.toInt()))
+            textCol.addView(label(item[2], 10f, 0xFF718096.toInt()))
             card.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(label("›", 23f, 0xFF7890AB.toInt(), true))
             return card
