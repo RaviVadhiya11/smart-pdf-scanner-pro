@@ -2373,6 +2373,52 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun confirmCloudAccountDeletion() {
+        appDialog()
+            .setTitle("Delete DocNexa account permanently?")
+            .setMessage(
+                "This permanently deletes your DocNexa Cloud account and PDFs synced to DocNexa Cloud. " +
+                    "PDFs saved locally on this phone will not be deleted. This action cannot be undone."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                val token = cloudToken()
+                if (token.isBlank()) {
+                    Toast.makeText(this, "Please sign in again before deleting your account.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Toast.makeText(this, "Deleting DocNexa Cloud account…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    try {
+                        SupabaseCloud.deleteAccount(token)
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                prefs.edit()
+                                    .remove("cloud_access_token")
+                                    .remove("cloud_refresh_token")
+                                    .remove("cloud_user_id")
+                                    .remove("cloud_email")
+                                    .apply()
+                                Toast.makeText(this, "Your DocNexa Cloud account was deleted.", Toast.LENGTH_LONG).show()
+                                buildScreen()
+                            }
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                Toast.makeText(
+                                    this,
+                                    error.localizedMessage ?: "Account deletion failed. Please contact support.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }.start()
+            }
+            .show()
+    }
+
     private fun syncCloudNow() {
         if (!requireInternet("Manual Cloud Sync")) return
         val token = cloudToken()
@@ -2503,6 +2549,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val accountEmail = prefs.getString("cloud_email", "").orEmpty()
+        if (accountEmail.isNotBlank() && cloudToken().isNotBlank()) {
+            section("DOCNEXA CLOUD ACCOUNT")
+            setting("!", "Delete cloud account", "Permanently delete your cloud account and synced PDFs") {
+                confirmCloudAccountDeletion()
+            }
+        }
         if (accountEmail.equals("ravivadhiya76@gmail.com", ignoreCase = true)) {
             section("ADMIN")
             setting("✦", "Admin notification panel", "Compose an announcement for subscribed DocNexa users") {
