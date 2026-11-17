@@ -90,6 +90,24 @@ internal object SupabaseCloud {
         return json.optString("answer").ifBlank { "The AI service returned an empty answer." }
     }
 
+    fun deleteAccount(token: String) {
+        require(token.isNotBlank()) { "Please sign in to delete your DocNexa account." }
+        val payload = JSONObject().put("confirm", true).toString().toByteArray(Charsets.UTF_8)
+        val response = request(
+            "POST",
+            "/functions/v1/docnexa-delete-account",
+            payload,
+            "application/json",
+            token
+        )
+        val json = JSONObject(response)
+        if (!json.optBoolean("success", false)) {
+            throw IllegalStateException(
+                json.optString("error").ifBlank { "Account deletion could not be completed." }
+            )
+        }
+    }
+
     fun resendConfirmation(email: String) {
         val body = JSONObject().put("type", "signup").put("email", email).toString().toByteArray()
         request("POST", "/auth/v1/resend", body, "application/json")
