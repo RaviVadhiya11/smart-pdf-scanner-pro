@@ -1848,33 +1848,35 @@ class MainActivity : AppCompatActivity() {
     private fun showPrivacyPolicy() {
         val policy = """
             DOCNEXA – PRIVACY POLICY
-            Last updated: 13 November 2026
+            Last updated: 17 November 2026
 
-            1. Information you provide
-            If you create an account, your email address and the name you enter may be processed by the app's authentication service (Supabase). Your password is handled by that authentication service; do not share it with anyone.
+            1. Account information
+            Supabase processes your email address, account ID, authentication credentials and session tokens to provide sign-in, verification, password recovery, cloud sync and account deletion. DocNexa does not store your password in readable form.
 
-            2. Documents and files
-            PDFs created or imported in the app are saved on your device in DocNexa app storage. If you choose Cloud Sync while signed in, document files may be uploaded to the configured Supabase storage service so they can be restored on another device. Do not upload documents unless you are comfortable storing them with that service.
+            2. Documents and permissions
+            Scans, images and PDFs are processed to provide scanner, OCR, conversion and PDF tools. Local documents are stored in private app storage. Camera is used when you choose scanning or live QR scanning. Android's file picker is used when you choose a file. The app does not automatically upload every local document.
 
-            3. Camera, photos and files
-            Camera access is used for document scanning. Photo/file access is used only when you choose to import or open documents. The app processes the selected content to provide its scanner and PDF features.
+            3. Optional Cloud Sync
+            When you sign in and choose Cloud Sync, PDFs are uploaded to a private Supabase Storage bucket in a folder associated with your account ID. Signing out does not delete cloud files. In-app account deletion removes your DocNexa cloud account and its synced PDFs when the deletion service succeeds. Local files and copies exported elsewhere remain on your device.
 
-            4. Internet and service providers
-            Sign-in, email verification, password recovery and optional cloud storage require an internet connection and are provided through Supabase. Those services process data under their own terms and privacy policies.
+            4. AI features
+            When you choose an AI document feature, extracted document text and the task/prompt are sent over HTTPS to DocNexa's Supabase-hosted AI service for processing. Do not submit sensitive information unless you are comfortable with this processing. AI results can be inaccurate.
 
-            5. Local storage and security
-            Local PDFs and app account session information may be stored on your device. Protect your device with a screen lock. No internet service can be guaranteed completely secure.
+            5. Analytics and diagnostics
+            The app uses Firebase Analytics for app usage events, Crashlytics for crash diagnostics, Firebase Performance Monitoring for performance data, Remote Config for app settings/announcements, and Firebase Cloud Messaging for service announcements. These services may process app/device identifiers, app and device information, diagnostic data and notification tokens.
 
-            6. Sharing and deletion
-            The app does not send a document to another person unless you choose a share/export action or enable cloud sync. You can delete local PDFs from your device. Removing the app or signing out may not delete files already uploaded to cloud storage; cloud copies may need to be deleted separately.
+            6. Advertising
+            DocNexa contains Google Mobile Ads, including native ads. Google and its advertising partners may process device identifiers, IP-derived approximate location, ad interactions and advertising information to deliver, measure and protect ads, subject to device settings and Google's policies.
 
-            7. Children
-            DocNexa is not designed to knowingly collect personal information from children.
+            7. Sharing, retention and deletion
+            The app does not share a document with another person unless you choose an export/share action. Local files remain until you delete them, clear app data or uninstall the app. Exported copies may remain in other apps or folders. Cloud files remain until deleted through account features or account deletion. Service providers may retain diagnostics and advertising data under their own policies.
 
-            8. Changes and contact
-            This policy may be updated as app features change. For privacy questions, use Contact us in the app and include “Privacy request” in your message.
+            8. Children, security and contact
+            DocNexa is not designed for children. Network requests to DocNexa services use HTTPS and local documents are stored in Android app-private storage. No system is completely secure. For privacy questions, contact business@pixelfirestudio.in.
 
-            Important: This in-app policy describes the current intended app behaviour. Before public release, the developer should publish a permanent public policy URL and verify the actual Supabase storage and retention settings.
+            Full policy and external account deletion request:
+            https://ravivadhiya11.github.io/smart-pdf-scanner-pro/privacy-policy.html
+            https://ravivadhiya11.github.io/smart-pdf-scanner-pro/delete-account.html
         """.trimIndent()
         val view = TextView(this).apply {
             text = policy
@@ -1885,7 +1887,12 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { addView(view) }
         showPremiumDialog(appDialog().setTitle("Privacy Policy")
             .setView(scroll).setPositiveButton("Close", null)
-            .setNeutralButton("Privacy question") { _, _ -> openFeedbackEmail(false) })
+            .setNeutralButton("Open online policy") { _, _ ->
+                CustomTabsIntent.Builder().build().launchUrl(
+                    this,
+                    Uri.parse("https://ravivadhiya11.github.io/smart-pdf-scanner-pro/privacy-policy.html")
+                )
+            })
     }
 
     private fun showTermsOfUse() {
@@ -1914,7 +1921,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDataHelp() {
         appDialog().setTitle("Your data and account")
-            .setMessage("Local PDFs are stored inside DocNexa and may be removed when you uninstall the app or clear app data. Use Save As to keep a separate device copy. Cloud sync is optional and requires you to sign in. Signing out only removes the account session from this device; it does not automatically erase PDFs saved locally or cloud copies. To request help with account or privacy data, use Contact us and describe what you want removed. Never send your password.")
+            .setMessage("Local PDFs are stored inside DocNexa and may be removed when you uninstall the app or clear app data. Use Save As to keep a separate device copy. Cloud sync is optional. Signing out does not erase local PDFs or cloud copies. In-app account deletion removes your DocNexa cloud account and synced cloud PDFs when successful; local and exported copies remain. You can also request deletion at https://ravivadhiya11.github.io/smart-pdf-scanner-pro/delete-account.html. Never send your password.")
             .setPositiveButton("OK", null)
             .setNeutralButton("Contact support") { _, _ -> openFeedbackEmail(false) }.show()
     }
