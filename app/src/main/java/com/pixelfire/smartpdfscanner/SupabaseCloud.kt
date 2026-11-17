@@ -13,7 +13,7 @@ internal object SupabaseCloud {
     private const val API_KEY = "sb_publishable_GYXmh25W433C0ll6i8ldEw_tf37VR2K"
     private const val BUCKET = "docnexa-pdfs"
 
-    data class AuthResult(val accessToken: String, val userId: String, val message: String)
+    data class AuthResult(val accessToken: String, val userId: String, val message: String, val refreshToken: String = "")
     data class OAuthResult(val accessToken: String, val refreshToken: String, val userId: String, val email: String)
 
     fun buildOAuthUrl(provider: String, redirectUri: String, codeChallenge: String, state: String): String {
@@ -65,7 +65,20 @@ internal object SupabaseCloud {
                 json.optString("msg").ifBlank { json.optString("message", "Sign-in did not return a session.") }
             return AuthResult("", "", msg)
         }
-        return AuthResult(token, userId, "Signed in")
+        if (userId.isBlank()) throw IllegalStateException("Supabase did not return an account ID.")
+        return AuthResult(token, userId, "Signed in", json.optString("refresh_token"))
+    }
+
+    fun refreshSession(refreshToken: String): OAuthResult {
+        require(refreshToken.isNotBlank()) { "No refresh token is available. Please sign in again." }
+        val payload = JSONObject().put("refresh_token", refreshToken).toString().toByteArray(Charsets.UTF_8)
+        val json = JSONObject(request("POST", "/auth/v1/token?grant_type=refresh_token", payload, "application/json"))
+        val user = json.optJSONObject("user") ?: JSONObject()
+        val access = json.optString("access_token")
+        val nextRefresh = json.optString("refresh_token")
+        val userId = user.optString("id")
+        if (access.isBlank() || userId.isBlank()) throw IllegalStateException("Could not refresh the DocNexa session. Please sign in again.")
+        return OAuthResult(access, nextRefresh, userId, user.optString("email"))
     }
 
 
