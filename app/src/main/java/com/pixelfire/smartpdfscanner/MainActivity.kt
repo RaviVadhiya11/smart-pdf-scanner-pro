@@ -2025,6 +2025,10 @@ class MainActivity : AppCompatActivity() {
         val raw = intent?.getStringExtra("notification_pdf_uri") ?: return
         intent.removeExtra("notification_pdf_uri")
         val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return
+        if (uri.authority == "$packageName.fileprovider" && privateDocumentFile(uri) == null) {
+            Toast.makeText(this, "This PDF belongs to a different DocNexa account. Sign in to that account to open it.", Toast.LENGTH_LONG).show()
+            return
+        }
         window.decorView.post { if (!isFinishing && !isDestroyed) openPdf(uri) }
     }
 
@@ -2392,6 +2396,9 @@ class MainActivity : AppCompatActivity() {
                     .remove("cloud_email")
                     .apply()
                 lastPdf = null
+                pendingDocumentNotification = null
+                pendingDocumentUri = null
+                androidx.core.app.NotificationManagerCompat.from(this).cancel(2101)
                 loadFolders()
                 Toast.makeText(this, "Signed out. This account’s PDFs are kept separate and safe.", Toast.LENGTH_LONG).show()
                 buildScreen()
