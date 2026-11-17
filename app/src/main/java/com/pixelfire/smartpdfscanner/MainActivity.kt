@@ -1607,7 +1607,13 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
         }
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            setPadding(0, 0, 0, dp(8))
+        }
         val menu = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, dp(20))
@@ -2142,7 +2148,7 @@ class MainActivity : AppCompatActivity() {
         }
         password.background = null
         password.setPadding(dp(15), dp(12), dp(4), dp(12))
-        passwordRow.addView(password, LinearLayout.LayoutParams(0, dp(46), 1f))
+        passwordRow.addView(password, LinearLayout.LayoutParams(0, dp(50), 1f))
         val showPassword = TextView(this).apply {
             text = "SHOW"
             textSize = 10f
@@ -2197,7 +2203,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(0xFFFFFFFF.toInt())
             background = gradient(0xFF8B5CF6.toInt(), 0xFF4F46E5.toInt(), 14)
             backgroundTintList = null
-            layoutParams = LinearLayout.LayoutParams(-1, dp(54))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(50))
         }
         content.addView(submit)
         content.addView(gap(11))
@@ -2222,11 +2228,11 @@ class MainActivity : AppCompatActivity() {
             }
         socialButtons.addView(
             socialButton("G   Google", 0xFFF8FAFF.toInt(), 0xFF26314C.toInt(), "google"),
-            LinearLayout.LayoutParams(0, dp(50), 1f).apply { rightMargin = dp(6) }
+            LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) }
         )
         socialButtons.addView(
             socialButton("f   Facebook", 0xFF1877F2.toInt(), 0xFFFFFFFF.toInt(), "facebook"),
-            LinearLayout.LayoutParams(0, dp(50), 1f).apply { leftMargin = dp(6) }
+            LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) }
         )
         content.addView(socialButtons)
         content.addView(gap(8))
