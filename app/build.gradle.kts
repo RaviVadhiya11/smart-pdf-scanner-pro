@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,7 +16,7 @@ val hasReleaseSigning = !releaseStorePath.isNullOrBlank() &&
     !releaseStorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank() &&
-    java.io.File(releaseStorePath).isFile
+    releaseStorePath?.let { File(it).isFile } == true
 
 android {
     signingConfigs {
