@@ -1787,7 +1787,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openFeedbackEmail(reportBug: Boolean, feedback: Boolean = false) {
-        val recipient = "support@pixelfirestudio.in"
+        val recipient = "business@pixelfirestudio.in"
         val subject = when {
             reportBug -> "DocNexa bug report"
             feedback -> "DocNexa app feedback"
