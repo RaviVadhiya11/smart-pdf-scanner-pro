@@ -5,6 +5,14 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PdfPagePlanTest {
+    @Test fun quickPageSelectionsSupportAllOddAndEven() {
+        assertEquals(listOf(0, 1, 2, 3, 4), PdfPagePlan.selection("ALL", 5))
+        assertEquals(listOf(0, 2, 4), PdfPagePlan.selection(" odd ", 5))
+        assertEquals(listOf(1, 3), PdfPagePlan.selection("Even", 5))
+        assertEquals(listOf(0, 2, 4), PdfPagePlan.build(PdfPagePlan.Operation.EXTRACT, "odd", 5))
+        assertEquals(listOf(0, 2, 4), PdfPagePlan.build(PdfPagePlan.Operation.DELETE, "even", 5))
+        assertThrows(IllegalArgumentException::class.java) { PdfPagePlan.selection("even", 1) }
+    }
     @Test fun extractPreservesRequestedOrderAndReverseRanges() {
         assertEquals(listOf(4, 2, 1, 0), PdfPagePlan.build(PdfPagePlan.Operation.EXTRACT, "5, 3-1", 5))
     }
