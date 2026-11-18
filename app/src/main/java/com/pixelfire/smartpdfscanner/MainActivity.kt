@@ -1401,25 +1401,72 @@ class MainActivity : AppCompatActivity() {
     // available document providers. MIME filtering is deliberately broad here,
     // while unsupported formats are handled safely after selection.
     private fun showEditCreateFileChoices() {
-        appDialog()
-            .setTitle("Edit or Create PDF")
-            .setItems(arrayOf(
-                "Browse all files (PDF, images, documents)",
-                "Edit an existing PDF",
-                "Create PDF from images",
-                "Merge PDF documents",
-                "PDF tools"
-            )) { _, which ->
-                when (which) {
-                    0 -> allFilesPicker.launch(arrayOf("*/*"))
-                    1 -> pdfEditorPicker.launch(arrayOf("application/pdf"))
-                    2 -> imagePicker.launch(arrayOf("image/*"))
-                    3 -> mergePicker.launch(arrayOf("application/pdf"))
-                    else -> showPdfTools()
+        val options = arrayOf(
+            "📁  Browse all files",
+            "📝  Edit an existing PDF",
+            "🖼  Create PDF from images",
+            "📑  Merge PDF documents",
+            "🛠  Advanced PDF tools",
+            "📄  Word / Excel / PowerPoint"
+        )
+        val descriptions = arrayOf(
+            "Browse PDF, images and other documents on your device",
+            "Open a PDF in the editor",
+            "Select multiple photos to make a PDF",
+            "Combine two or more PDF files",
+            "Explore editing and document utilities",
+            "Office document conversion is not available yet"
+        )
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        val dialog = appDialog().setTitle("Edit or Create PDF")
+            .setView(android.widget.ScrollView(this).apply { addView(container) })
+            .setNegativeButton("Close", null)
+            .create()
+        options.forEachIndexed { index, title ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (index % 2 == 0) 0xFFF0F5FC.toInt() else 0xFFFFFFFF.toInt())
+                    cornerRadius = dp(14).toFloat()
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    when (index) {
+                        0 -> allFilesPicker.launch(arrayOf("*/*"))
+                        1 -> pdfEditorPicker.launch(arrayOf("application/pdf"))
+                        2 -> imagePicker.launch(arrayOf("image/*"))
+                        3 -> mergePicker.launch(arrayOf("application/pdf"))
+                        4 -> showPdfTools()
+                        else -> appDialog()
+                            .setTitle("Office to PDF")
+                            .setMessage("Word, Excel and PowerPoint files can be browsed, but direct conversion is not supported in this version. Please export the document as PDF using an Office app, then open it here.")
+                            .setPositiveButton("OK", null).show()
+                    }
                 }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            item.addView(android.widget.TextView(this).apply {
+                text = title
+                textSize = 17f
+                setTextColor(0xFF132D50.toInt())
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+            item.addView(android.widget.TextView(this).apply {
+                text = descriptions[index]
+                textSize = 12f
+                setTextColor(0xFF526579.toInt())
+                setPadding(0, dp(4), 0, 0)
+            })
+            container.addView(item, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(8)
+            })
+        }
+        dialog.show()
     }
 
     private fun showHomeOverflowMenu(anchor: View) {
