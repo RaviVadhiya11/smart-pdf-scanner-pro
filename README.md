@@ -18,7 +18,7 @@ Native Android app using Kotlin and Google ML Kit Document Scanner.
 3. Open the completed run and download **Smart-PDF-Scanner-Pro-Android-Builds**.
 4. Extract the artifact ZIP:
    - `app-debug.apk` is for installing and testing on an Android phone.
-   - `app-release.aab` is the release bundle, currently unsigned.
+   - `app-release.aab` is the release bundle. It is signed only when all four required signing secrets are configured; CI now fails if any are missing.
 
 ## Local build requirements
 JDK 17, Android SDK Platform 36, Build Tools 36.0.0 and Gradle 8.14.4.
@@ -29,7 +29,7 @@ Without signing secrets, the workflow produces an unsigned release AAB. A privat
 To enable signed releases, create an upload keystore privately and configure GitHub Actions repository secrets named `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The workflow decodes the keystore to a temporary runner file and signs the release AAB when all four secrets are present. Never paste passwords or keystore data into chat or a public issue.
 
 ## Scope and testing
-This is a first native scanning version, not yet a full PDF editor. OCR/search, merging existing PDFs, compression settings, password protection, persistent scan history and in-app PDF editing are not included. Test on physical devices before Play submission.
+The current app includes code and dependencies for scanning, OCR, PDF editing and document utilities, cloud features, and advertising. Their complete behavior is not established by a successful CI build. Test every user-facing action on physical devices, including error states, large files, permissions, consent, authentication and account deletion, before Play submission.
 
 
 ## Play Store readiness checklist
@@ -39,5 +39,5 @@ This is a first native scanning version, not yet a full PDF editor. OCR/search, 
   - `https://ravivadhiya11.github.io/smart-pdf-scanner-pro/privacy-policy.html`
   - `https://ravivadhiya11.github.io/smart-pdf-scanner-pro/delete-account.html`
 - The app contains Google Mobile Ads and must be declared as **Contains ads** in Play Console. Complete the Data safety, target audience, content rating, app access and account deletion declarations accurately.
-- The current release bundle is unsigned unless an upload keystore is configured. Create a private upload keystore and add the four GitHub Actions secrets documented above before attempting a Play Console upload. Never commit the keystore or its passwords.
+- The release workflow requires all four signing secrets and fails if they are missing. Create a private upload keystore and add the four GitHub Actions secrets documented above before attempting a Play Console upload. Never commit the keystore or its passwords.
 - Complete a physical-device test of sign-up, email confirmation, sign-in, account switching, scan/save/open/share, cloud sync, account deletion, notifications, offline behaviour and ads before production release.
