@@ -13,6 +13,15 @@ internal object PdfPagePlan {
         require(total > 0) { "This PDF has no pages." }
         require(value.isNotBlank()) { "Enter page numbers or ranges." }
         require(value.length <= 50000) { "The page list is too long." }
+        // Advanced quick selections for PDF editing: all, odd and even pages.
+        // These are 1-based page numbers, converted to zero-based indices.
+        when (value.trim().lowercase(java.util.Locale.ROOT)) {
+            "all" -> return (0 until total).toList()
+            "odd" -> return (0 until total step 2).toList()
+            "even" -> return (1 until total step 2).toList().also {
+                require(it.isNotEmpty()) { "This PDF has no even-numbered pages." }
+            }
+        }
         val selected = ArrayList<Int>()
         val seen = HashSet<Int>()
         for (part in value.split(',')) {
