@@ -21,7 +21,7 @@ Native Android app using Kotlin and Google ML Kit Document Scanner.
    - `app-release.aab` is the release bundle, currently unsigned.
 
 ## Local build requirements
-JDK 17, Android SDK Platform 36, Build Tools 36.0.0 and Gradle 8.13.
+JDK 17, Android SDK Platform 36, Build Tools 36.0.0 and Gradle 8.14.4.
 Run `gradle :app:assembleDebug` for APK or `gradle :app:bundleRelease` for AAB.
 
 ## Play Store signing — keep credentials private
