@@ -64,6 +64,9 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.gms.ads.nativead.NativeAdView
 import com.google.android.gms.ads.MobileAds
+import com.google.android.ump.ConsentInformation
+import com.google.android.ump.ConsentRequestParameters
+import com.google.android.ump.UserMessagingPlatform
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
@@ -319,6 +322,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val loadedNativeAds = mutableListOf<NativeAd>()
+    private var adsConsentAllowed = false
+    private var privacyOptionsRequired = false
     private lateinit var status: TextView
     private lateinit var recent: TextView
     private var lastPdf: Uri? = null
@@ -514,6 +519,50 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private fun requestAdConsent() {
+        val consentInfo = UserMessagingPlatform.getConsentInformation(this)
+        val params = ConsentRequestParameters.Builder().build()
+        consentInfo.requestConsentInfoUpdate(
+            this,
+            params,
+            {
+                UserMessagingPlatform.loadAndShowConsentFormIfRequired(this) { formError ->
+                    privacyOptionsRequired = consentInfo.privacyOptionsRequirementStatus ==
+                        ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+                    adsConsentAllowed = consentInfo.canRequestAds()
+                    if (adsConsentAllowed) {
+                        MobileAds.initialize(this) {
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) buildScreen()
+                            }
+                        }
+                    } else if (formError != null) {
+                        android.util.Log.w("DocNexa", "Consent form not available: ${formError.message}")
+                    }
+                }
+            },
+            { error ->
+                android.util.Log.w("DocNexa", "Consent info update failed: ${error.message}")
+                adsConsentAllowed = consentInfo.canRequestAds()
+                if (adsConsentAllowed) {
+                    MobileAds.initialize(this) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) buildScreen()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    private fun showPrivacyChoices() {
+        UserMessagingPlatform.showPrivacyOptionsForm(this) { formError ->
+            if (formError != null) {
+                Toast.makeText(this, "Privacy options could not be opened: ${formError.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     private fun initializeRemoteConfig() {
         // Defaults keep the app safe and usable even when Remote Config is offline.
         val remoteConfig = FirebaseRemoteConfig.getInstance()
@@ -554,8 +603,8 @@ class MainActivity : AppCompatActivity() {
         FirebaseMessaging.getInstance().subscribeToTopic("docnexa_announcements")
             .addOnFailureListener { error -> android.util.Log.w("DocNexa", "Announcement topic subscription failed", error) }
         PDFBoxResourceLoader.init(applicationContext)
-        MobileAds.initialize(this) {}
         buildScreen()
+        requestAdConsent()
         openNotificationPdf(intent)
         initializeRemoteConfig()
         pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
@@ -1388,6 +1437,7 @@ class MainActivity : AppCompatActivity() {
             if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
             true
         }
+        popup.menu.add("Privacy choices").setOnMenuItemClickListener { showPrivacyChoices(); true }
         popup.menu.add("View Mode").setOnMenuItemClickListener {
             appDialog().setTitle("View mode")
                 .setSingleChoiceItems(arrayOf("List view", "Grid view"), prefs.getInt("document_view_mode", 0)) { dialog, which ->
@@ -3711,6 +3761,7 @@ class MainActivity : AppCompatActivity() {
      * The ad is inserted between Quick Access and the PDF Tools grid.
      */
     private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount): () -> Unit {
+        if (!adsConsentAllowed) return {}
         val disposed = AtomicBoolean(false)
         var displayedAd: NativeAd? = null
         var displayedAdView: NativeAdView? = null
