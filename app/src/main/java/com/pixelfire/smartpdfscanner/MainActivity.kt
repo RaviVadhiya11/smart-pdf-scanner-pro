@@ -1400,6 +1400,67 @@ class MainActivity : AppCompatActivity() {
     // The Android system document picker provides Downloads, device storage and
     // available document providers. MIME filtering is deliberately broad here,
     // while unsupported formats are handled safely after selection.
+    private val officeDocumentPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) convertOfficeTextToPdf(uri)
+    }
+
+    // Basic offline text conversion, not a layout-preserving Office renderer.
+    private fun convertOfficeTextToPdf(uri: Uri) {
+        Thread {
+            try {
+                val name = android.provider.OpenableColumns.DISPLAY_NAME.let { column ->
+                    contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    }
+                } ?: "Office document"
+                val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                require(ext in setOf("docx", "xlsx", "pptx")) { "Select a DOCX, XLSX or PPTX file" }
+                val entryPattern = when (ext) {
+                    "docx" -> Regex("^word/document\\.xml$")
+                    "xlsx" -> Regex("^xl/(sharedStrings|worksheets/sheet[0-9]+)\\.xml$")
+                    else -> Regex("^ppt/slides/slide[0-9]+\\.xml$")
+                }
+                val parts = mutableListOf<Pair<String, String>>()
+                contentResolver.openInputStream(uri)?.use { stream ->
+                    java.util.zip.ZipInputStream(stream).use { zip ->
+                        var entry = zip.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory && entry.name.matches(entryPattern)) {
+                                val xml = zip.readBytes().toString(Charsets.UTF_8)
+                                require(xml.length <= 5_000_000) { "Document section too large" }
+                                val text = when (ext) {
+                                    "docx" -> xml.replace(Regex("</w:p>"), "\\n")
+                                        .replace(Regex("<w:tab[^>]*/>"), " ")
+                                    "pptx" -> xml.replace(Regex("</a:p>"), "\\n")
+                                    else -> xml.replace(Regex("</row>"), "\\n")
+                                        .replace(Regex("</c>"), " | ")
+                                }.replace(Regex("<[^>]*>"), "")
+                                    .replace("&amp;", "&").replace("&lt;", "<")
+                                    .replace("&gt;", ">").replace("&quot;", "\"")
+                                    .replace("&apos;", "'").trim()
+                                if (text.isNotBlank()) parts.add(entry.name to text)
+                            }
+                            entry = zip.nextEntry
+                        }
+                    }
+                } ?: error("Cannot read document")
+                val content = parts.sortedBy { it.first }.joinToString("\\n\\n") { it.second }
+                require(content.isNotBlank()) { "No readable text found in this Office file" }
+                require(content.length <= 500_000) { "Document text is too large for basic conversion" }
+                runOnUiThread {
+                    appDialog().setTitle("Create text-based PDF?")
+                        .setMessage("This offline conversion extracts readable text only. Tables, images, charts, slide layouts, fonts and formatting may be lost. For an exact PDF, export from an Office app. Continue?")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Create PDF") { _, _ ->
+                            createPdfFromText(content, name.substringBeforeLast('.').take(70))
+                        }.show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, e.message ?: "Could not read Office file", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
     private fun showEditCreateFileChoices() {
         val options = arrayOf(
             "📁  Browse all files",
@@ -1415,7 +1476,7 @@ class MainActivity : AppCompatActivity() {
             "Select multiple photos to make a PDF",
             "Combine two or more PDF files",
             "Explore editing and document utilities",
-            "Office document conversion is not available yet"
+            "Basic offline text-only PDF conversion (formatting may be lost)"
         )
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1443,10 +1504,7 @@ class MainActivity : AppCompatActivity() {
                         2 -> imagePicker.launch(arrayOf("image/*"))
                         3 -> mergePicker.launch(arrayOf("application/pdf"))
                         4 -> showPdfTools()
-                        else -> appDialog()
-                            .setTitle("Office to PDF")
-                            .setMessage("Word, Excel and PowerPoint files can be browsed, but direct conversion is not supported in this version. Please export the document as PDF using an Office app, then open it here.")
-                            .setPositiveButton("OK", null).show()
+                        else -> officeDocumentPicker.launch(arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation"))
                     }
                 }
             }
