@@ -25,7 +25,7 @@ JDK 17, Android SDK Platform 36, Build Tools 36.0.0 and Gradle 8.14.4.
 Run `gradle :app:assembleDebug` for APK or `gradle :app:bundleRelease` for AAB.
 
 ## Play Store signing — keep credentials private
-Without signing secrets, the workflow produces an unsigned release AAB. A private upload keystore is required for a Play Store upload. Do not commit a keystore or passwords to this public repository.
+The GitHub Actions workflow stops with an explicit error when any required signing secret is missing; it does not publish an unsigned release artifact. A private upload keystore is required for a Play Store upload. Do not commit a keystore or passwords to this public repository.
 To enable signed releases, create an upload keystore privately and configure GitHub Actions repository secrets named `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The workflow decodes the keystore to a temporary runner file and signs the release AAB when all four secrets are present. Never paste passwords or keystore data into chat or a public issue.
 
 ## Scope and testing
