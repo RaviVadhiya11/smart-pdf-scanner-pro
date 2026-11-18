@@ -1397,6 +1397,31 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
+    // The Android system document picker provides Downloads, device storage and
+    // available document providers. MIME filtering is deliberately broad here,
+    // while unsupported formats are handled safely after selection.
+    private fun showEditCreateFileChoices() {
+        appDialog()
+            .setTitle("Edit or Create PDF")
+            .setItems(arrayOf(
+                "Browse all files (PDF, images, documents)",
+                "Edit an existing PDF",
+                "Create PDF from images",
+                "Merge PDF documents",
+                "PDF tools"
+            )) { _, which ->
+                when (which) {
+                    0 -> allFilesPicker.launch(arrayOf("*/*"))
+                    1 -> pdfEditorPicker.launch(arrayOf("application/pdf"))
+                    2 -> imagePicker.launch(arrayOf("image/*"))
+                    3 -> mergePicker.launch(arrayOf("application/pdf"))
+                    else -> showPdfTools()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showHomeOverflowMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
@@ -1791,7 +1816,7 @@ class MainActivity : AppCompatActivity() {
         section("Tools")
         item("⚒", "PDF Tools") { showPdfTools() }
         item("✦", "AI Document Assistant") { showAiAssistant() }
-        item("▣", "Edit/Create PDF") { imagePicker.launch(arrayOf("image/*")) }
+        item("▣", "Edit/Create PDF") { showEditCreateFileChoices() }
         item("✍", "Signature") { openSignatureEditor() }
         item("▦", "QR Scanner") { showQrScanner() }
         item("▦", "QR Generator") { showQrGenerator() }
