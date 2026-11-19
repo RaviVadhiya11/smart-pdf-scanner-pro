@@ -479,6 +479,79 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val printPdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) printPdfDocument(uri)
+    }
+
+    private fun printPdfDocument(uri: Uri) {
+        try {
+            val manager = getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
+            val displayName = "DocNexa PDF"
+            val adapter = object : android.print.PrintDocumentAdapter() {
+                override fun onLayout(
+                    oldAttributes: android.print.PrintAttributes?,
+                    newAttributes: android.print.PrintAttributes?,
+                    cancellationSignal: android.os.CancellationSignal,
+                    callback: LayoutResultCallback,
+                    extras: Bundle?
+                ) {
+                    if (cancellationSignal.isCanceled) {
+                        callback.onLayoutCancelled()
+                        return
+                    }
+                    try {
+                        val descriptor = contentResolver.openFileDescriptor(uri, "r")
+                            ?: throw java.io.IOException("Cannot open PDF")
+                        val count = PdfRenderer(descriptor).use { it.pageCount }
+                        val info = android.print.PrintDocumentInfo.Builder("DocNexa_Document.pdf")
+                            .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(count)
+                            .build()
+                        callback.onLayoutFinished(info, true)
+                    } catch (e: Exception) {
+                        callback.onLayoutFailed(e.localizedMessage ?: "Unable to read PDF")
+                    }
+                }
+
+                override fun onWrite(
+                    pages: Array<out android.print.PageRange>,
+                    destination: ParcelFileDescriptor,
+                    cancellationSignal: android.os.CancellationSignal,
+                    callback: WriteResultCallback
+                ) {
+                    try {
+                        if (cancellationSignal.isCanceled) {
+                            callback.onWriteCancelled()
+                            return
+                        }
+                        contentResolver.openInputStream(uri).use { input ->
+                            if (input == null) throw java.io.IOException("Cannot read selected PDF")
+                            android.os.ParcelFileDescriptor.AutoCloseOutputStream(destination).use { output ->
+                                val buffer = ByteArray(32768)
+                                while (true) {
+                                    if (cancellationSignal.isCanceled) {
+                                        callback.onWriteCancelled()
+                                        return
+                                    }
+                                    val size = input.read(buffer)
+                                    if (size < 0) break
+                                    output.write(buffer, 0, size)
+                                }
+                                output.flush()
+                            }
+                        }
+                        callback.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                    } catch (e: Exception) {
+                        callback.onWriteFailed(e.localizedMessage ?: "PDF printing failed")
+                    }
+                }
+            }
+            manager.print(displayName, adapter, android.print.PrintAttributes.Builder().build())
+        } catch (e: Exception) {
+            Toast.makeText(this, e.localizedMessage ?: "Printing unavailable", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private val pdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val signature = signaturePng
@@ -3735,6 +3808,7 @@ class MainActivity : AppCompatActivity() {
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { pdfToImagePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
             PdfTool("Scanner Filters", "◐", 0xFF0D9488.toInt()) { showScannerFilterSettings() },
+            PdfTool("Print PDF", "▤", 0xFF2563EB.toInt()) { printPdfPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
                 lastPdf?.let { uri ->
                     val share = Intent(Intent.ACTION_SEND).setType("application/pdf")
