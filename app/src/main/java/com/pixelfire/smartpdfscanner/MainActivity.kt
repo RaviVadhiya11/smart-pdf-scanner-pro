@@ -5464,6 +5464,42 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { Toast.makeText(this@MainActivity, "Choose a tool to apply changes and save a new PDF.", Toast.LENGTH_LONG).show() }
         })
         root.addView(header); root.addView(gap(12))
+        val quickBar = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val quickActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(6), dp(4), dp(10))
+        }
+        fun quickEdit(title: String, symbol: String, action: () -> Unit) {
+            val button = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                background = rounded(0xFF202B3A.toInt(), 12)
+                setOnClickListener { action() }
+            }
+            button.addView(label(symbol, 22f, 0xFF80BFFF.toInt(), true).apply {
+                gravity = Gravity.CENTER
+            })
+            button.addView(label(title, 11f, 0xFFFFFFFF.toInt()).apply {
+                gravity = Gravity.CENTER
+            })
+            quickActions.addView(button, LinearLayout.LayoutParams(dp(94), dp(82)).apply {
+                marginEnd = dp(6)
+            })
+        }
+        quickEdit("Preview", "▣") { openPdf(uri) }
+        quickEdit("Text", "T") { addTextToPdfDialog(uri) }
+        quickEdit("Signature", "✍") { openSignatureEditor(uri) }
+        quickEdit("Watermark", "▧") { addWatermarkDialog(uri) }
+        quickEdit("Whitener", "□") { addWhitenerDialog(uri) }
+        quickEdit("Shapes", "◇") { addShapeDialog(uri) }
+        quickEdit("Rotate", "↻") { rotatePdfPages(uri) }
+        quickEdit("Pages", "⇅") { showPageOrganizer(uri, PdfPagePlan.Operation.REORDER) }
+        quickEdit("Print", "▤") { printPdfDocument(uri) }
+        quickEdit("Share", "↗") { sharePdf(uri) }
+        quickBar.addView(quickActions)
+        root.addView(quickBar)
+        root.addView(gap(8))
         root.addView(label("EDIT PDF", 12f, 0xFF55A7FF.toInt(), true)); root.addView(gap(10))
         val scroller = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -5498,6 +5534,7 @@ class MainActivity : AppCompatActivity() {
         editorAction("Split PDF", "Split this PDF into two files", "⇄") { splitPdfFile(uri) }
         editorAction("Extract Text", "Copy searchable PDF text", "Aa") { extractPdfText(uri) }
         editorAction("PDF Details", "View page count and file information", "ⓘ") { showPdfDetails(uri) }
+        editorAction("Print PDF", "Open Android print preview and printer settings", "▤") { printPdfDocument(uri) }
         editorAction("Share PDF", "Share the original PDF", "↗") { sharePdf(uri) }
         scroller.addView(list); root.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
         setScreenContent(root)
