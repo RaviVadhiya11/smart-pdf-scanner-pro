@@ -791,6 +791,12 @@ class MainActivity : AppCompatActivity() {
             shortcut("All") { choose((0 until count).toList()) }
             shortcut("Odd") { choose((0 until count).filter { it % 2 == 0 }) }
             shortcut("Even") { choose((0 until count).filter { it % 2 == 1 }) }
+            shortcut("First half") { choose((0 until ((count + 1) / 2)).toList()) }
+            shortcut("Last half") { choose(((count + 1) / 2 until count).toList()) }
+            shortcut("Invert") {
+                val current = selection().toSet()
+                choose((0 until count).filterNot { it in current })
+            }
             shortcut("Clear") { choose(emptyList()) }
         }
         fun render() {
