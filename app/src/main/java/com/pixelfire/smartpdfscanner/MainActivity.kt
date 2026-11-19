@@ -6223,13 +6223,27 @@ class MainActivity : AppCompatActivity() {
                                 val first = renderer.openPage(0).use { page ->
                                     "${page.width} × ${page.height} px"
                                 }
-                                "PDF readable • $count page(s) • First page: $first"
+                                var inspected = 1
+                                var failed = 0
+                                val sampleLimit = minOf(count, 25)
+                                for (index in 1 until sampleLimit) {
+                                    try {
+                                        renderer.openPage(index).use { page ->
+                                            if (page.width <= 0 || page.height <= 0) failed++
+                                        }
+                                        inspected++
+                                    } catch (_: Exception) {
+                                        failed++
+                                    }
+                                }
+                                val result = if (failed == 0) "No errors found in sampled pages" else "$failed sampled page(s) failed inspection"
+                                "PDF opened • $count page(s) • First page: $first • Checked: $inspected/$count • $result"
                             }
                             runOnUiThread {
                                 if (!isFinishing && !isDestroyed) {
                                     updateResultStatus(report)
                                     appDialog().setTitle("PDF Integrity Report")
-                                        .setMessage("File: ${item.fileName}\\n\\n$report\\n\\nThis checks that Android can open the PDF and read its first page. It is not a full corruption scan.")
+                                        .setMessage("File: ${item.fileName}\\n\\n$report\\n\\nThis checks up to 25 pages for basic readability. It does not guarantee the entire PDF is free from corruption.")
                                         .setPositiveButton("OK", null).show()
                                 }
                             }
