@@ -6155,6 +6155,38 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             panel.addView(destinationGrid)
+            panel.addView(gap(10))
+            panel.addView(label("ADVANCED FILE TOOLS", 12f, 0xFF52627A.toInt(), true))
+            panel.addView(gap(6))
+            val advancedPdfRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val compressResult = resultButton("↓ Compress PDF", false) {
+                val item = exportResults.selected
+                if (item?.mime == "application/pdf") {
+                    showCompressionOptions(Uri.parse(item.uri))
+                } else updateResultStatus("Compression is available for PDF files.")
+            }
+            val passwordResult = resultButton("🔒 Protect PDF", false) {
+                val item = exportResults.selected
+                if (item?.mime == "application/pdf") {
+                    // Reuse the existing password tool rather than exposing a nonfunctional toggle.
+                    passwordPicker.launch(arrayOf("application/pdf"))
+                    updateResultStatus("Select the PDF to protect in the file picker.")
+                } else updateResultStatus("Password protection is available for PDF files.")
+            }
+            advancedPdfRow.addView(compressResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5) })
+            advancedPdfRow.addView(passwordResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
+            panel.addView(advancedPdfRow)
+            panel.addView(gap(8))
+            val ocrResult = resultButton("🔎 Recognize text in image (OCR)", false) {
+                val item = exportResults.selected
+                if (item?.mime?.startsWith("image/") == true) {
+                    runOcr(Uri.parse(item.uri))
+                } else {
+                    ocrPicker.launch("image/*")
+                    updateResultStatus("Choose an image to recognize text.")
+                }
+            }
+            panel.addView(ocrResult, LinearLayout.LayoutParams(-1, dp(48)))
             panel.addView(gap(8))
             // ZIP is an actual archive containing the selected exported file, not PDF compression.
             val zipButton = resultButton("📦 Create ZIP archive", false) {
