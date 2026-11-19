@@ -7539,6 +7539,11 @@ class MainActivity : AppCompatActivity() {
             adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Small", "Normal", "Large"))
             setSelection(1)
         }
+        val quality = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Standard (smaller file)", "High (sharper text)", "Maximum (larger file)"))
+            setSelection(1)
+        }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(4))
@@ -7548,6 +7553,7 @@ class MainActivity : AppCompatActivity() {
             addView(gap(7)); addView(label("Orientation", 11f, 0xFF263957.toInt(), true)); addView(orientationSpinner)
             addView(gap(7)); addView(label("Image placement", 11f, 0xFF263957.toInt(), true)); addView(fit)
             addView(gap(7)); addView(label("Page margins", 11f, 0xFF263957.toInt(), true)); addView(margin)
+            addView(gap(7)); addView(label("Image quality", 11f, 0xFF263957.toInt(), true)); addView(quality)
         }
         showPremiumDialog(appDialog().setTitle("Image to PDF • Export settings")
             .setView(panel)
@@ -7561,7 +7567,7 @@ class MainActivity : AppCompatActivity() {
                 val width = if (landscape) selected.second else selected.first
                 val height = if (landscape) selected.first else selected.second
                 val margins = listOf(20, 40, 64)[margin.selectedItemPosition.coerceIn(0, 2)]
-                createPdfFromImages(uris, croppedBitmaps, base, width, height, margins, fit.selectedItemPosition == 1, autoFit)
+                createPdfFromImages(uris, croppedBitmaps, base, width, height, margins, fit.selectedItemPosition == 1, autoFit, listOf(1400, 2400, 3072)[quality.selectedItemPosition.coerceIn(0, 2)])
             })
     }
 
@@ -7586,7 +7592,8 @@ class MainActivity : AppCompatActivity() {
         pageHeight: Int = 842,
         margin: Int = 40,
         fillPage: Boolean = false,
-        autoFit: Boolean = false
+        autoFit: Boolean = false,
+        maxImageDimension: Int = 3072
     ) {
         status.text = "Creating PDF from ${uris.size} image(s)…"
         Thread {
@@ -7596,7 +7603,7 @@ class MainActivity : AppCompatActivity() {
                 uris.forEachIndexed { index, uri ->
                     val cached = croppedBitmaps.getOrNull(index)
                     require(cached == null || !cached.isRecycled) { "This image preview has expired. Select the image again." }
-                    val bitmap = cached ?: decodeImageSafely(uri, (maxOf(pageWidth, pageHeight) * 3).coerceAtMost(3072))
+                    val bitmap = cached ?: decodeImageSafely(uri, maxImageDimension.coerceIn(800, 3072))
                     val w = if (autoFit && bitmap.width > bitmap.height) pageHeight else pageWidth
                     val h = if (autoFit && bitmap.width > bitmap.height) pageWidth else pageHeight
                     val pageInfo = PdfDocument.PageInfo.Builder(w, h, index + 1).create()
