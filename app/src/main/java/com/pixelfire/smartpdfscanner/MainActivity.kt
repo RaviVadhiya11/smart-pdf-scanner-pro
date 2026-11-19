@@ -6115,7 +6115,7 @@ class MainActivity : AppCompatActivity() {
                 destinationGrid.addView(gap(8))
             }
             destinationRow(
-                "📱 Phone storage", { exportResults.selected?.let { saveResultAs(it) } }),
+                "📱 Phone storage", { exportResults.selected?.let { saveResultAs(it) } },
                 "📂 My documents", {
                     updateResultStatus("Already saved in DocNexa. Open My Documents to find it.")
                 }
