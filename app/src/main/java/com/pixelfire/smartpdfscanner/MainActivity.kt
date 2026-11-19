@@ -6262,6 +6262,54 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             panel.addView(inspectPdfButton, LinearLayout.LayoutParams(-1, dp(52)))
+            val batchCheckButton = resultButton("✓ Batch check all exported PDFs", false) {
+                val pdfItems = exportResults.items.filter { it.mime == "application/pdf" }
+                if (pdfItems.isEmpty()) {
+                    updateResultStatus("No PDF files available for batch inspection.")
+                } else {
+                    updateResultStatus("Checking ${pdfItems.size} exported PDF(s)…")
+                    Thread {
+                        val lines = mutableListOf<String>()
+                        pdfItems.forEachIndexed { index, item ->
+                            try {
+                                val source = Uri.parse(item.uri)
+                                val fd = contentResolver.openFileDescriptor(source, "r")
+                                    ?: throw java.io.IOException("Cannot open PDF")
+                                val report = PdfRenderer(fd).use { renderer ->
+                                    val count = renderer.pageCount
+                                    if (count < 1) throw java.io.IOException("No readable pages")
+                                    var checked = 0
+                                    for (pageIndex in 0 until minOf(count, 25)) {
+                                        renderer.openPage(pageIndex).use { page ->
+                                            if (page.width < 1 || page.height < 1) throw java.io.IOException("Invalid page dimensions")
+                                        }
+                                        checked++
+                                    }
+                                    "$count pages; $checked checked"
+                                }
+                                lines.add("${index + 1}. ${item.fileName}: OK ($report)")
+                            } catch (e: Exception) {
+                                lines.add("${index + 1}. ${item.fileName}: FAILED (${e.localizedMessage ?: "Unreadable PDF"})")
+                            }
+                        }
+                        val report = lines.joinToString("\\n")
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                updateResultStatus("Batch PDF inspection complete.")
+                                appDialog().setTitle("Batch PDF Inspection")
+                                    .setMessage(report + "\\n\\nUp to 25 pages per PDF were checked for basic readability.")
+                                    .setPositiveButton("Copy report") { _, _ ->
+                                        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DocNexa PDF inspection", report))
+                                        Toast.makeText(this, "Report copied", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .setNegativeButton("Close", null).show()
+                            }
+                        }
+                    }.start()
+                }
+            }
+            panel.addView(batchCheckButton, LinearLayout.LayoutParams(-1, dp(54)))
             panel.addView(gap(8))
             val ocrResult = resultButton("🔎 Recognize text in image (OCR)", false) {
                 val item = exportResults.selected
@@ -6334,6 +6382,7 @@ class MainActivity : AppCompatActivity() {
                 gallery.visibility = if (item.mime.startsWith("image/") && Build.VERSION.SDK_INT >= 29) View.VISIBLE else View.GONE
                 advancedPdfRow.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
                 inspectPdfButton.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
+                batchCheckButton.visibility = if (exportResults.items.count { it.mime == "application/pdf" } > 1) View.VISIBLE else View.GONE
                 ocrResult.visibility = if (item.mime.startsWith("image/") || item.mime == "application/pdf") View.VISIBLE else View.GONE
                 if (displayedUri == item.uri) return
                 displayedUri = item.uri
