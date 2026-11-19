@@ -6311,6 +6311,77 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             panel.addView(batchCheckButton, LinearLayout.LayoutParams(-1, dp(54)))
+            val batchCompressButton = resultButton("▣ Batch compress exported PDFs", false) {
+                val pdfItems = exportResults.items.filter { it.mime == "application/pdf" }.toList()
+                if (pdfItems.size < 2) {
+                    updateResultStatus("Create at least two PDF files to use batch compression.")
+                } else {
+                    appDialog().setTitle("Batch PDF Compression")
+                        .setMessage("Compress ${pdfItems.size} PDFs using the Standard preset? New copies will be saved. Compression rasterizes pages and removes searchable text, links and forms.")
+                        .setPositiveButton("Compress all") { _, _ ->
+                            updateResultStatus("Compressing ${pdfItems.size} PDFs in background…")
+                            Thread {
+                                val results = mutableListOf<String>()
+                                val created = mutableListOf<Pair<Uri, String>>()
+                                val preset = compressionPresets[1]
+                                pdfItems.forEachIndexed { index, item ->
+                                    try {
+                                        val source = Uri.parse(item.uri)
+                                        val descriptor = contentResolver.openFileDescriptor(source, "r")
+                                            ?: throw java.io.IOException("Cannot open source")
+                                        val output = PdfDocument()
+                                        try {
+                                            PdfRenderer(descriptor).use { renderer ->
+                                                for (pageIndex in 0 until renderer.pageCount) {
+                                                    renderer.openPage(pageIndex).use { sourcePage ->
+                                                        val width = (sourcePage.width * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                                                        val height = (sourcePage.height * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                                                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                                        try {
+                                                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                                                            sourcePage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                                            val encoded = ByteArrayOutputStream().also {
+                                                                bitmap.compress(Bitmap.CompressFormat.JPEG, preset.quality, it)
+                                                            }.toByteArray()
+                                                            val reduced = BitmapFactory.decodeByteArray(encoded, 0, encoded.size)
+                                                                ?: throw java.io.IOException("Could not encode page")
+                                                            try {
+                                                                val page = output.startPage(PdfDocument.PageInfo.Builder(sourcePage.width, sourcePage.height, pageIndex + 1).create())
+                                                                page.canvas.drawBitmap(reduced, null, android.graphics.Rect(0, 0, sourcePage.width, sourcePage.height), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                                                                output.finishPage(page)
+                                                            } finally { reduced.recycle() }
+                                                        } finally { bitmap.recycle() }
+                                                    }
+                                                }
+                                            }
+                                            val bytes = ByteArrayOutputStream().also { output.writeTo(it) }.toByteArray()
+                                            val name = "Batch_Compressed_${index + 1}_${System.currentTimeMillis()}.pdf"
+                                            val saved = saveBytesPrivately(bytes, name)
+                                                ?: throw java.io.IOException("Could not save output")
+                                            created.add(saved to name)
+                                            results.add("${index + 1}. ${item.fileName}: saved (${formatFileSize(bytes.size.toLong())})")
+                                        } finally { output.close() }
+                                    } catch (e: Exception) {
+                                        results.add("${index + 1}. ${item.fileName}: failed (${e.localizedMessage ?: "Unknown error"})")
+                                    }
+                                }
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        created.forEach { (uri, name) ->
+                                            exportResults.add(ExportResultItem(uri.toString(), name, "application/pdf"))
+                                        }
+                                        refreshExportResult?.invoke()
+                                        updateResultStatus("Batch compression: ${created.size}/${pdfItems.size} saved.")
+                                        appDialog().setTitle("Batch Compression Results")
+                                            .setMessage(results.joinToString("\\n"))
+                                            .setPositiveButton("OK", null).show()
+                                    }
+                                }
+                            }.start()
+                        }.setNegativeButton("Cancel", null).show()
+                }
+            }
+            panel.addView(batchCompressButton, LinearLayout.LayoutParams(-1, dp(54)))
             panel.addView(gap(8))
             val ocrResult = resultButton("🔎 Recognize text in image (OCR)", false) {
                 val item = exportResults.selected
@@ -6384,6 +6455,7 @@ class MainActivity : AppCompatActivity() {
                 advancedPdfRow.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
                 inspectPdfButton.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
                 batchCheckButton.visibility = if (exportResults.items.count { it.mime == "application/pdf" } > 1) View.VISIBLE else View.GONE
+                batchCompressButton.visibility = batchCheckButton.visibility
                 ocrResult.visibility = if (item.mime.startsWith("image/") || item.mime == "application/pdf") View.VISIBLE else View.GONE
                 if (displayedUri == item.uri) return
                 displayedUri = item.uri
