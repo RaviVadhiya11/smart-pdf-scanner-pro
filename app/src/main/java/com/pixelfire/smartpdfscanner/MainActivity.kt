@@ -6099,7 +6099,63 @@ class MainActivity : AppCompatActivity() {
                 }
             }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
             panel.addView(actions)
-            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
+            panel.addView(gap(12))
+            panel.addView(label("SAVE FILE TO", 12f, 0xFF52627A.toInt(), true))
+            panel.addView(gap(8))
+            // The original export remains in DocNexa private documents until the user
+            // explicitly chooses an external destination. No cloud upload is implied.
+            val destinationGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            fun destinationRow(first: Pair<String, () -> Unit>, second: Pair<String, () -> Unit>) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(resultButton(first.first, false, first.second),
+                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
+                row.addView(resultButton(second.first, false, second.second),
+                    LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
+                destinationGrid.addView(row)
+                destinationGrid.addView(gap(8))
+            }
+            destinationRow(
+                ("📱 Phone storage" to { exportResults.selected?.let { saveResultAs(it) } }),
+                ("📂 My documents" to {
+                    updateResultStatus("Already saved in DocNexa. Open My Documents to find it.")
+                })
+            )
+            destinationRow(
+                ("☁ Google Drive" to {
+                    exportResults.selected?.let { item ->
+                        try {
+                            val source = Uri.parse(item.uri)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = item.mime
+                                putExtra(Intent.EXTRA_STREAM, source)
+                                clipData = android.content.ClipData.newRawUri(item.fileName, source)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(Intent.createChooser(send, "Choose Google Drive to save"))
+                        } catch (e: Exception) {
+                            updateResultStatus(e.localizedMessage ?: "Unable to open sharing apps.")
+                        }
+                    }
+                }),
+                ("✉ Email" to {
+                    exportResults.selected?.let { item ->
+                        try {
+                            val source = Uri.parse(item.uri)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = item.mime
+                                putExtra(Intent.EXTRA_STREAM, source)
+                                clipData = android.content.ClipData.newRawUri(item.fileName, source)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(Intent.createChooser(send, "Choose an email app"))
+                        } catch (e: Exception) {
+                            updateResultStatus(e.localizedMessage ?: "Unable to open email sharing.")
+                        }
+                    }
+                })
+            )
+            panel.addView(destinationGrid)
+            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } } { exportResults.selected?.let { saveResultImageToGallery(it) } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
             val dialog = appDialog().setView(toolDialogScroll(panel, 0.68f)).setNegativeButton("Done", null).create()
             exportResultDialog = dialog
