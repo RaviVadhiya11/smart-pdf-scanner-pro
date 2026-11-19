@@ -6105,23 +6105,23 @@ class MainActivity : AppCompatActivity() {
             // The original export remains in DocNexa private documents until the user
             // explicitly chooses an external destination. No cloud upload is implied.
             val destinationGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            fun destinationRow(first: Pair<String, () -> Unit>, second: Pair<String, () -> Unit>) {
+            fun destinationRow(firstTitle: String, firstAction: () -> Unit, secondTitle: String, secondAction: () -> Unit) {
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                row.addView(resultButton(first.first, false, first.second),
+                row.addView(resultButton(firstTitle, false, firstAction),
                     LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
-                row.addView(resultButton(second.first, false, second.second),
+                row.addView(resultButton(secondTitle, false, secondAction),
                     LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
                 destinationGrid.addView(row)
                 destinationGrid.addView(gap(8))
             }
             destinationRow(
-                ("📱 Phone storage" to { exportResults.selected?.let { saveResultAs(it) } }),
-                ("📂 My documents" to {
+                "📱 Phone storage", { exportResults.selected?.let { saveResultAs(it) } }),
+                "📂 My documents", {
                     updateResultStatus("Already saved in DocNexa. Open My Documents to find it.")
-                })
+                }
             )
             destinationRow(
-                ("☁ Google Drive" to {
+                "☁ Google Drive", {
                     exportResults.selected?.let { item ->
                         try {
                             val source = Uri.parse(item.uri)
@@ -6136,8 +6136,8 @@ class MainActivity : AppCompatActivity() {
                             updateResultStatus(e.localizedMessage ?: "Unable to open sharing apps.")
                         }
                     }
-                }),
-                ("✉ Email" to {
+                },
+                "✉ Email", {
                     exportResults.selected?.let { item ->
                         try {
                             val source = Uri.parse(item.uri)
@@ -6152,7 +6152,7 @@ class MainActivity : AppCompatActivity() {
                             updateResultStatus(e.localizedMessage ?: "Unable to open email sharing.")
                         }
                     }
-                })
+                }
             )
             panel.addView(destinationGrid)
             val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } } { exportResults.selected?.let { saveResultImageToGallery(it) } }
