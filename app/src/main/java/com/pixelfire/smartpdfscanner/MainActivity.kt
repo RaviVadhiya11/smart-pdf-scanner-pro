@@ -6066,7 +6066,9 @@ class MainActivity : AppCompatActivity() {
             panel.addView(gap(12))
             fun resultButton(title: String, primary: Boolean, action: () -> Unit): com.google.android.material.button.MaterialButton =
                 com.google.android.material.button.MaterialButton(this).apply {
-                    text = title; isAllCaps = false; textSize = 14f
+                    text = title; isAllCaps = false; textSize = 12.5f
+                    maxLines = 2
+                    setPadding(dp(5), dp(5), dp(5), dp(5))
                     cornerRadius = dp(12)
                     setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFF2563EB.toInt())
                     backgroundTintList = android.content.res.ColorStateList.valueOf(if (primary) 0xFF2563EB.toInt() else 0xFFEAF2FF.toInt())
@@ -6083,7 +6085,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(openButton, LinearLayout.LayoutParams(-1, dp(54)))
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             actions.addView(resultButton("Save As", false) { exportResults.selected?.let { saveResultAs(it) } },
-                LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(5) })
             actions.addView(resultButton("Share", false) {
                 exportResults.selected?.let { item ->
                     try {
@@ -6169,11 +6171,10 @@ class MainActivity : AppCompatActivity() {
                 val item = exportResults.selected
                 if (item?.mime == "application/pdf") {
                     // Reuse the existing password tool rather than exposing a nonfunctional toggle.
-                    passwordPicker.launch(arrayOf("application/pdf"))
-                    updateResultStatus("Select the PDF to protect in the file picker.")
+                    passwordDialog(Uri.parse(item.uri), false)
                 } else updateResultStatus("Password protection is available for PDF files.")
             }
-            advancedPdfRow.addView(compressResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5) })
+            advancedPdfRow.addView(compressResult, LinearLayout.LayoutParams(0, dp(64), 1f).apply { rightMargin = dp(5) })
             advancedPdfRow.addView(passwordResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
             panel.addView(advancedPdfRow)
             panel.addView(gap(8))
@@ -6186,7 +6187,7 @@ class MainActivity : AppCompatActivity() {
                     updateResultStatus("Choose an image to recognize text.")
                 }
             }
-            panel.addView(ocrResult, LinearLayout.LayoutParams(-1, dp(48)))
+            panel.addView(ocrResult, LinearLayout.LayoutParams(-1, dp(54)))
             panel.addView(gap(8))
             // ZIP is an actual archive containing the selected exported file, not PDF compression.
             val zipButton = resultButton("📦 Create ZIP archive", false) {
@@ -6217,9 +6218,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             panel.addView(zipButton, LinearLayout.LayoutParams(-1, dp(48)))
-            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
+            val gallery = resultButton("Save image to Gallery", false) { exportResults.selected?.let { item ->
+                if (item.mime.startsWith("image/")) saveResultImageToGallery(item)
+                else updateResultStatus("Gallery saving is only available for image files.")
+            } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
-            val dialog = appDialog().setView(toolDialogScroll(panel, 0.68f)).setNegativeButton("Done", null).create()
+            val dialog = appDialog().setTitle("DocNexa • Save & Export").setView(toolDialogScroll(panel, 0.83f)).setNegativeButton("Done", null).create()
             exportResultDialog = dialog
             var displayedUri: String? = null
             var selectorEntries = emptyList<String>()
