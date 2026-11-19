@@ -438,6 +438,10 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) showPassportPhotoEditor(uri)
     }
 
+    private val searchableOcrPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) createSearchableOcrPdf(uri)
+    }
+
     private val ocrPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) runOcr(uri)
     }
@@ -3744,6 +3748,7 @@ class MainActivity : AppCompatActivity() {
             PdfTool("Compress PDF", "↓", 0xFFEA580C.toInt()) { compressPicker.launch(arrayOf("application/pdf")) },
             PdfTool("PDF to Word", "W", 0xFF2563EB.toInt()) { pdfToWordPicker.launch(arrayOf("application/pdf")) },
             PdfTool("OCR Image", "Aa", 0xFF7C3AED.toInt()) { ocrPicker.launch("image/*") },
+            PdfTool("Searchable OCR PDF", "Aa+", 0xFF0D9488.toInt()) { searchableOcrPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Watermark", "▧", 0xFF64748B.toInt()) { watermarkPicker.launch(arrayOf("application/pdf")) },
             PdfTool("PDF Editor", "✎", 0xFF2563EB.toInt()) { pdfEditorPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Add/Merge PDF Files", "⇲", 0xFFF06A36.toInt()) { mergePicker.launch(arrayOf("application/pdf")) },
@@ -7996,6 +8001,93 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun createSearchableOcrPdf(uri: Uri) {
+        appDialog().setTitle("Searchable OCR PDF")
+            .setMessage("Recognize printed Latin-script text on each PDF page and add an invisible searchable text layer. This may take time. Original PDF remains unchanged. Complex layouts and other scripts may not be recognized accurately.")
+            .setPositiveButton("Start OCR") { _, _ ->
+                status.text = "Creating searchable PDF…"
+                Thread {
+                    var recognizer: com.google.mlkit.vision.text.TextRecognizer? = null
+                    try {
+                        recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        val source = contentResolver.openFileDescriptor(uri, "r")
+                            ?: throw java.io.IOException("Cannot open PDF")
+                        val texts = mutableListOf<List<Pair<String, android.graphics.Rect>>>()
+                        PdfRenderer(source).use { renderer ->
+                            if (renderer.pageCount > 100) throw java.io.IOException("Maximum 100 pages per OCR job")
+                            for (index in 0 until renderer.pageCount) {
+                                renderer.openPage(index).use { page ->
+                                    val scale = minOf(2f, 1800f / maxOf(page.width, page.height).toFloat())
+                                    val width = (page.width * scale).toInt().coerceAtLeast(1)
+                                    val height = (page.height * scale).toInt().coerceAtLeast(1)
+                                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                    try {
+                                        bitmap.eraseColor(android.graphics.Color.WHITE)
+                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        val result = com.google.android.gms.tasks.Tasks.await(
+                                            recognizer.process(InputImage.fromBitmap(bitmap, 0)))
+                                        val lines = result.textBlocks.flatMap { it.lines }.mapNotNull { line ->
+                                            val box = line.boundingBox
+                                            if (box == null || line.text.isBlank()) null
+                                            else line.text to android.graphics.Rect(
+                                                (box.left / scale).toInt(), (box.top / scale).toInt(),
+                                                (box.right / scale).toInt(), (box.bottom / scale).toInt())
+                                        }
+                                        texts.add(lines)
+                                    } finally { bitmap.recycle() }
+                                }
+                            }
+                        }
+                        val input = contentResolver.openInputStream(uri)
+                            ?: throw java.io.IOException("Cannot read PDF")
+                        val outputBytes = input.use { stream ->
+                            PDDocument.load(stream).use { doc ->
+                                doc.pages.forEachIndexed { index, page ->
+                                    val lines = texts.getOrNull(index).orEmpty()
+                                    if (lines.isNotEmpty()) {
+                                        val pageHeight = page.mediaBox.height
+                                        PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { content ->
+                                            content.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.NEITHER)
+                                            lines.forEach { (line, box) ->
+                                                val safe = line.replace(Regex("[^\\u0020-\\u007E]"), " ").trim()
+                                                if (safe.isNotBlank()) {
+                                                    val fontSize = box.height().toFloat().coerceIn(5f, 24f)
+                                                    content.beginText()
+                                                    content.setFont(PDType1Font.HELVETICA, fontSize)
+                                                    content.newLineAtOffset(box.left.toFloat(), (pageHeight - box.bottom).coerceAtLeast(0f))
+                                                    content.showText(safe.take(500))
+                                                    content.endText()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
+                            }
+                        }
+                        val name = "Searchable_OCR_${System.currentTimeMillis()}.pdf"
+                        val saved = saveBytesPrivately(outputBytes, name)
+                            ?: throw java.io.IOException("Could not save searchable PDF")
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                status.text = "Searchable PDF created"
+                                showExportSuccess(saved, name, "application/pdf")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                status.text = "Searchable OCR failed"
+                                appDialog().setTitle("OCR failed")
+                                    .setMessage(e.localizedMessage ?: "Could not create searchable PDF")
+                                    .setPositiveButton("OK", null).show()
+                            }
+                        }
+                    } finally { recognizer?.close() }
+                }.start()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun runOcr(uri: Uri) {
