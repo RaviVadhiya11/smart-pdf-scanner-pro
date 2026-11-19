@@ -8017,7 +8017,8 @@ class MainActivity : AppCompatActivity() {
                 Thread {
                     var recognizer: com.google.mlkit.vision.text.TextRecognizer? = null
                     try {
-                        recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        val ocrClient = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        recognizer = ocrClient
                         val source = contentResolver.openFileDescriptor(uri, "r")
                             ?: throw java.io.IOException("Cannot open PDF")
                         val texts = mutableListOf<List<Pair<String, android.graphics.Rect>>>()
@@ -8033,7 +8034,7 @@ class MainActivity : AppCompatActivity() {
                                         bitmap.eraseColor(android.graphics.Color.WHITE)
                                         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                         val result = com.google.android.gms.tasks.Tasks.await(
-                                            recognizer.process(InputImage.fromBitmap(bitmap, 0)))
+                                            ocrClient.process(InputImage.fromBitmap(bitmap, 0)))
                                         val lines = result.textBlocks.flatMap { it.lines }.mapNotNull { line ->
                                             val box = line.boundingBox
                                             if (box == null || line.text.isBlank()) null
