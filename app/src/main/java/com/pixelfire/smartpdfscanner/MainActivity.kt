@@ -1266,152 +1266,104 @@ class MainActivity : AppCompatActivity() {
         content.addView(quickAccessScroll)
         content.addView(gap(16))
 
-        // Premium scan hero: compact copy, custom scanner artwork and clear primary action.
+        // Design 1 — Modern Blue: compact scan hero, four primary actions and four quick tools.
         val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = gradient(0xFFEAF2FF.toInt(), 0xFFDCEAFF.toInt(), 24)
-            elevation = dp(2).toFloat()
-        }
-        val heroTop = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-        }
-        val heroCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        heroCopy.addView(label("DOCNEXA • SMART SCAN", 10f, blue, true))
-        heroCopy.addView(gap(8))
-        heroCopy.addView(label("Your documents.\nClear, secure,\norganized.", 22f, navy, true))
-        heroCopy.addView(gap(7))
-        heroCopy.addView(label("Scan • Enhance • Save as PDF", 10.5f, muted))
-        heroTop.addView(heroCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        val heroArt = object : View(this) {
-            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-            override fun onDraw(canvas: android.graphics.Canvas) {
-                super.onDraw(canvas)
-                val w = width.toFloat()
-                val h = height.toFloat()
-                val cx = w * .50f
-                val cy = h * .50f
-                paint.style = android.graphics.Paint.Style.FILL
-                paint.color = 0xFFBBD5FF.toInt()
-                canvas.drawCircle(cx, cy, minOf(w, h) * .48f, paint)
-                val rect = android.graphics.RectF(w*.25f, h*.13f, w*.75f, h*.87f)
-                paint.color = 0xFFFFFFFF.toInt()
-                canvas.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), paint)
-                paint.style = android.graphics.Paint.Style.STROKE
-                paint.strokeWidth = dp(3).toFloat()
-                paint.strokeCap = android.graphics.Paint.Cap.ROUND
-                paint.color = 0xFF2164C5.toInt()
-                val l=rect.left-dp(5); val t=rect.top+dp(8); val r=rect.right+dp(5); val b=rect.bottom-dp(8); val k=dp(11).toFloat()
-                canvas.drawLine(l+k,t,l,t,paint); canvas.drawLine(l,t,l,t+k,paint)
-                canvas.drawLine(r-k,t,r,t,paint); canvas.drawLine(r,t,r,t+k,paint)
-                canvas.drawLine(l,b-k,l,b,paint); canvas.drawLine(l,b,l+k,b,paint)
-                canvas.drawLine(r-k,b,r,b,paint); canvas.drawLine(r,b,r,b-k,paint)
-                paint.color = 0xFF18A9D5.toInt()
-                paint.strokeWidth = dp(4).toFloat()
-                canvas.drawLine(w*.17f,cy,w*.83f,cy,paint)
-                paint.color = 0xFF2164C5.toInt()
-                paint.strokeWidth = dp(2).toFloat()
-                canvas.drawLine(rect.left+dp(8),rect.top+dp(22),rect.right-dp(8),rect.top+dp(22),paint)
-                canvas.drawLine(rect.left+dp(8),rect.bottom-dp(22),rect.right-dp(8),rect.bottom-dp(22),paint)
-            }
-        }.apply { contentDescription = "Document scanner illustration" }
-        heroTop.addView(heroArt, LinearLayout.LayoutParams(dp(94), dp(112)).apply { leftMargin = dp(8) })
-        hero.addView(heroTop)
-        hero.addView(gap(14))
-        val scanButton = Button(this).apply {
-            text = "▣   Scan a Document"
-            isAllCaps = false
-            textSize = 15f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(0xFFFFFFFF.toInt())
-            background = gradient(0xFF4285F4.toInt(), 0xFF1764DE.toInt(), 16)
-            backgroundTintList = null
-            minHeight = dp(54)
+            setPadding(dp(18), dp(18), dp(14), dp(18))
+            background = gradient(0xFF0788ED.toInt(), 0xFF0756C7.toInt(), 20)
+            elevation = dp(3).toFloat()
             setOnClickListener { startDocumentScan() }
         }
-        hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
+        val heroText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heroText.addView(label("Scan Documents", 19f, 0xFFFFFFFF.toInt(), true))
+        heroText.addView(gap(5))
+        heroText.addView(label("Scan, Edit and Save as PDF", 11f, 0xFFEAF5FF.toInt()))
+        heroText.addView(gap(10))
+        heroText.addView(label("START SCANNING  ›", 11f, 0xFFFFFFFF.toInt(), true))
+        hero.addView(heroText, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(label("▤", 49f, 0xFFFFFFFF.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(0xFF237FE3.toInt(), 15)
+        }, LinearLayout.LayoutParams(dp(75), dp(80)))
         content.addView(hero)
+        content.addView(gap(16))
+
+        fun homeTile(title: String, symbol: String, accent: Int, action: () -> Unit): View {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(3), dp(12), dp(3), dp(12))
+                background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE1EAF5.toInt())
+                elevation = dp(1).toFloat()
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { action() }
+                addView(label(symbol, 24f, accent, true).apply {
+                    gravity = Gravity.CENTER
+                    background = rounded(0xFFF0F6FF.toInt(), 13)
+                }, LinearLayout.LayoutParams(dp(47), dp(47)))
+                addView(gap(8))
+                addView(label(title, 11f, navy, true).apply {
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                })
+            }
+        }
+        val primaryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val primary = listOf(
+            Triple("Scan", "▣", 0xFF087CF1.toInt()),
+            Triple("Import", "▧", 0xFF1EB96A.toInt()),
+            Triple("PDF Tools", "PDF", 0xFFE94752.toInt()),
+            Triple("ID Card", "▣", 0xFF18B9D7.toInt())
+        )
+        primary.forEachIndexed { index, item ->
+            val action: () -> Unit = when (index) {
+                0 -> ({ startDocumentScan() })
+                1 -> ({ showImportFileHub() })
+                2 -> ({ showPdfTools() })
+                else -> ({ showIdPhotoMenu() })
+            }
+            primaryActions.addView(homeTile(item.first, item.second, item.third, action),
+                LinearLayout.LayoutParams(0, dp(110), 1f).apply {
+                    if (index < 3) marginEnd = dp(7)
+                })
+        }
+        content.addView(primaryActions)
         content.addView(gap(20))
 
-        // Tool section title.
         val quickTitle = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        quickTitle.addView(label("QUICK TOOLS", 15f, navy, true),
+        quickTitle.addView(label("Quick Tools", 17f, navy, true),
             LinearLayout.LayoutParams(0, -2, 1f))
-        quickTitle.addView(TextView(this).apply {
-            text = "VIEW ALL  ›"
-            textSize = 11f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(blue)
+        quickTitle.addView(label("View All  ›", 12f, blue, true).apply {
             setOnClickListener { showPdfTools() }
         })
         content.addView(quickTitle)
         content.addView(gap(10))
-
-        val tools = listOf(
-            Triple("Smart Scan", "Camera scanner", "▣"),
-            Triple("PDF Tools", "Merge • Split • Edit", "PDF"),
-            Triple("Import Picture", "Images to PDF", "▧"),
-            Triple("Import File", "Open PDF files", "⇧"),
-            Triple("Compress PDF", "Reduce file size", "⌁"),
-            Triple("Image to Text", "Extract OCR text", "T"),
-            Triple("PDF to Word", "Convert document", "W"),
-            Triple("QR Scanner", "Scan QR codes", "⌗")
+        val quickActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val quickItems = listOf(
+            Triple("Merge PDF", "▤", 0xFF8060D8.toInt()),
+            Triple("Compress", "⇩", 0xFFFFA91E.toInt()),
+            Triple("Split PDF", "⊞", 0xFFB347DC.toInt()),
+            Triple("OCR", "OCR", 0xFF0C9BC7.toInt())
         )
-        tools.chunked(2).forEachIndexed { rowIndex, pair ->
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            pair.forEachIndexed { index, item ->
-                val accent = listOf(
-                    0xFF3478F6.toInt(), 0xFFE66AA6.toInt(),
-                    0xFF42B96B.toInt(), 0xFFFFC247.toInt(),
-                    0xFFE66AA6.toInt(), 0xFFFFC247.toInt(),
-                    0xFF3478F6.toInt(), 0xFF42B96B.toInt()
-                )[rowIndex * 2 + index]
-                val action: () -> Unit = when (rowIndex * 2 + index) {
-                    0 -> ({ startDocumentScan() })
-                    1 -> ({ showPdfTools() })
-                    2 -> ({ imagePicker.launch(arrayOf("image/*")) })
-                    3 -> ({ showImportFileHub() })
-                    4 -> ({ compressPicker.launch(arrayOf("application/pdf")) })
-                    5 -> ({ ocrPicker.launch("image/*") })
-                    6 -> ({ pdfToWordPicker.launch(arrayOf("application/pdf")) })
-                    7 -> ({ showQrScanner() })
-                    else -> ({ showPdfTools() })
-                }
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(14), dp(13), dp(10), dp(12))
-                    background = rounded(0xFFFFFFFF.toInt(), 17, 0xFFE8EDF5.toInt())
-                    elevation = dp(1).toFloat()
-                    isClickable = true
-                    isFocusable = true
-                    setOnClickListener { action() }
-                }
-                card.addView(TextView(this).apply {
-                    text = item.third
-                    textSize = 20f
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                    setTextColor(accent)
-                    background = rounded(paleBlue, 13)
-                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(42))
-                })
-                card.addView(gap(8))
-                card.addView(label(item.first, 13f, navy, true))
-                card.addView(gap(3))
-                card.addView(label(item.second, 10f, muted))
-                val params = LinearLayout.LayoutParams(0, dp(116), 1f)
-                if (index == 0) params.rightMargin = dp(8) else params.leftMargin = dp(8)
-                row.addView(card, params)
+        quickItems.forEachIndexed { index, item ->
+            val action: () -> Unit = when (index) {
+                0 -> ({ mergePicker.launch(arrayOf("application/pdf")) })
+                1 -> ({ compressPicker.launch(arrayOf("application/pdf")) })
+                2 -> ({ splitPicker.launch(arrayOf("application/pdf")) })
+                else -> ({ ocrPicker.launch("image/*") })
             }
-            content.addView(row)
-            content.addView(gap(10))
+            quickActions.addView(homeTile(item.first, item.second, item.third, action),
+                LinearLayout.LayoutParams(0, dp(102), 1f).apply {
+                    if (index < 3) marginEnd = dp(7)
+                })
         }
+        content.addView(quickActions)
+        content.addView(gap(18))
 
         addNativeAdCard(content)
 
