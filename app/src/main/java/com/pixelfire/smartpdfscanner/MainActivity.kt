@@ -6155,6 +6155,36 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             panel.addView(destinationGrid)
+            panel.addView(gap(8))
+            // ZIP is an actual archive containing the selected exported file, not PDF compression.
+            val zipButton = resultButton("📦 Create ZIP archive", false) {
+                val selected = exportResults.selected
+                if (selected == null) {
+                    updateResultStatus("Select a file first.")
+                } else {
+                    updateResultStatus("Creating ZIP archive…")
+                    Thread {
+                        try {
+                            val bytes = java.io.ByteArrayOutputStream()
+                            java.util.zip.ZipOutputStream(bytes).use { zip ->
+                                zip.putNextEntry(java.util.zip.ZipEntry(selected.fileName.substringAfterLast('/')))
+                                contentResolver.openInputStream(Uri.parse(selected.uri)).use { source ->
+                                    if (source == null) throw java.io.IOException("Cannot read selected file")
+                                    source.copyTo(zip)
+                                }
+                                zip.closeEntry()
+                            }
+                            val zipName = selected.fileName.substringBeforeLast('.', selected.fileName) + ".zip"
+                            val saved = saveBytesPrivately(bytes.toByteArray(), zipName)
+                                ?: throw java.io.IOException("Could not save ZIP archive")
+                            runOnUiThread { showExportSuccess(saved, zipName, "application/zip") }
+                        } catch (e: Exception) {
+                            runOnUiThread { updateResultStatus(e.localizedMessage ?: "ZIP creation failed.") }
+                        }
+                    }.start()
+                }
+            }
+            panel.addView(zipButton, LinearLayout.LayoutParams(-1, dp(48)))
             val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
             val dialog = appDialog().setView(toolDialogScroll(panel, 0.68f)).setNegativeButton("Done", null).create()
