@@ -1447,11 +1447,33 @@ class MainActivity : AppCompatActivity() {
             content.addView(recent)
         }
         content.addView(gap(16))
-        content.addView(label("MY DOCUMENTS", 15f, navy, true))
+        val savedDocs = getSavedPdfs()
+        val folderHeading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        folderHeading.addView(label("Folders (${homeFolders.size})", 17f, navy, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        folderHeading.addView(Button(this).apply {
+            text = "▣ +"
+            isAllCaps = false
+            contentDescription = "Create new folder"
+            setOnClickListener { createFolderDialog() }
+        })
+        content.addView(folderHeading)
         content.addView(gap(8))
         homeFolders.forEach { folder -> content.addView(folderCard(folder)) }
-        val savedDocs = getSavedPdfs()
-        content.addView(label("Recent Documents (" + savedDocs.size + ")", 16f, navy, true))
+        val documentsHeading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        documentsHeading.addView(label("Documents (${savedDocs.size})", 17f, navy, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        documentsHeading.addView(label("View all  ›", 12f, blue, true).apply {
+            setPadding(dp(8), dp(10), dp(4), dp(10))
+            setOnClickListener { showAllDocumentsScreen() }
+        })
+        content.addView(documentsHeading)
         content.addView(gap(8))
         if (savedDocs.isEmpty()) content.addView(label("Your scanned PDFs will appear here automatically.", 11f, muted))
         else savedDocs.take(20).forEach { item -> content.addView(documentCard(item.first, item.second)) }
@@ -1461,6 +1483,84 @@ class MainActivity : AppCompatActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         addBottomAdAndActions(root)
+        setScreenContent(root)
+    }
+
+    private fun showAllDocumentsScreen() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFF5F8FF.toInt())
+        }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 16)
+        }
+        top.addView(label("‹", 32f, 0xFFFFFFFF.toInt()).apply {
+            setPadding(dp(8), 0, dp(18), 0)
+            setOnClickListener { buildScreen() }
+        })
+        top.addView(label("My Documents", 20f, 0xFFFFFFFF.toInt(), true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(label("⌕", 28f, 0xFFFFFFFF.toInt()).apply {
+            setOnClickListener { showDocumentSearch() }
+        })
+        root.addView(top)
+        val scroll = ScrollView(this)
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(20))
+        }
+        val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val modes = listOf("All docs", "Recent", "Favourite")
+        val buttons = mutableListOf<TextView>()
+        fun render(mode: Int) {
+            buttons.forEachIndexed { index, button ->
+                button.background = rounded(if (index == mode) 0xFF2563EB.toInt() else 0xFFFFFFFF.toInt(), 16, 0xFFDCE7FA.toInt())
+                button.setTextColor(if (index == mode) 0xFFFFFFFF.toInt() else 0xFF172B4D.toInt())
+            }
+            results.removeAllViews()
+            val all = getSavedPdfs()
+            val docs = when (mode) {
+                1 -> all.take(10)
+                2 -> all.filter { (_, uri) -> prefs.getBoolean("favorite_" + uri.toString().hashCode(), false) }
+                else -> all
+            }
+            results.addView(label("Documents (${docs.size})", 16f, 0xFF172B4D.toInt(), true))
+            results.addView(gap(8))
+            if (docs.isEmpty()) results.addView(label("No documents in this section.", 13f, 0xFF718096.toInt()))
+            docs.forEach { (name, uri) -> results.addView(documentCard(name, uri)) }
+        }
+        modes.forEachIndexed { index, name ->
+            val button = label(name, 12f, 0xFF172B4D.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(10), dp(13), dp(10), dp(13))
+                setOnClickListener { render(index) }
+            }
+            buttons.add(button)
+            tabs.addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(5) })
+        }
+        body.addView(tabs)
+        body.addView(gap(14))
+        val folderHead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        folderHead.addView(label("Folders (${homeFolders.size})", 16f, 0xFF172B4D.toInt(), true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        folderHead.addView(label("＋ New", 13f, 0xFF2563EB.toInt(), true).apply {
+            setPadding(dp(8), dp(10), dp(8), dp(10))
+            setOnClickListener { createFolderDialog() }
+        })
+        body.addView(folderHead)
+        homeFolders.forEach { body.addView(folderCard(it)) }
+        body.addView(gap(12))
+        body.addView(results)
+        render(0)
+        scroll.addView(body)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setScreenContent(root)
     }
 
