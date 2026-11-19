@@ -6204,6 +6204,36 @@ class MainActivity : AppCompatActivity() {
             advancedPdfRow.addView(passwordResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
             panel.addView(advancedPdfRow)
             panel.addView(gap(8))
+            val inspectPdfButton = resultButton("✓ Check PDF integrity & page count", false) {
+                val item = exportResults.selected
+                if (item == null || item.mime != "application/pdf") {
+                    updateResultStatus("Select a PDF file to inspect.")
+                } else {
+                    updateResultStatus("Checking PDF structure and pages…")
+                    Thread {
+                        try {
+                            val source = Uri.parse(item.uri)
+                            val fd = contentResolver.openFileDescriptor(source, "r")
+                                ?: throw java.io.IOException("Unable to open PDF")
+                            val report = PdfRenderer(fd).use { renderer ->
+                                val count = renderer.pageCount
+                                if (count <= 0) throw java.io.IOException("PDF has no readable pages")
+                                val first = renderer.openPage(0).use { page ->
+                                    "${page.width} × ${page.height} px"
+                                }
+                                "PDF readable • $count page(s) • First page: $first"
+                            }
+                            runOnUiThread { updateResultStatus(report) }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                updateResultStatus("PDF check failed: ${e.localizedMessage ?: "Unreadable or protected PDF"}")
+                            }
+                        }
+                    }.start()
+                }
+            }
+            panel.addView(inspectPdfButton, LinearLayout.LayoutParams(-1, dp(52)))
+            panel.addView(gap(8))
             val ocrResult = resultButton("🔎 Recognize text in image (OCR)", false) {
                 val item = exportResults.selected
                 if (item?.mime?.startsWith("image/") == true) {
@@ -6274,6 +6304,7 @@ class MainActivity : AppCompatActivity() {
                 openButton.text = if (item.mime == "application/pdf") "Open PDF" else "Open file"
                 gallery.visibility = if (item.mime.startsWith("image/") && Build.VERSION.SDK_INT >= 29) View.VISIBLE else View.GONE
                 advancedPdfRow.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
+                inspectPdfButton.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
                 ocrResult.visibility = if (item.mime.startsWith("image/") || item.mime == "application/pdf") View.VISIBLE else View.GONE
                 if (displayedUri == item.uri) return
                 displayedUri = item.uri
