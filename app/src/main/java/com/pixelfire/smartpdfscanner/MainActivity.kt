@@ -6101,6 +6101,32 @@ class MainActivity : AppCompatActivity() {
                 }
             }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
             panel.addView(actions)
+            panel.addView(gap(8))
+            val fileUtilities = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            fileUtilities.addView(resultButton("Copy file name", false) {
+                exportResults.selected?.let { item ->
+                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("DocNexa file name", item.fileName))
+                    updateResultStatus("File name copied.")
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(5) })
+            fileUtilities.addView(resultButton("File details", false) {
+                exportResults.selected?.let { item ->
+                    val source = Uri.parse(item.uri)
+                    var size = "Unknown"
+                    try {
+                        contentResolver.query(source, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            val column = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (column >= 0 && cursor.moveToFirst() && !cursor.isNull(column)) {
+                                val bytes = cursor.getLong(column)
+                                size = String.format(java.util.Locale.US, "%.2f MB", bytes / 1048576.0)
+                            }
+                        }
+                    } catch (_: Exception) { }
+                    appDialog().setTitle("File details").setMessage("Name: ${item.fileName}\\nType: ${ExportResultSession.typeLabel(item.mime)}\\nSize: $size\\nLocation: DocNexa file storage").setPositiveButton("OK", null).show()
+                }
+            }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
+            panel.addView(fileUtilities)
             panel.addView(gap(12))
             panel.addView(label("SAVE FILE TO", 12f, 0xFF52627A.toInt(), true))
             panel.addView(gap(8))
@@ -6247,6 +6273,8 @@ class MainActivity : AppCompatActivity() {
                 location.text = if (privateDocumentFile(Uri.parse(item.uri)) != null) "Saved inside DocNexa" else "Saved file"
                 openButton.text = if (item.mime == "application/pdf") "Open PDF" else "Open file"
                 gallery.visibility = if (item.mime.startsWith("image/") && Build.VERSION.SDK_INT >= 29) View.VISIBLE else View.GONE
+                advancedPdfRow.visibility = if (item.mime == "application/pdf") View.VISIBLE else View.GONE
+                ocrResult.visibility = if (item.mime.startsWith("image/") || item.mime == "application/pdf") View.VISIBLE else View.GONE
                 if (displayedUri == item.uri) return
                 displayedUri = item.uri
                 val token = resultPreviewGeneration.incrementAndGet()
