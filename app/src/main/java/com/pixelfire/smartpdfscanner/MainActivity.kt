@@ -1388,6 +1388,7 @@ class MainActivity : AppCompatActivity() {
                 val query = field.text.toString().trim()
                 val matches = getSavedPdfs().filter { (it.first + " " + prefs.getString("document_tag_" + it.second.toString().hashCode(), "") + " " +
                     prefs.getString("document_datetime_" + it.second.toString().hashCode(), "")).contains(query, ignoreCase = true) }
+                    .sortedWith(compareBy({ !it.first.startsWith(query, ignoreCase = true) }, { it.first.lowercase(java.util.Locale.ROOT) }))
                 if (query.isBlank()) Toast.makeText(this, "Type a document name to search", Toast.LENGTH_SHORT).show()
                 else if (matches.isEmpty()) appDialog().setTitle("No documents found")
                     .setMessage("No saved PDF matches: " + query).setPositiveButton("OK", null).show()
@@ -7963,8 +7964,18 @@ class MainActivity : AppCompatActivity() {
                             Toast.makeText(this, "Text copied", Toast.LENGTH_SHORT).show()
                         }
                         .setNeutralButton("Share text", null)
-                        .setNegativeButton("Close", null)
+                        .setNegativeButton("Save TXT", null)
                     ).apply {
+                        getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                            val name = "DocNexa_OCR_${System.currentTimeMillis()}.txt"
+                            val saved = saveBytesPrivately(extracted.toByteArray(Charsets.UTF_8), name)
+                            if (saved != null) {
+                                showExportSuccess(saved, name, "text/plain")
+                                dismiss()
+                            } else {
+                                Toast.makeText(this@MainActivity, "Could not save OCR text", Toast.LENGTH_LONG).show()
+                            }
+                        }
                         getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                             val send = Intent(Intent.ACTION_SEND).setType("text/plain")
                                 .putExtra(Intent.EXTRA_SUBJECT, "Text extracted with DocNexa")
