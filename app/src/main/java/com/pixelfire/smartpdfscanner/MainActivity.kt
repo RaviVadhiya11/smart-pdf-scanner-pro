@@ -3734,6 +3734,7 @@ class MainActivity : AppCompatActivity() {
             PdfTool("Signature", "S", 0xFFF6B34C.toInt()) { openSignatureEditor() },
             PdfTool("PDF to Image", "▧", 0xFF82C58A.toInt()) { pdfToImagePicker.launch(arrayOf("application/pdf")) },
             PdfTool("Image to PDF", "▧", 0xFF795548.toInt()) { imagePicker.launch(arrayOf("image/*")) },
+            PdfTool("Scanner Filters", "◐", 0xFF0D9488.toInt()) { showScannerFilterSettings() },
             PdfTool("Share PDF", "↗", 0xFFFFB900.toInt()) {
                 lastPdf?.let { uri ->
                     val share = Intent(Intent.ACTION_SEND).setType("application/pdf")
@@ -7945,6 +7946,54 @@ class MainActivity : AppCompatActivity() {
      * Each page is decoded at up to 4800px on its longest edge, never JPEG-recompressed,
      * fitted proportionally to an A4 page, and kept inside printer-safe margins.
      */
+    private fun showScannerFilterSettings() {
+        val names = arrayOf("Original color", "Grayscale", "High contrast B&W", "Enhanced color")
+        val selected = prefs.getInt("scanner_filter_mode", 0).coerceIn(0, names.lastIndex)
+        appDialog().setTitle("Scanner Filters")
+            .setSingleChoiceItems(names, selected) { dialog, which ->
+                prefs.edit().putInt("scanner_filter_mode", which).apply()
+                Toast.makeText(this, "Scanner filter: ${names[which]}", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun filterScannedPage(source: Bitmap, mode: Int): Bitmap {
+        if (mode == 0) return source
+        val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val matrix = android.graphics.ColorMatrix()
+        when (mode) {
+            1 -> matrix.setSaturation(0f)
+            2 -> {
+                matrix.setSaturation(0f)
+                val contrast = 2.3f
+                val offset = 128f * (1f - contrast)
+                val contrastMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                    contrast, 0f, 0f, 0f, offset,
+                    0f, contrast, 0f, 0f, offset,
+                    0f, 0f, contrast, 0f, offset,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                matrix.postConcat(contrastMatrix)
+            }
+            3 -> {
+                matrix.setSaturation(1.35f)
+                val contrast = 1.18f
+                val offset = 128f * (1f - contrast)
+                matrix.postConcat(android.graphics.ColorMatrix(floatArrayOf(
+                    contrast, 0f, 0f, 0f, offset,
+                    0f, contrast, 0f, 0f, offset,
+                    0f, 0f, contrast, 0f, offset,
+                    0f, 0f, 0f, 1f, 0f
+                )))
+            }
+        }
+        paint.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+        Canvas(output).drawBitmap(source, 0f, 0f, paint)
+        return output
+    }
+
     private fun createPrintReadyScanPdf(pageUris: List<Uri>): Uri? {
         var document: PdfDocument? = null
         return try {
@@ -7952,7 +8001,14 @@ class MainActivity : AppCompatActivity() {
             val outputDocument = PdfDocument()
             document = outputDocument
             pageUris.forEachIndexed { index, uri ->
-                val bitmap = decodeImageSafely(uri, 4800)
+                val original = decodeImageSafely(uri, 4800)
+                val bitmap = try {
+                    filterScannedPage(original, prefs.getInt("scanner_filter_mode", 0))
+                } catch (e: Exception) {
+                    original.recycle()
+                    throw e
+                }
+                if (bitmap !== original) original.recycle()
                 try {
                     val landscape = bitmap.width > bitmap.height
                     val pageWidth = if (landscape) 842 else 595
