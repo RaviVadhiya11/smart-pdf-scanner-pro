@@ -7948,14 +7948,68 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showScannerFilterSettings() {
         val names = arrayOf("Original color", "Grayscale", "High contrast B&W", "Enhanced color")
-        val selected = prefs.getInt("scanner_filter_mode", 0).coerceIn(0, names.lastIndex)
-        appDialog().setTitle("Scanner Filters")
-            .setSingleChoiceItems(names, selected) { dialog, which ->
-                prefs.edit().putInt("scanner_filter_mode", which).apply()
-                Toast.makeText(this, "Scanner filter: ${names[which]}", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
+        var selected = prefs.getInt("scanner_filter_mode", 0).coerceIn(0, names.lastIndex)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+        panel.addView(label("Choose a filter for new scanned PDFs", 15f, 0xFF172B4D.toInt(), true))
+        panel.addView(gap(8))
+        panel.addView(label("Preview below is a sample. The chosen filter is applied when the next scan is converted into a print-ready PDF.", 11f, 0xFF64748B.toInt()))
+        val sample = Bitmap.createBitmap(480, 260, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(sample)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+        ink.color = android.graphics.Color.rgb(28, 65, 130)
+        ink.textSize = 36f
+        ink.isFakeBoldText = true
+        canvas.drawText("DocNexa Scan", 24f, 68f, ink)
+        ink.isFakeBoldText = false
+        ink.textSize = 23f
+        ink.color = android.graphics.Color.rgb(70, 80, 90)
+        canvas.drawText("Sample document preview", 24f, 118f, ink)
+        ink.color = android.graphics.Color.rgb(235, 165, 60)
+        canvas.drawRect(24f, 145f, 210f, 214f, ink)
+        ink.color = android.graphics.Color.rgb(65, 170, 125)
+        canvas.drawRect(225f, 145f, 450f, 214f, ink)
+        val preview = ImageView(this).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        panel.addView(preview, LinearLayout.LayoutParams(-1, dp(190)))
+        val current = label("", 13f, 0xFF2563EB.toInt(), true)
+        panel.addView(current)
+        fun updatePreview() {
+            val filtered = filterScannedPage(sample, selected)
+            preview.setImageBitmap(filtered)
+            current.text = "Preview: ${names[selected]}"
+        }
+        updatePreview()
+        val choices = android.widget.RadioGroup(this).apply {
+            orientation = android.widget.RadioGroup.VERTICAL
+        }
+        names.forEachIndexed { index, name ->
+            choices.addView(android.widget.RadioButton(this).apply {
+                id = View.generateViewId()
+                text = name
+                isChecked = index == selected
+                setOnClickListener {
+                    selected = index
+                    updatePreview()
+                }
+            })
+        }
+        panel.addView(choices)
+        val dialog = appDialog().setTitle("Scanner Filters • Preview")
+            .setView(toolDialogScroll(panel))
+            .setPositiveButton("Apply filter") { _, _ ->
+                prefs.edit().putInt("scanner_filter_mode", selected).apply()
+                Toast.makeText(this, "Saved: ${names[selected]}. Applies to new scans.", Toast.LENGTH_LONG).show()
             }
-            .setNegativeButton("Cancel", null).show()
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnDismissListener { sample.recycle() }
+        dialog.show()
     }
 
     private fun filterScannedPage(source: Bitmap, mode: Int): Bitmap {
