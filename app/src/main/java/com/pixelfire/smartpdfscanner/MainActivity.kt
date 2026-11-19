@@ -6145,7 +6145,9 @@ class MainActivity : AppCompatActivity() {
             destinationRow(
                 "📱 Phone storage", { exportResults.selected?.let { saveResultAs(it) } },
                 "📂 My documents", {
-                    updateResultStatus("Already saved in DocNexa. Open My Documents to find it.")
+                    exportResultDialog?.dismiss()
+                    buildScreen()
+                    Toast.makeText(this, "My Documents and Recent Documents are on the home screen.", Toast.LENGTH_LONG).show()
                 }
             )
             destinationRow(
@@ -6223,10 +6225,23 @@ class MainActivity : AppCompatActivity() {
                                 }
                                 "PDF readable • $count page(s) • First page: $first"
                             }
-                            runOnUiThread { updateResultStatus(report) }
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) {
+                                    updateResultStatus(report)
+                                    appDialog().setTitle("PDF Integrity Report")
+                                        .setMessage("File: ${item.fileName}\\n\\n$report\\n\\nThis checks that Android can open the PDF and read its first page. It is not a full corruption scan.")
+                                        .setPositiveButton("OK", null).show()
+                                }
+                            }
                         } catch (e: Exception) {
                             runOnUiThread {
-                                updateResultStatus("PDF check failed: ${e.localizedMessage ?: "Unreadable or protected PDF"}")
+                                if (!isFinishing && !isDestroyed) {
+                                    val message = e.localizedMessage ?: "Unreadable or protected PDF"
+                                    updateResultStatus("PDF check failed: $message")
+                                    appDialog().setTitle("PDF Check Failed")
+                                        .setMessage(message)
+                                        .setPositiveButton("OK", null).show()
+                                }
                             }
                         }
                     }.start()
