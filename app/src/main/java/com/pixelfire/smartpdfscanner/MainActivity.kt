@@ -6155,7 +6155,7 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             panel.addView(destinationGrid)
-            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } } { exportResults.selected?.let { saveResultImageToGallery(it) } }
+            val gallery = resultButton("Save to Gallery", false) { exportResults.selected?.let { saveResultImageToGallery(it) } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
             val dialog = appDialog().setView(toolDialogScroll(panel, 0.68f)).setNegativeButton("Done", null).create()
             exportResultDialog = dialog
