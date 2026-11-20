@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -24,6 +26,7 @@ jobs:
           sudo apt-get install -y librsvg2-bin
           rsvg-convert -w 1024 -h 1024 branding/docnexa-icon.svg -o app/src/main/res/drawable-nodpi/docnexa_icon_art.png
       - name: Verify release signing configuration
+        if: github.event_name != 'pull_request'
         run: |
           for variable in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!variable}" ]; then
@@ -32,6 +35,7 @@ jobs:
             fi
           done
       - name: Decode Android upload keystore
+        if: github.event_name != 'pull_request'
         run: |
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
@@ -49,13 +53,17 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.4'
-      - name: Test page tools and build installable debug APK
+      - name: Run unit tests and build installable debug APK
         run: gradle :app:testDebugUnitTest :app:assembleDebug
       - name: Check Android lint
         run: gradle :app:lintDebug
+      - name: Validate release variant
+        run: gradle :app:lintRelease :app:testReleaseUnitTest
       - name: Build release AAB
+        if: github.event_name != 'pull_request'
         run: gradle :app:bundleRelease
       - name: Upload Android builds
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: Smart-PDF-Scanner-Pro-Android-Builds
@@ -70,6 +78,9 @@ jobs:
           name: Smart-PDF-Scanner-Pro-Validation
           path: |
             app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/tests/testReleaseUnitTest/
             app/build/reports/lint-results-debug.html
             app/build/reports/lint-results-debug.xml
+            app/build/reports/lint-results-release.html
+            app/build/reports/lint-results-release.xml
           if-no-files-found: ignore
