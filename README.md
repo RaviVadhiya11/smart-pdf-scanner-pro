@@ -41,3 +41,18 @@ The current app includes code and dependencies for scanning, OCR, PDF editing an
 - The app contains Google Mobile Ads and must be declared as **Contains ads** in Play Console. Complete the Data safety, target audience, content rating, app access and account deletion declarations accurately.
 - The release workflow requires all four signing secrets and fails if they are missing. Create a private upload keystore and add the four GitHub Actions secrets documented above before attempting a Play Console upload. Never commit the keystore or its passwords.
 - Complete a physical-device test of sign-up, email confirmation, sign-in, account switching, scan/save/open/share, cloud sync, account deletion, notifications, offline behaviour and ads before production release.
+
+
+## Supabase AI Edge Function
+The repository includes `supabase/functions/docnexa-ai/index.ts` for the in-app PDF AI assistant.
+Deploy that Edge Function to the same Supabase project used by the app and configure server-side secrets:
+
+- `OPENAI_API_KEY` — your OpenAI API key. Never place it in the Android app or commit it to GitHub.
+- `OPENAI_MODEL` — optional model override. If omitted, the function uses `gpt-6.2-astra`.
+
+The function requires a signed-in Supabase user, validates supported tasks and document length, and calls the OpenAI Responses API from the server.
+
+## Known conversion scope
+- Office to PDF is an offline text-extraction conversion for DOCX/XLSX/PPTX. It does not reproduce the original Office layout, images or complex tables.
+- PDF to Word creates an editable DOCX from selectable PDF text. Scanned/image-only PDFs should use OCR first.
+- These tools are intentionally described as document utilities rather than pixel-perfect Microsoft Office renderers.
