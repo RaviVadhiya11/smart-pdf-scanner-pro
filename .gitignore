@@ -3,3 +3,11 @@
 local.properties
 .idea/
 *.iml
+
+# Never commit Android signing credentials or local secret files.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+.env
+.env.*
