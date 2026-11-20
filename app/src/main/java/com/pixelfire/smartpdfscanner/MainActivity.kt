@@ -526,21 +526,36 @@ class MainActivity : AppCompatActivity() {
                         }
                         contentResolver.openInputStream(uri).use { input ->
                             if (input == null) throw java.io.IOException("Cannot read selected PDF")
-                            android.os.ParcelFileDescriptor.AutoCloseOutputStream(destination).use { output ->
-                                val buffer = ByteArray(32768)
-                                while (true) {
-                                    if (cancellationSignal.isCanceled) {
-                                        callback.onWriteCancelled()
-                                        return
-                                    }
-                                    val size = input.read(buffer)
-                                    if (size < 0) break
-                                    output.write(buffer, 0, size)
+                            PDDocument.load(input).use { source ->
+                                val requested = PrintPagePlan.selectedPages(
+                                    source.numberOfPages,
+                                    pages.map { PrintPagePlan.Range(it.start, it.end) }
+                                )
+                                if (requested.isEmpty()) {
+                                    callback.onWriteFailed("No printable pages were selected.")
+                                    return
                                 }
-                                output.flush()
+                                android.os.ParcelFileDescriptor.AutoCloseOutputStream(destination).use { output ->
+                                    if (requested.size == source.numberOfPages &&
+                                        requested.indices.all { requested[it] == it }) {
+                                        source.save(output)
+                                    } else {
+                                        PDDocument().use { subset ->
+                                            requested.forEach { pageIndex ->
+                                                if (cancellationSignal.isCanceled) {
+                                                    callback.onWriteCancelled()
+                                                    return
+                                                }
+                                                subset.importPage(source.getPage(pageIndex))
+                                            }
+                                            subset.save(output)
+                                        }
+                                    }
+                                    output.flush()
+                                }
                             }
                         }
-                        callback.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                        callback.onWriteFinished(pages)
                     } catch (e: Exception) {
                         callback.onWriteFailed(e.localizedMessage ?: "PDF printing failed")
                     }
