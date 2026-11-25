@@ -4026,7 +4026,8 @@ class MainActivity : AppCompatActivity() {
             PdfTool("PDF to Excel", "X", 0xFF16834A.toInt()) { excelExportPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Book Scanner", "▤", 0xFF0891B2.toInt()) { bookSpreadPicker.launch(arrayOf("image/*")) },
             PdfTool("Document Eraser", "✎", 0xFF7C3AED.toInt()) { documentEraserPicker.launch(arrayOf("image/*")) },
-            PdfTool("PDF Redaction", "▣", 0xFFDC4D58.toInt()) { secureRedactionPicker.launch(arrayOf("application/pdf")) }
+            PdfTool("PDF Redaction", "▣", 0xFFDC4D58.toInt()) { secureRedactionPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF to PowerPoint", "P", 0xFFEA580C.toInt()) { powerpointExportPicker.launch(arrayOf("application/pdf")) }
         )
         val catalog = (quickTools + pdfTools).distinctBy { it.title }
         val defaultPins = quickTools.map { it.title }.toSet()
@@ -4105,7 +4106,7 @@ class MainActivity : AppCompatActivity() {
             "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery", "Page Collage", "Book Scanner" -> "Create"
             "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers", "Document Eraser", "PDF Redaction" -> "Edit"
             "Reorder Pages", "Delete Pages", "Extract Pages", "Duplicate Pages" -> "Organize"
-            "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF", "PDF to Excel", "Image Quality Enhancer" -> "Convert"
+            "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF", "PDF to Excel", "PDF to PowerPoint", "Image Quality Enhancer" -> "Convert"
             "Add Password", "Remove Password" -> "Protect"
             else -> "View & share"
         }
@@ -4720,6 +4721,86 @@ class MainActivity : AppCompatActivity() {
                 }
             } finally { output.close() }
         }
+    }
+
+
+    private val powerpointExportPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) exportPdfPresentation(uri)
+    }
+
+    private fun exportPdfPresentation(uri: Uri) {
+        appDialog().setTitle("PDF to PowerPoint")
+            .setMessage("Create a widescreen PPTX with one high-resolution image per PDF page. Original visual layout is preserved, but individual text and objects are not editable. Maximum 40 pages.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Export PPTX") { _, _ ->
+                advancedToolJob("Creating PowerPoint…") {
+                    val output = ByteArrayOutputStream()
+                    val p = "http://schemas.openxmlformats.org/presentationml/2006/main"
+                    val a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+                    val r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                    val relNs = "http://schemas.openxmlformats.org/package/2006/relationships"
+                    fun rel(id: String, type: String, target: String) = """<Relationship Id="$id" Type="$r/$type" Target="$target"/>"""
+                    fun rels(body: String) = """<Relationships xmlns="$relNs">$body</Relationships>"""
+                    val group = """<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>"""
+                    val clrMap = """<p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" folHlink="folHlink" hlink="hlink" tx1="dk1" tx2="dk2"/>"""
+                    val ns = "xmlns:p=\"$p\" xmlns:a=\"$a\" xmlns:r=\"$r\""
+                    val cx = 12192000L
+                    val cy = 6858000L
+                    var count = 0
+                    ZipOutputStream(output).use { zip ->
+                        fun part(name: String, data: ByteArray) { zip.putNextEntry(ZipEntry(name)); zip.write(data); zip.closeEntry() }
+                        fun xml(name: String, value: String) = part(name, value.toByteArray(Charsets.UTF_8))
+                        val descriptor = contentResolver.openFileDescriptor(uri,"r") ?: error("Cannot open PDF")
+                        PdfRenderer(descriptor).use { renderer ->
+                            count = renderer.pageCount
+                            require(count in 1..40) { "Select a PDF containing 1–40 pages" }
+                            for (index in 0 until count) {
+                                val n = index + 1
+                                renderer.openPage(index).use { page ->
+                                    val scale = minOf(3f, 2200f/maxOf(page.width,page.height))
+                                    val bitmap = Bitmap.createBitmap((page.width*scale).toInt().coerceAtLeast(1),(page.height*scale).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
+                                    try {
+                                        bitmap.eraseColor(android.graphics.Color.WHITE)
+                                        page.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        val image = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG,94,it) }.toByteArray()
+                                        part("ppt/media/page$n.jpg",image)
+                                        require(output.size() <= 64*1024*1024) { "Presentation exceeds 64 MB" }
+                                        val ratio = minOf(cx.toDouble()/page.width,cy.toDouble()/page.height)
+                                        val w = (page.width*ratio).toLong()
+                                        val h = (page.height*ratio).toLong()
+                                        val left = (cx-w)/2
+                                        val top = (cy-h)/2
+                                        val picture = """<p:pic><p:nvPicPr><p:cNvPr id="2" name="PDF Page $n"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="$left" y="$top"/><a:ext cx="$w" cy="$h"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"""
+                                        xml("ppt/slides/slide$n.xml","""<p:sld $ns><p:cSld><p:spTree>$group$picture</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>""")
+                                        xml("ppt/slides/_rels/slide$n.xml.rels",rels(rel("rId1","slideLayout","../slideLayouts/slideLayout1.xml")+rel("rId2","image","../media/page$n.jpg")))
+                                    } finally { bitmap.recycle() }
+                                }
+                            }
+                        }
+                        val slides = (1..count).joinToString("") { n -> """<p:sldId id="${255+n}" r:id="rId${n+1}"/>""" }
+                        xml("ppt/presentation.xml","""<p:presentation $ns><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>$slides</p:sldIdLst><p:sldSz cx="$cx" cy="$cy" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>""")
+                        xml("ppt/_rels/presentation.xml.rels",rels(rel("rId1","slideMaster","slideMasters/slideMaster1.xml")+(1..count).joinToString("") { n -> rel("rId${n+1}","slide","slides/slide$n.xml") }))
+                        xml("ppt/slideMasters/slideMaster1.xml","""<p:sldMaster $ns><p:cSld><p:spTree>$group</p:spTree></p:cSld>$clrMap<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles/></p:sldMaster>""")
+                        xml("ppt/slideMasters/_rels/slideMaster1.xml.rels",rels(rel("rId1","slideLayout","../slideLayouts/slideLayout1.xml")+rel("rId2","theme","../theme/theme1.xml")))
+                        xml("ppt/slideLayouts/slideLayout1.xml","""<p:sldLayout $ns type="blank" preserve="1"><p:cSld name="Blank"><p:spTree>$group</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>""")
+                        xml("ppt/slideLayouts/_rels/slideLayout1.xml.rels",rels(rel("rId1","slideMaster","../slideMasters/slideMaster1.xml")))
+                        val colors = listOf("dk1" to "000000","lt1" to "FFFFFF","dk2" to "172B4D","lt2" to "F1F5F9","accent1" to "2563EB","accent2" to "0D9488","accent3" to "7C3AED","accent4" to "EA580C","accent5" to "DC2626","accent6" to "64748B","hlink" to "2563EB","folHlink" to "7C3AED").joinToString("") { (key,value) -> """<a:$key><a:srgbClr val="$value"/></a:$key>""" }
+                        val fill = """<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>"""
+                        val line = """<a:ln w="12700">$fill<a:prstDash val="solid"/></a:ln>"""
+                        xml("ppt/theme/theme1.xml","""<a:theme xmlns:a="$a" name="DocNexa"><a:themeElements><a:clrScheme name="DocNexa">$colors</a:clrScheme><a:fontScheme name="Arial"><a:majorFont><a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Default"><a:fillStyleLst>$fill$fill$fill</a:fillStyleLst><a:lnStyleLst>$line$line$line</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>$fill$fill$fill</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>""")
+                        xml("_rels/.rels",rels(rel("rId1","officeDocument","ppt/presentation.xml")))
+                        val slideTypes = (1..count).joinToString("") { n -> """<Override PartName="/ppt/slides/slide$n.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>""" }
+                        xml("[Content_Types].xml","""<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>$slideTypes</Types>""")
+                    }
+                    val data = output.toByteArray()
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = "PowerPoint export complete"
+                            saveDocumentBytes(data,"PDF_Presentation","application/vnd.openxmlformats-officedocument.presentationml.presentation","pptx")
+                        }
+                    }
+                }
+            }.show()
     }
 
     private fun showCreatePdfHub() {
