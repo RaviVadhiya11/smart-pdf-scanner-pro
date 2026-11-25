@@ -4019,7 +4019,11 @@ class MainActivity : AppCompatActivity() {
             PdfTool("PDF To Text", "T", 0xFF35B5E5.toInt()) { pdfTextPicker.launch(arrayOf("application/pdf")) },
             PdfTool("PDF To ZIP", "▣", 0xFFE91E63.toInt()) { zipPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Text To PDF", "▤", 0xFF9826AC.toInt()) { createTextPdfDialog() },
-            PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) }
+            PdfTool("PDF Details", "ⓘ", 0xFF673AB7.toInt()) { detailsPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF Compare", "≠", 0xFF2563EB.toInt()) { compareDocumentsPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Image Quality Enhancer", "✦", 0xFF0D9488.toInt()) { enhanceDocumentPicker.launch(arrayOf("image/*")) },
+            PdfTool("Batch Document Studio", "▦", 0xFF7C3AED.toInt()) { batchDocumentsPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("PDF to Excel", "X", 0xFF16834A.toInt()) { excelExportPicker.launch(arrayOf("application/pdf")) }
         )
         val catalog = (quickTools + pdfTools).distinctBy { it.title }
         val defaultPins = quickTools.map { it.title }.toSet()
@@ -4098,7 +4102,7 @@ class MainActivity : AppCompatActivity() {
             "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery", "Page Collage" -> "Create"
             "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers" -> "Edit"
             "Reorder Pages", "Delete Pages", "Extract Pages", "Duplicate Pages" -> "Organize"
-            "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF" -> "Convert"
+            "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF", "PDF to Excel", "Image Quality Enhancer" -> "Convert"
             "Add Password", "Remove Password" -> "Protect"
             else -> "View & share"
         }
@@ -4282,6 +4286,195 @@ class MainActivity : AppCompatActivity() {
         })
         loader.loadAd(AdRequest.Builder().build())
         return { releaseAd(); (slot.parent as? ViewGroup)?.removeView(slot) }
+    }
+
+
+    private val compareDocumentsPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files ->
+        if (files.size == 2) compareSelectedPdfs(files[0], files[1])
+        else if (files.isNotEmpty()) Toast.makeText(this, "Select exactly two PDFs", Toast.LENGTH_LONG).show()
+    }
+    private val enhanceDocumentPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showDocumentEnhancer(uri)
+    }
+    private val batchDocumentsPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files ->
+        if (files.isNotEmpty()) showBatchDocuments(files)
+    }
+    private val excelExportPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) exportPdfSpreadsheet(uri)
+    }
+
+    private fun advancedToolJob(title: String, action: () -> Unit) {
+        status.text = title
+        Thread {
+            try { action() } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Operation failed"
+                        appDialog().setTitle("Unable to complete").setMessage(e.localizedMessage ?: "Document processing failed")
+                            .setPositiveButton("OK", null).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun compareSelectedPdfs(first: Uri, second: Uri) {
+        advancedToolJob("Comparing PDF documents…") {
+            fun fingerprints(uri: Uri): List<Pair<String, String>> =
+                contentResolver.openFileDescriptor(uri, "r")!!.use { descriptor ->
+                    PdfRenderer(android.os.ParcelFileDescriptor.dup(descriptor.fileDescriptor)).use { renderer ->
+                        require(renderer.pageCount <= 150) { "Comparison supports up to 150 pages per document" }
+                        (0 until renderer.pageCount).map { index ->
+                            renderer.openPage(index).use { page ->
+                                val scale = minOf(1f, 800f / maxOf(page.width, page.height))
+                                val bitmap = Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                                try {
+                                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    val buffer = java.nio.ByteBuffer.allocate(bitmap.byteCount)
+                                    bitmap.copyPixelsToBuffer(buffer)
+                                    val hash = MessageDigest.getInstance("SHA-256").digest(buffer.array()).joinToString("") { "%02x".format(it.toInt() and 255) }
+                                    "${page.width} × ${page.height}" to hash
+                                } finally { bitmap.recycle() }
+                            }
+                        }
+                    }
+                }
+            val a = fingerprints(first)
+            val b = fingerprints(second)
+            val changed = (0 until maxOf(a.size, b.size)).filter { a.getOrNull(it) != b.getOrNull(it) }
+            val report = "First PDF: ${a.size} pages\nSecond PDF: ${b.size} pages\nDifferent or missing pages: ${changed.size}\n\n" +
+                if (changed.isEmpty()) "No differences detected at preview resolution." else changed.joinToString(", ") { (it + 1).toString() }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    status.text = "Comparison complete"
+                    appDialog().setTitle("PDF Compare • Visual report").setMessage(report + "\n\nCompares rendered pages by position; does not compare metadata or hidden content.")
+                        .setPositiveButton("Save report") { _, _ -> createPdfFromText(report, "PDF_Comparison") }
+                        .setNegativeButton("Close", null).show()
+                }
+            }
+        }
+    }
+
+    private fun showDocumentEnhancer(uri: Uri) {
+        val options = arrayOf("Natural contrast", "Clean grayscale", "High contrast text")
+        appDialog().setTitle("Image Quality Enhancer").setItems(options) { _, choice ->
+            advancedToolJob("Enhancing image…") {
+                val source = decodeImageSafely(uri, 2400)
+                val result = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+                try {
+                    val saturation = android.graphics.ColorMatrix().apply { setSaturation(if (choice == 0) 1f else 0f) }
+                    val gain = if (choice == 2) 1.65f else 1.18f
+                    val offset = 128f * (1f - gain)
+                    val contrast = android.graphics.ColorMatrix(floatArrayOf(gain,0f,0f,0f,offset, 0f,gain,0f,0f,offset, 0f,0f,gain,0f,offset, 0f,0f,0f,1f,0f))
+                    saturation.postConcat(contrast)
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = android.graphics.ColorMatrixColorFilter(saturation) }
+                    Canvas(result).drawBitmap(source, 0f, 0f, paint)
+                    val bytes = ByteArrayOutputStream().also { result.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            val preview = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            val image = ImageView(this).apply { setImageBitmap(preview); adjustViewBounds = true; maxHeight = dp(360) }
+                            appDialog().setTitle("Enhanced preview").setView(image)
+                                .setPositiveButton("Save PNG") { _, _ -> saveDocumentBytes(bytes, "Enhanced", "image/png", "png") }
+                                .setNegativeButton("Close", null).show()
+                            status.text = "Enhancement complete"
+                        }
+                    }
+                } finally { source.recycle(); result.recycle() }
+            }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showBatchDocuments(files: List<Uri>) {
+        if (files.size > 20) { Toast.makeText(this, "Select up to 20 PDFs", Toast.LENGTH_LONG).show(); return }
+        appDialog().setTitle("Batch Document Studio")
+            .setMessage("${files.size} PDF files selected. Choose a batch operation. Originals are unchanged.")
+            .setItems(arrayOf("Merge into one PDF", "Export ZIP archive")) { _, operation ->
+                advancedToolJob("Processing batch…") {
+                    val bytes = ByteArrayOutputStream()
+                    if (operation == 0) {
+                        PDDocument().use { output ->
+                            files.forEach { uri ->
+                                contentResolver.openInputStream(uri)!!.use { input ->
+                                    PDDocument.load(input).use { source ->
+                                        require(output.numberOfPages + source.numberOfPages <= 300) { "Maximum 300 merged pages" }
+                                        PDFMergerUtility().appendDocument(output, source)
+                                    }
+                                }
+                            }
+                            output.save(bytes)
+                        }
+                    } else {
+                        ZipOutputStream(bytes).use { zip ->
+                            var total = 0L
+                            files.forEachIndexed { index, uri ->
+                                zip.putNextEntry(ZipEntry("Document_${index + 1}.pdf"))
+                                contentResolver.openInputStream(uri)!!.use { input ->
+                                    val buffer = ByteArray(8192)
+                                    while (true) {
+                                        val count = input.read(buffer)
+                                        if (count < 0) break
+                                        total += count
+                                        require(total <= 64L * 1024 * 1024) { "Batch exceeds 64 MB" }
+                                        zip.write(buffer, 0, count)
+                                    }
+                                }
+                                zip.closeEntry()
+                            }
+                        }
+                    }
+                    val data = bytes.toByteArray()
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = "Batch complete"
+                            if (operation == 0) savePdfBytes(data, "Batch_Merged")
+                            else saveDocumentBytes(data, "Batch_Documents", "application/zip", "zip")
+                        }
+                    }
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun exportPdfSpreadsheet(uri: Uri) {
+        appDialog().setTitle("PDF to Excel")
+            .setMessage("Extract selectable text into an editable XLSX sheet. Tabs or runs of spaces separate columns. Scanned pages need OCR first; complex tables may require manual correction.")
+            .setPositiveButton("Export XLSX") { _, _ ->
+                advancedToolJob("Exporting spreadsheet…") {
+                    val text = contentResolver.openInputStream(uri)!!.use { input ->
+                        PDDocument.load(input).use { doc ->
+                            require(doc.numberOfPages <= 100) { "Maximum 100 pages" }
+                            PDFTextStripper().apply { sortByPosition = true }.getText(doc)
+                        }
+                    }
+                    require(text.isNotBlank() && text.length <= 500000) { "No selectable text or document too large" }
+                    fun xml(value: String) = value.filter { it == '\t' || it == '\n' || it == '\r' || it >= ' ' }
+                        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    val rows = text.lineSequence().filter { it.isNotBlank() }.take(10000).mapIndexed { index, line ->
+                        val cells = line.trim().split(Regex("\\t+| {2,}")).take(100).joinToString("") { cell ->
+                            "<c t=\"inlineStr\"><is><t xml:space=\"preserve\">${xml(cell)}</t></is></c>"
+                        }
+                        "<row r=\"${index + 1}\">$cells</row>"
+                    }.joinToString("")
+                    val output = ByteArrayOutputStream()
+                    ZipOutputStream(output).use { zip ->
+                        fun part(name: String, value: String) {
+                            zip.putNextEntry(ZipEntry(name)); zip.write(value.toByteArray(Charsets.UTF_8)); zip.closeEntry()
+                        }
+                        part("[Content_Types].xml", """<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>""")
+                        part("_rels/.rels", """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>""")
+                        part("xl/workbook.xml", """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="PDF Text" sheetId="1" r:id="rId1"/></sheets></workbook>""")
+                        part("xl/_rels/workbook.xml.rels", """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>""")
+                        part("xl/worksheets/sheet1.xml", """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>$rows</sheetData></worksheet>""")
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = "Excel export complete"
+                            saveDocumentBytes(output.toByteArray(), "PDF_Excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx")
+                        }
+                    }
+                }
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showCreatePdfHub() {
