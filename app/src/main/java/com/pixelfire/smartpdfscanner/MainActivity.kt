@@ -4023,7 +4023,10 @@ class MainActivity : AppCompatActivity() {
             PdfTool("PDF Compare", "≠", 0xFF2563EB.toInt()) { compareDocumentsPicker.launch(arrayOf("application/pdf")) },
             PdfTool("Image Quality Enhancer", "✦", 0xFF0D9488.toInt()) { enhanceDocumentPicker.launch(arrayOf("image/*")) },
             PdfTool("Batch Document Studio", "▦", 0xFF7C3AED.toInt()) { batchDocumentsPicker.launch(arrayOf("application/pdf")) },
-            PdfTool("PDF to Excel", "X", 0xFF16834A.toInt()) { excelExportPicker.launch(arrayOf("application/pdf")) }
+            PdfTool("PDF to Excel", "X", 0xFF16834A.toInt()) { excelExportPicker.launch(arrayOf("application/pdf")) },
+            PdfTool("Book Scanner", "▤", 0xFF0891B2.toInt()) { bookSpreadPicker.launch(arrayOf("image/*")) },
+            PdfTool("Document Eraser", "✎", 0xFF7C3AED.toInt()) { documentEraserPicker.launch(arrayOf("image/*")) },
+            PdfTool("PDF Redaction", "▣", 0xFFDC4D58.toInt()) { secureRedactionPicker.launch(arrayOf("application/pdf")) }
         )
         val catalog = (quickTools + pdfTools).distinctBy { it.title }
         val defaultPins = quickTools.map { it.title }.toSet()
@@ -4099,8 +4102,8 @@ class MainActivity : AppCompatActivity() {
         val toolGrid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(toolGrid)
         fun toolCategory(tool: PdfTool): String = when (tool.title) {
-            "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery", "Page Collage" -> "Create"
-            "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers" -> "Edit"
+            "Create PDF", "Text To PDF", "Image to PDF", "Add Page from Gallery", "Page Collage", "Book Scanner" -> "Create"
+            "Add/Merge PDF Files", "Split", "Rotate all pages", "Signature", "Watermark", "PDF Editor", "Page Numbers", "Document Eraser", "PDF Redaction" -> "Edit"
             "Reorder Pages", "Delete Pages", "Extract Pages", "Duplicate Pages" -> "Organize"
             "PDF to Image", "PDF To Text", "PDF To ZIP", "PDF to Word", "OCR Image", "Compress PDF", "PDF to Excel", "Image Quality Enhancer" -> "Convert"
             "Add Password", "Remove Password" -> "Protect"
@@ -4389,7 +4392,6 @@ class MainActivity : AppCompatActivity() {
     private fun showBatchDocuments(files: List<Uri>) {
         if (files.size > 20) { Toast.makeText(this, "Select up to 20 PDFs", Toast.LENGTH_LONG).show(); return }
         appDialog().setTitle("Batch Document Studio")
-            .setMessage("${files.size} PDF files selected. Choose a batch operation. Originals are unchanged.")
             .setItems(arrayOf("Merge into one PDF", "Export ZIP archive")) { _, operation ->
                 advancedToolJob("Processing batch…") {
                     val bytes = ByteArrayOutputStream()
@@ -4475,6 +4477,249 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.setNegativeButton("Cancel", null).show()
+    }
+
+
+    private val bookSpreadPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showBookSpread(uri)
+    }
+    private val documentEraserPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) showDocumentEraser(uri)
+    }
+    private val secureRedactionPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) selectRedactionPage(uri)
+    }
+
+    private fun showBookSpread(uri: Uri) {
+        advancedToolJob("Preparing book spread…") {
+            val bitmap = decodeImageSafely(uri, 3000)
+            require(bitmap.width >= 2) { "Image is too narrow" }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) { bitmap.recycle(); return@runOnUiThread }
+                val panel = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                }
+                val split = SeekBar(this).apply { max = 60; progress = 30 }
+                val preview = object : View(this) {
+                    private val ink = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                    override fun onDraw(canvas: Canvas) {
+                        super.onDraw(canvas)
+                        val scale = minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+                        val w = bitmap.width * scale
+                        val h = bitmap.height * scale
+                        val left = (width - w) / 2f
+                        val top = (height - h) / 2f
+                        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, top, left + w, top + h), ink)
+                        val center = left + w * (20 + split.progress) / 100f
+                        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2563EB.toInt(); strokeWidth = dp(3).toFloat() }
+                        canvas.drawLine(center, top, center, top + h, line)
+                    }
+                }
+                val reverse = android.widget.CheckBox(this).apply { text = "Right page first" }
+                panel.addView(label("Adjust the center divider. Each half becomes a separate page.", 12f, 0xFF64748B.toInt()))
+                panel.addView(preview, LinearLayout.LayoutParams(-1, dp(260)))
+                panel.addView(split)
+                panel.addView(reverse)
+                split.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { preview.invalidate() }
+                    override fun onStartTrackingTouch(bar: SeekBar?) {}
+                    override fun onStopTrackingTouch(bar: SeekBar?) {}
+                })
+                val dialog = appDialog().setTitle("Book Scanner • Split spread").setView(panel)
+                    .setPositiveButton("Create PDF") { _, _ ->
+                        val middle = (bitmap.width * (20 + split.progress) / 100).coerceIn(1, bitmap.width - 1)
+                        val left = Bitmap.createBitmap(bitmap, 0, 0, middle, bitmap.height)
+                        val right = Bitmap.createBitmap(bitmap, middle, 0, bitmap.width - middle, bitmap.height)
+                        createPdfFromBitmaps(if (reverse.isChecked) listOf(right, left) else listOf(left, right), "Book_Scan")
+                    }.setNegativeButton("Cancel", null).create()
+                dialog.setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
+                dialog.show()
+                status.text = "Book spread ready"
+            }
+        }
+    }
+
+    private fun showDocumentEraser(uri: Uri) {
+        advancedToolJob("Preparing image editor…") {
+            val source = decodeImageSafely(uri, 2400)
+            val editable = source.copy(Bitmap.Config.ARGB_8888, true)
+            source.recycle()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) { editable.recycle(); return@runOnUiThread }
+                val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+                val brush = SeekBar(this).apply { max = 90; progress = 25 }
+                val editor = object : View(this) {
+                    val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+                    val target = Canvas(editable)
+                    var previousX = 0f
+                    var previousY = 0f
+                    private fun scale() = minOf(width.toFloat() / editable.width, height.toFloat() / editable.height).coerceAtLeast(0.001f)
+                    override fun onDraw(canvas: Canvas) {
+                        val scale = scale()
+                        val left = (width - editable.width * scale) / 2
+                        val top = (height - editable.height * scale) / 2
+                        canvas.drawBitmap(editable, null, android.graphics.RectF(left, top, left + editable.width * scale, top + editable.height * scale), Paint(Paint.FILTER_BITMAP_FLAG))
+                    }
+                    override fun onTouchEvent(event: MotionEvent): Boolean {
+                        val scale = scale()
+                        val x = ((event.x - (width - editable.width * scale) / 2) / scale).coerceIn(0f, editable.width.toFloat())
+                        val y = ((event.y - (height - editable.height * scale) / 2) / scale).coerceIn(0f, editable.height.toFloat())
+                        ink.strokeWidth = (brush.progress + 10) / scale
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> { parent?.requestDisallowInterceptTouchEvent(true); target.drawCircle(x, y, ink.strokeWidth / 2, ink); previousX = x; previousY = y }
+                            MotionEvent.ACTION_MOVE -> { target.drawLine(previousX, previousY, x, y, ink); previousX = x; previousY = y }
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { parent?.requestDisallowInterceptTouchEvent(false); performClick() }
+                        }
+                        invalidate()
+                        return true
+                    }
+                    override fun performClick(): Boolean { super.performClick(); return true }
+                }
+                panel.addView(label("Paint white over unwanted marks on white paper. This is a manual brush, not AI inpainting.", 12f, 0xFF64748B.toInt()))
+                panel.addView(editor, LinearLayout.LayoutParams(-1, dp(300)))
+                panel.addView(label("Brush size", 12f, 0xFF64748B.toInt()))
+                panel.addView(brush)
+                val dialog = appDialog().setTitle("Document Eraser").setView(panel)
+                    .setPositiveButton("Save PNG") { _, _ ->
+                        val bytes = ByteArrayOutputStream().also { editable.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+                        saveDocumentBytes(bytes, "Clean_Document", "image/png", "png")
+                    }.setNegativeButton("Cancel", null).create()
+                dialog.setOnDismissListener { editable.recycle() }
+                dialog.show()
+                status.text = "Document editor ready"
+            }
+        }
+    }
+
+    private fun selectRedactionPage(uri: Uri) {
+        advancedToolJob("Opening PDF for redaction…") {
+            val count = contentResolver.openFileDescriptor(uri, "r")?.let { descriptor ->
+                PdfRenderer(descriptor).use { it.pageCount }
+            } ?: error("Cannot open PDF")
+            require(count in 1..50) { "Redaction supports 1–50 pages per job" }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    appDialog().setTitle("PDF Redaction • Select page")
+                        .setItems(Array(count) { "Page " + (it + 1) }) { _, index -> showRedactionPreview(uri, index) }
+                        .setNegativeButton("Cancel", null).show()
+                }
+            }
+        }
+    }
+
+    private fun showRedactionPreview(uri: Uri, pageIndex: Int) {
+        advancedToolJob("Rendering redaction preview…") {
+            val preview = contentResolver.openFileDescriptor(uri, "r")?.let { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    renderer.openPage(pageIndex).use { page ->
+                        val scale = minOf(2f, 1600f / maxOf(page.width, page.height))
+                        Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
+                            it.eraseColor(android.graphics.Color.WHITE)
+                            page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        }
+                    }
+                }
+            } ?: error("Cannot render PDF")
+            runOnUiThread {
+                if (isFinishing || isDestroyed) { preview.recycle(); return@runOnUiThread }
+                val regions = mutableListOf<android.graphics.RectF>()
+                val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+                val editor = object : View(this) {
+                    var active: android.graphics.RectF? = null
+                    var startX = 0f
+                    var startY = 0f
+                    private fun bounds(): android.graphics.RectF {
+                        val scale = minOf(width.toFloat() / preview.width, height.toFloat() / preview.height)
+                        val w = preview.width * scale
+                        val h = preview.height * scale
+                        return android.graphics.RectF((width-w)/2, (height-h)/2, (width+w)/2, (height+h)/2)
+                    }
+                    override fun onDraw(canvas: Canvas) {
+                        val b = bounds()
+                        canvas.drawBitmap(preview, null, b, Paint(Paint.FILTER_BITMAP_FLAG))
+                        val paint = Paint().apply { color = android.graphics.Color.BLACK }
+                        (regions + listOfNotNull(active)).forEach {
+                            canvas.drawRect(b.left + it.left*b.width(), b.top + it.top*b.height(), b.left + it.right*b.width(), b.top + it.bottom*b.height(), paint)
+                        }
+                    }
+                    override fun onTouchEvent(event: MotionEvent): Boolean {
+                        val b = bounds()
+                        val x = ((event.x-b.left)/b.width().coerceAtLeast(1f)).coerceIn(0f,1f)
+                        val y = ((event.y-b.top)/b.height().coerceAtLeast(1f)).coerceIn(0f,1f)
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> { parent?.requestDisallowInterceptTouchEvent(true); startX=x; startY=y; active=null }
+                            MotionEvent.ACTION_MOVE -> active = android.graphics.RectF(minOf(x,startX),minOf(y,startY),maxOf(x,startX),maxOf(y,startY))
+                            MotionEvent.ACTION_UP -> {
+                                val rect = android.graphics.RectF(minOf(x,startX),minOf(y,startY),maxOf(x,startX),maxOf(y,startY))
+                                if (rect.width() > 0.003f && rect.height() > 0.003f) regions.add(rect)
+                                active=null; parent?.requestDisallowInterceptTouchEvent(false); performClick()
+                            }
+                            MotionEvent.ACTION_CANCEL -> { active=null; parent?.requestDisallowInterceptTouchEvent(false) }
+                        }
+                        invalidate()
+                        return true
+                    }
+                    override fun performClick(): Boolean { super.performClick(); return true }
+                }
+                panel.addView(label("Drag black rectangles over sensitive details. Review every region before saving. Other pages are not automatically redacted.",12f,0xFF64748B.toInt()))
+                panel.addView(editor, LinearLayout.LayoutParams(-1,dp(340)))
+                panel.addView(Button(this).apply { text="Undo last region"; setOnClickListener { if(regions.isNotEmpty()) regions.removeAt(regions.lastIndex); editor.invalidate() } })
+                val dialog = appDialog().setTitle("PDF Redaction • Page "+(pageIndex+1)).setView(panel)
+                    .setNegativeButton("Cancel",null).setPositiveButton("Export redacted PDF",null).create()
+                dialog.setOnDismissListener { preview.recycle() }
+                dialog.show()
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    if(regions.isEmpty()) { Toast.makeText(this,"Mark at least one region",Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                    val selected = regions.map { android.graphics.RectF(it) }
+                    dialog.dismiss()
+                    appDialog().setTitle("Permanently remove marked content?")
+                        .setMessage("Creates a new image-only PDF from rendered pages, with marked pixels overwritten. Text search, forms, links and original metadata are discarded. Original PDF remains unchanged. Review output before sharing.")
+                        .setNegativeButton("Cancel",null).setPositiveButton("Create copy") { _, _ -> exportRedactedPdf(uri,pageIndex,selected) }.show()
+                }
+                status.text="Redaction preview ready"
+            }
+        }
+    }
+
+    private fun exportRedactedPdf(uri: Uri, selectedPage: Int, regions: List<android.graphics.RectF>) {
+        advancedToolJob("Creating redacted copy…") {
+            val output = PdfDocument()
+            try {
+                contentResolver.openFileDescriptor(uri,"r")?.let { descriptor ->
+                    PdfRenderer(descriptor).use { renderer ->
+                        require(renderer.pageCount in 1..50) { "Maximum 50 pages" }
+                        for(i in 0 until renderer.pageCount) {
+                            renderer.openPage(i).use { page ->
+                                val scale=minOf(2.5f,2200f/maxOf(page.width,page.height))
+                                val bitmap=Bitmap.createBitmap((page.width*scale).toInt().coerceAtLeast(1),(page.height*scale).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
+                                try {
+                                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                                    page.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    if(i==selectedPage) {
+                                        val canvas=Canvas(bitmap)
+                                        val paint=Paint().apply { color=android.graphics.Color.BLACK }
+                                        regions.forEach { rect ->
+                                            canvas.drawRect((rect.left*bitmap.width-2).coerceAtLeast(0f),(rect.top*bitmap.height-2).coerceAtLeast(0f),(rect.right*bitmap.width+2).coerceAtMost(bitmap.width.toFloat()),(rect.bottom*bitmap.height+2).coerceAtMost(bitmap.height.toFloat()),paint)
+                                        }
+                                    }
+                                    val resultPage=output.startPage(PdfDocument.PageInfo.Builder(page.width,page.height,i+1).create())
+                                    resultPage.canvas.drawBitmap(bitmap,null,Rect(0,0,page.width,page.height),Paint(Paint.FILTER_BITMAP_FLAG))
+                                    output.finishPage(resultPage)
+                                } finally { bitmap.recycle() }
+                            }
+                        }
+                    }
+                } ?: error("Cannot read PDF")
+                val bytes=ByteArrayOutputStream().also { output.writeTo(it) }.toByteArray()
+                runOnUiThread {
+                    if(!isFinishing && !isDestroyed) {
+                        status.text="Redacted PDF created"
+                        savePdfBytes(bytes,"Redacted")
+                    }
+                }
+            } finally { output.close() }
+        }
     }
 
     private fun showCreatePdfHub() {
