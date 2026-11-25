@@ -1603,59 +1603,122 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) convertOfficeTextToPdf(uri)
     }
 
-    // Basic offline text conversion, not a layout-preserving Office renderer.
+    // Bounded, namespace-aware offline Office extraction.
     private fun convertOfficeTextToPdf(uri: Uri) {
         Thread {
             try {
-                val name = android.provider.OpenableColumns.DISPLAY_NAME.let { column ->
-                    contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) cursor.getString(0) else null
-                    }
-                } ?: "Office document"
+                val name = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                } ?: error("Cannot identify document")
                 val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-                require(ext in setOf("docx", "xlsx", "pptx")) { "Select a DOCX, XLSX or PPTX file" }
-                val entryPattern = when (ext) {
-                    "docx" -> Regex("^word/document\\.xml$")
-                    "xlsx" -> Regex("^xl/(sharedStrings|worksheets/sheet[0-9]+)\\.xml$")
-                    else -> Regex("^ppt/slides/slide[0-9]+\\.xml$")
-                }
-                val parts = mutableListOf<Pair<String, String>>()
+                require(ext in setOf("docx", "xlsx", "pptx")) { "Select DOCX, XLSX or PPTX" }
+                val parts = mutableMapOf<String, ByteArray>()
+                var total = 0L
+                var entries = 0
+                val pattern = Regex("word/document\\.xml|xl/(sharedStrings\\.xml|worksheets/sheet[0-9]+\\.xml)|ppt/slides/slide[0-9]+\\.xml")
                 contentResolver.openInputStream(uri)?.use { stream ->
                     java.util.zip.ZipInputStream(stream).use { zip ->
-                        var entry = zip.nextEntry
-                        while (entry != null) {
-                            if (!entry.isDirectory && entry.name.matches(entryPattern)) {
-                                val xml = zip.readBytes().toString(Charsets.UTF_8)
-                                require(xml.length <= 5_000_000) { "Document section too large" }
-                                val text = when (ext) {
-                                    "docx" -> xml.replace(Regex("</w:p>"), "\\n")
-                                        .replace(Regex("<w:tab[^>]*/>"), " ")
-                                    "pptx" -> xml.replace(Regex("</a:p>"), "\\n")
-                                    else -> xml.replace(Regex("</row>"), "\\n")
-                                        .replace(Regex("</c>"), " | ")
-                                }.replace(Regex("<[^>]*>"), "")
-                                    .replace("&amp;", "&").replace("&lt;", "<")
-                                    .replace("&gt;", ">").replace("&quot;", "\"")
-                                    .replace("&apos;", "'").trim()
-                                if (text.isNotBlank()) parts.add(entry.name to text)
+                        while (true) {
+                            val entry = zip.nextEntry ?: break
+                            require(++entries <= 5000) { "Too many document sections" }
+                            val wanted = !entry.isDirectory && entry.name.matches(pattern)
+                            val output = ByteArrayOutputStream()
+                            val buffer = ByteArray(8192)
+                            var count = 0
+                            while (true) {
+                                val n = zip.read(buffer)
+                                if (n < 0) break
+                                count += n
+                                total += n
+                                require(total <= 96L * 1024 * 1024) { "Expanded document exceeds 96 MB" }
+                                if (wanted) {
+                                    require(count <= 8 * 1024 * 1024) { "Document section exceeds 8 MB" }
+                                    output.write(buffer, 0, n)
+                                }
                             }
-                            entry = zip.nextEntry
+                            if (wanted) parts[entry.name] = output.toByteArray()
+                            zip.closeEntry()
                         }
                     }
                 } ?: error("Cannot read document")
-                val content = parts.sortedBy { it.first }.joinToString("\\n\\n") { it.second }
-                require(content.isNotBlank()) { "No readable text found in this Office file" }
-                require(content.length <= 500_000) { "Document text is too large for basic conversion" }
+                fun parse(bytes: ByteArray, event: (org.xmlpull.v1.XmlPullParser, Int) -> Unit) {
+                    val parser = android.util.Xml.newPullParser()
+                    parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                    parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+                    parser.setInput(bytes.inputStream(), null)
+                    while (parser.eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                        event(parser, parser.eventType)
+                        parser.nextToken()
+                    }
+                }
+                val start = org.xmlpull.v1.XmlPullParser.START_TAG
+                val end = org.xmlpull.v1.XmlPullParser.END_TAG
+                val txt = org.xmlpull.v1.XmlPullParser.TEXT
+                val shared = mutableListOf<String>()
+                parts["xl/sharedStrings.xml"]?.let { bytes ->
+                    var inText = false
+                    var value = StringBuilder()
+                    parse(bytes) { p, e ->
+                        if (e == start && p.name == "si") value = StringBuilder()
+                        if (e == start && p.name == "t") inText = true
+                        if (e == txt && inText) value.append(p.text)
+                        if (e == end && p.name == "t") inText = false
+                        if (e == end && p.name == "si") shared.add(value.toString())
+                    }
+                }
+                val content = StringBuilder()
+                val ordered = parts.keys.filter { it != "xl/sharedStrings.xml" }.sortedBy {
+                    Regex("[0-9]+").find(it)?.value?.toIntOrNull() ?: 0
+                }
+                ordered.forEachIndexed { index, key ->
+                    if (ext != "docx") content.append("\n").append(if (ext == "xlsx") "Worksheet " else "Slide ").append(index + 1).append("\n\n")
+                    var inText = false
+                    var cellType = ""
+                    var cell = StringBuilder()
+                    var inCell = false
+                    var firstCell = true
+                    parse(parts.getValue(key)) { p, e ->
+                        if (e == start) {
+                            when (p.name) {
+                                "c" -> if (ext == "xlsx") { inCell = true; cellType = p.getAttributeValue(null, "t") ?: ""; cell = StringBuilder() }
+                                "row" -> firstCell = true
+                                "t", "v" -> inText = true
+                                "tab" -> if (ext == "docx") content.append('\t')
+                                "br" -> if (ext != "xlsx") content.append('\n')
+                            }
+                        } else if ((e == txt || e == org.xmlpull.v1.XmlPullParser.CDSECT || e == org.xmlpull.v1.XmlPullParser.ENTITY_REF) && inText) {
+                            val value = p.text ?: ""
+                            if (ext == "xlsx") { if (inCell) cell.append(value) } else content.append(value)
+                        } else if (e == end) {
+                            when (p.name) {
+                                "t", "v" -> inText = false
+                                "c" -> if (ext == "xlsx") {
+                                    if (!firstCell) content.append(" | ")
+                                    firstCell = false
+                                    val raw = cell.toString()
+                                    content.append(when (cellType) {
+                                        "s" -> raw.toIntOrNull()?.let { shared.getOrNull(it) } ?: ""
+                                        "b" -> if (raw == "1") "TRUE" else "FALSE"
+                                        else -> raw
+                                    })
+                                    inCell = false
+                                }
+                                "p" -> if (ext != "xlsx") content.append('\n')
+                                "row", "tr" -> content.append('\n')
+                            }
+                        }
+                        require(content.length <= 500_000) { "Document text exceeds conversion limit" }
+                    }
+                }
+                require(content.isNotBlank() && ordered.isNotEmpty()) { "No readable Office content found" }
                 runOnUiThread {
-                    appDialog().setTitle("Create text-based PDF?")
-                        .setMessage("This offline conversion extracts readable text only. Tables, images, charts, slide layouts, fonts and formatting may be lost. For an exact PDF, export from an Office app. Continue?")
+                    appDialog().setTitle("Office to PDF • Offline")
+                        .setMessage("Text, worksheet values and slide order are extracted locally. Complex formatting, images and charts are not reproduced. Continue?")
                         .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Create PDF") { _, _ ->
-                            createPdfFromText(content, name.substringBeforeLast('.').take(70))
-                        }.show()
+                        .setPositiveButton("Create PDF") { _, _ -> createPdfFromText(content.toString(), name.substringBeforeLast('.').take(70)) }.show()
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.message ?: "Could not read Office file", Toast.LENGTH_LONG).show() }
+                runOnUiThread { Toast.makeText(this, e.message ?: "Could not convert Office file", Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
@@ -1675,7 +1738,7 @@ class MainActivity : AppCompatActivity() {
             "Select multiple photos to make a PDF",
             "Combine two or more PDF files",
             "Explore editing and document utilities",
-            "Basic offline text-only PDF conversion (formatting may be lost)"
+            "Offline Office conversion with worksheet values and slide order"
         )
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -6089,7 +6152,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 val text = contentResolver.openInputStream(uri)?.use { stream ->
-                    PDDocument.load(stream).use { PDFTextStripper().getText(it) }
+                    PDDocument.load(stream).use { PDFTextStripper().apply { sortByPosition = true; pageEnd = "\n\u000C\n" }.getText(it) }
                 } ?: error("Cannot open PDF")
                 if (text.isBlank()) error("No selectable text found. This may be a scanned PDF; run Image to Text (OCR) first.")
                 val docxBytes = createDocxBytes(text, fontName, fontSize)
@@ -6120,13 +6183,14 @@ class MainActivity : AppCompatActivity() {
     private fun createDocxBytes(text: String, fontName: String, fontSize: Int): ByteArray {
         val safeFont = fontName.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         val paragraphs = text.replace("\r\n", "\n").replace('\r', '\n').split("\n")
-            .map { it.trimEnd() }
-            .filter { it.isNotBlank() }
+            .map { if (it.contains('\u000C')) "\u000C" else it.trimEnd() }
+            .filter { it == "\u000C" || it.isNotBlank() }
             .ifEmpty { listOf(text.trim()) }
         fun xml(value: String): String = value.replace("&", "&amp;")
             .replace("<", "&lt;").replace(">", "&gt;")
             .replace("\"", "&quot;").replace("'", "&apos;")
         val body = paragraphs.joinToString("") { paragraph ->
+            if (paragraph == "\u000C") return@joinToString "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
             val runs = paragraph.split("\t").mapIndexed { index, part ->
                 val tab = if (index > 0) "<w:r><w:tab/></w:r>" else ""
                 tab + "<w:r><w:rPr><w:rFonts w:ascii=\"$safeFont\" w:hAnsi=\"$safeFont\"/><w:sz w:val=\"${fontSize * 2}\"/></w:rPr><w:t xml:space=\"preserve\">${xml(part)}</w:t></w:r>"
