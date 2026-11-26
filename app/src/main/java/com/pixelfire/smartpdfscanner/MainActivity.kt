@@ -4344,6 +4344,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun compareSelectedPdfs(first: Uri, second: Uri) {
+        if (!requirePremiumTool("PDF Compare")) return
         advancedToolJob("Comparing PDF documents…") {
             fun fingerprints(uri: Uri): List<Pair<String, String>> =
                 contentResolver.openFileDescriptor(uri, "r")!!.use { descriptor ->
@@ -4412,6 +4413,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showBatchDocuments(files: List<Uri>) {
+        if (!requirePremiumTool("Batch Document Studio")) return
         if (files.size > 20) { Toast.makeText(this, "Select up to 20 PDFs", Toast.LENGTH_LONG).show(); return }
         appDialog().setTitle("Batch Document Studio")
             .setItems(arrayOf("Merge into one PDF", "Export ZIP archive")) { _, operation ->
@@ -4461,6 +4463,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exportPdfSpreadsheet(uri: Uri) {
+        if (!requirePremiumTool("PDF to Excel")) return
         appDialog().setTitle("PDF to Excel")
             .setMessage("Extract selectable text into an editable XLSX sheet. Tabs or runs of spaces separate columns. Scanned pages need OCR first; complex tables may require manual correction.")
             .setPositiveButton("Export XLSX") { _, _ ->
@@ -4750,6 +4753,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exportPdfPresentation(uri: Uri) {
+        if (!requirePremiumTool("PDF to PowerPoint")) return
         appDialog().setTitle("PDF to PowerPoint")
             .setMessage("Create a widescreen PPTX with one high-resolution image per PDF page. Original visual layout is preserved, but individual text and objects are not editable. Maximum 40 pages.")
             .setNegativeButton("Cancel", null)
@@ -4893,7 +4897,7 @@ class MainActivity : AppCompatActivity() {
             filtered.chunked(2).forEach { pair ->
                 val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
                 pair.forEach { item ->
-                    row.addView(toolCard(item.title,item.description,item.icon,0xFF3478F6.toInt(),item.action),LinearLayout.LayoutParams(0,dp(128),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
+                    row.addView(toolCard(if(item.title in premiumStudioTools) item.title+" • PRO" else item.title,if(item.title=="Remove Background")"Free preview • PRO export" else item.description,item.icon,0xFF3478F6.toInt()) { if(item.title !in premiumStudioTools || requirePremiumTool(item.title)) item.action() },LinearLayout.LayoutParams(0,dp(128),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
                 }
                 if(pair.size==1) row.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
                 grid.addView(row)
@@ -4935,6 +4939,19 @@ class MainActivity : AppCompatActivity() {
             billingHandler.postDelayed(this, 60_000L)
         }
     }
+
+    private val premiumPdfTools = setOf("PDF Compare", "PDF to Excel", "PDF to PowerPoint", "Searchable OCR PDF", "Batch Document Studio")
+    private val premiumStudioTools = setOf("Batch Converter", "Background Changer")
+    private fun requirePremiumTool(feature: String): Boolean {
+        if (hasVerifiedPremium()) return true
+        studioPremiumInfo(feature)
+        return false
+    }
+    private fun openPdfCatalogTool(tool: PdfTool) {
+        if (tool.title !in premiumPdfTools || requirePremiumTool(tool.title)) tool.action()
+    }
+    private fun pdfCatalogTitle(title: String): String =
+        if (title in premiumPdfTools) "$title • PRO" else title
 
     private fun hasVerifiedPremium(): Boolean =
         verifiedPremiumUser.isNotBlank() && verifiedPremiumUser == signedInUserId() &&
@@ -5060,14 +5077,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun studioPremiumInfo() {
+    private fun studioPremiumInfo(feature: String = "") {
         val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(12)) }
         val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(18),dp(18),dp(18)); background=gradient(0xFF10254C.toInt(),0xFF6546C8.toInt(),20) }
         hero.addView(label("♛ DOCNEXA PREMIUM",12f,0xFFFFD66B.toInt(),true))
         hero.addView(gap(6)); hero.addView(label(if(hasVerifiedPremium()) "Your membership is active" else "Unlock more. Work without ads.",21f,android.graphics.Color.WHITE,true))
         hero.addView(gap(6)); hero.addView(label("Ad-free documents • 4K and 8K image export",12f,0xFFE5EDFF.toInt()))
+        if(feature.isNotBlank()) hero.addView(label("$feature requires Premium",13f,0xFFFFD66B.toInt(),true))
         panel.addView(hero); panel.addView(gap(12))
-        listOf("✓ All existing PDF and image tools", "✓ No native ads with verified Premium", "✓ High-resolution 4K / 8K image scaling", "✓ Restore using the same Play and DocNexa accounts").forEach {
+        listOf("✓ All free tools, plus advanced PDF conversion", "✓ PDF Compare, searchable OCR PDF and batch studio", "✓ AI background cutout export and batch image conversion", "✓ No native ads with verified Premium", "✓ High-resolution 4K / 8K image scaling", "✓ Restore using the same Play and DocNexa accounts").forEach {
             panel.addView(label(it,13f,0xFF263957.toInt())); panel.addView(gap(6))
         }
         val message = label(if(hasVerifiedPremium()) "Verified membership" else "Loading prices from Google Play…",12f,0xFF64748B.toInt())
@@ -5191,7 +5209,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(label("${width} × ${height} px • ${format.uppercase(Locale.ROOT)} • ${bytes.size/1024} KB",12f,0xFF64748B.toInt()))
             val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
                 .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->
-                    if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo()
+                    if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo("High-quality image export")
                     else saveDocumentBytes(bytes,prefix,studioMime(format),format)
                 }.create()
             dialog.setOnDismissListener{preview.recycle()}
@@ -5200,6 +5218,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun studioFormatDialog(files:List<Uri>){
+        if(files.size > 1 && !requirePremiumTool("Batch Converter")) return
         if(files.size>10){Toast.makeText(this,"Select up to 10 images",Toast.LENGTH_LONG).show();return}
         val formats=arrayOf("jpg","png","webp","bmp")
         appDialog().setTitle(if(files.size==1)"Image Format Converter" else "Batch Image Converter")
@@ -5281,6 +5300,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun studioBackground(uri:Uri,change:Boolean){
+        if(change && !requirePremiumTool("Background Changer")) return
         val colors=intArrayOf(android.graphics.Color.WHITE,0xFFE2E8F0.toInt(),0xFFBFE4FF.toInt(),0xFF172B4D.toInt())
         fun process(color:Int?){
             advancedToolJob("Removing background…"){
@@ -5294,7 +5314,7 @@ class MainActivity : AppCompatActivity() {
                         Canvas(this).apply{drawColor(color);drawBitmap(foreground,0f,0f,Paint(Paint.FILTER_BITMAP_FLAG))}
                     }
                     if(foreground!==source)foreground.recycle()
-                    studioResult(output,if(color==null)"Background_Removed" else "Background_Changed")
+                    studioResult(output,if(color==null)"Background_Removed" else "Background_Changed",requiresPremium=true)
                 }finally{client.close();source.recycle()}
             }
         }
@@ -5602,7 +5622,7 @@ class MainActivity : AppCompatActivity() {
                     isClickable = true
                     isFocusable = true
                     contentDescription = tool.title
-                    setOnClickListener { tool.action() }
+                    setOnClickListener { openPdfCatalogTool(tool) }
                 }
                 item.addView(TextView(this).apply {
                     text = tool.symbol
@@ -5612,7 +5632,7 @@ class MainActivity : AppCompatActivity() {
                     background = rounded(0xFFEAF2FF.toInt(), 12)
                 }, LinearLayout.LayoutParams(dp(44), dp(44)))
                 item.addView(gap(7))
-                item.addView(label(tool.title, 12f, 0xFF263957.toInt(), true).apply {
+                item.addView(label(pdfCatalogTitle(tool.title), 12f, 0xFF263957.toInt(), true).apply {
                     gravity = Gravity.CENTER
                     textAlignment = View.TEXT_ALIGNMENT_CENTER
                     minLines = 2
@@ -5671,7 +5691,7 @@ class MainActivity : AppCompatActivity() {
                     isClickable = true
                     isFocusable = true
                     contentDescription = tool.title + ". " + pdfToolDescription(tool.title)
-                    setOnClickListener { tool.action() }
+                    setOnClickListener { openPdfCatalogTool(tool) }
                 }
                 val icon = TextView(this).apply {
                     text = tool.symbol
@@ -5684,7 +5704,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 item.addView(icon)
                 item.addView(gap(8))
-                val caption = label(tool.title, 13f, titleColor, true)
+                val caption = label(pdfCatalogTitle(tool.title), 13f, titleColor, true)
                 caption.gravity = Gravity.CENTER
                 caption.textAlignment = View.TEXT_ALIGNMENT_CENTER
                 item.addView(caption)
@@ -9516,6 +9536,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createSearchableOcrPdf(uri: Uri) {
+        if (!requirePremiumTool("Searchable OCR PDF")) return
         appDialog().setTitle("Searchable OCR PDF")
             .setMessage("Recognize printed Latin-script text on each PDF page and add an invisible searchable text layer. This may take time. Original PDF remains unchanged. Complex layouts and other scripts may not be recognized accurately.")
             .setPositiveButton("Start OCR") { _, _ ->
