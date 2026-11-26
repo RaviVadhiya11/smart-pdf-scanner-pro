@@ -7647,6 +7647,31 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
+    // Native vector mark, rendered without a bitmap or additional library.
+    private fun driveBrandIcon(): View = object : View(this) {
+        private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val size = minOf(width, height).toFloat()
+            if (size <= 0f) return
+            canvas.save()
+            canvas.translate((width - size) / 2f, (height - size) / 2f)
+            canvas.scale(size / 48f, size / 48f)
+            fun polygon(color: Int, vararg points: Float) {
+                val path = android.graphics.Path()
+                path.moveTo(points[0], points[1])
+                for (i in 2 until points.size step 2) path.lineTo(points[i], points[i + 1])
+                path.close()
+                ink.color = color
+                canvas.drawPath(path, ink)
+            }
+            polygon(0xFF0F9D58.toInt(), 17f, 5f, 30f, 5f, 14f, 33f, 7f, 43f, 1f, 32f)
+            polygon(0xFFF4B400.toInt(), 17f, 5f, 30f, 5f, 47f, 33f, 33f, 33f)
+            polygon(0xFF4285F4.toInt(), 14f, 29f, 45f, 29f, 47f, 33f, 41f, 43f, 7f, 43f)
+            canvas.restore()
+        }
+    }.apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+
     private fun showDriveBackupHub() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -7657,15 +7682,35 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(16), dp(15), dp(16), dp(15))
             background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 18)
         }
-        hero.addView(label("CLOUD STORAGE", 11f, 0xFFBCD7FF.toInt(), true))
-        hero.addView(label("Google Drive & Backup", 21f, 0xFFFFFFFF.toInt(), true))
-        hero.addView(label("Original quality • User-selected access", 12f, 0xFFE1EDFF.toInt()))
+        val brandRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val iconTile = android.widget.FrameLayout(this).apply {
+            background = rounded(0xFFFFFFFF.toInt(), 14)
+            addView(driveBrandIcon(), android.widget.FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+        }
+        brandRow.addView(iconTile, LinearLayout.LayoutParams(dp(56), dp(56)).apply { rightMargin = dp(12) })
+        val brandText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brandText.addView(label("CLOUD STORAGE", 10f, 0xFFBCD7FF.toInt(), true))
+        brandText.addView(label("Google Drive & Backup", 19f, 0xFFFFFFFF.toInt(), true))
+        brandText.addView(label("Original quality • Secure access", 11f, 0xFFE1EDFF.toInt()))
+        brandRow.addView(brandText, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(brandRow)
         panel.addView(hero); panel.addView(gap(10))
+
+        val owner = signedInUserId()
+        val lastEmail = prefs.getString(accountPrefKey("drive_last_email"), "").orEmpty()
+        val connection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(0xFFF1F6FF.toInt(), 14, 0xFFDCE7FA.toInt())
+        }
+        val state = label(if (lastEmail.isBlank()) "Not connected" else "Checking connection…", 15f, 0xFF53627A.toInt(), true)
+        val accountLabel = label(if (lastEmail.isBlank()) "Connect your Google account to back up files." else "Last authorized: " + lastEmail, 12f, 0xFF64748B.toInt())
+        connection.addView(state); connection.addView(accountLabel)
+        panel.addView(connection); panel.addView(gap(10))
         val stamp = prefs.getLong(accountPrefKey("manual_backup_time"), 0L)
         val last = if (stamp > 0L) java.text.DateFormat.getDateTimeInstance().format(Date(stamp)) else "No manual backup yet"
         panel.addView(label("Last copy written: " + last, 12f, 0xFF53627A.toInt()))
-        panel.addView(label("Choose Drive in the Android picker. Manual picker copies are not verified as cloud uploads. Direct authorization is available separately.", 12f, 0xFF64748B.toInt()))
-        panel.addView(gap(12))
+        panel.addView(gap(10))
         val dialog = appDialog().setTitle("Backup & Restore").setView(toolDialogScroll(panel, 0.72f))
             .setNegativeButton("Close", null).create()
         fun option(title: String, detail: String, action: () -> Unit) {
@@ -7681,7 +7726,18 @@ class MainActivity : AppCompatActivity() {
             row.addView(label(detail, 12f, 0xFF64748B.toInt()))
             panel.addView(row); panel.addView(gap(8))
         }
-        option("Connect Google Drive", "Authorize selected-file access for direct uploads and restore. Google Cloud setup required.") { authorizeDirectDrive() }
+        val actionTitle = label("Connect Google Drive", 15f, 0xFFFFFFFF.toInt(), true).apply { gravity = Gravity.CENTER }
+        val connectButton = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            minimumHeight = dp(52)
+            background = gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 14)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            isClickable = true; isFocusable = true
+            addView(actionTitle, LinearLayout.LayoutParams(-1, -2))
+            setOnClickListener { dialog.dismiss(); authorizeDirectDrive() }
+        }
+        panel.addView(connectButton); panel.addView(gap(10))
         option("Import / restore a file", "Choose an existing PDF, image or supported export from Drive or another provider.") { launchDriveImport() }
         option("Manual backup", "Select a saved document, image or invoice export. Copy to the folder you choose.") { chooseDriveBackupFile() }
         option("Open Google Drive", "Manage your Google account and uploaded files in Drive.") {
@@ -7689,8 +7745,46 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive")))
             } catch (_: Exception) { Toast.makeText(this, "Google Drive unavailable.", Toast.LENGTH_LONG).show() }
         }
-        panel.addView(label("Automatic background backup and continuous multi-device sync require a separately configured service. Manual backup remains available.", 11f, 0xFF64748B.toInt()))
+        panel.addView(label("Manual copies use your selected storage provider. Automatic backup and continuous sync are not yet available.", 11f, 0xFF64748B.toInt()))
         dialog.show()
+        // Recheck an existing authorization without opening a consent screen automatically.
+        // Only a successful Drive API response is presented as Connected.
+        if (lastEmail.isNotBlank()) {
+            fun showState(connected: Boolean, detail: String) {
+                if (!dialog.isShowing || owner != signedInUserId() || isFinishing || isDestroyed) return
+                state.text = if (connected) "● Connected" else "○ Reconnect / check access"
+                state.setTextColor(if (connected) 0xFF128268.toInt() else 0xFF64748B.toInt())
+                accountLabel.text = detail
+                actionTitle.text = if (connected) "Manage Google Drive" else "Connect Google Drive"
+            }
+            if (!isInternetAvailable()) {
+                showState(false, "Offline • Last authorized: " + lastEmail)
+            } else {
+                val request = com.google.android.gms.auth.api.identity.AuthorizationRequest.builder()
+                    .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(directDriveScope))).build()
+                com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this).authorize(request)
+                    .addOnSuccessListener { authorization ->
+                        val token = authorization.accessToken
+                        if (authorization.hasResolution() || token.isNullOrBlank() || !authorization.grantedScopes.contains(directDriveScope)) {
+                            showState(false, "Google permission needs to be renewed.")
+                        } else {
+                            Thread {
+                                val email = runCatching { DirectDriveApi.accountEmail(token) }.getOrNull()
+                                runOnUiThread {
+                                    if (email != null && owner == signedInUserId() && dialog.isShowing) {
+                                        rememberDriveAuthorization(email)
+                                        showState(true, email)
+                                    } else showState(false, "Could not verify Google Drive access. Tap Connect to retry.")
+                                }
+                            }.start()
+                        }
+                    }.addOnFailureListener { showState(false, "Could not verify Google Drive access. Tap Connect to retry.") }
+            }
+        }
+    }
+
+    private fun rememberDriveAuthorization(email: String) {
+        prefs.edit().putString(accountPrefKey("drive_last_email"), email).apply()
     }
 
     private var directDriveAccount: String? = null
@@ -7797,7 +7891,8 @@ class MainActivity : AppCompatActivity() {
                 val email = DirectDriveApi.accountEmail(token)
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
-                        status.text = "Google Drive authorized"
+                        rememberDriveAuthorization(email)
+                        status.text = "Google Drive connected"
                         showDirectDriveActions(token, email, account)
                     }
                 }
@@ -7809,7 +7904,7 @@ class MainActivity : AppCompatActivity() {
         if (account != signedInUserId()) return
         val options = mutableListOf("Upload a saved file", "Restore a DocNexa backup", "Manage Google access")
         if (hasVerifiedPremium()) options.add(1, "Batch upload (Premium)")
-        appDialog().setTitle("Google Drive • Authorized")
+        appDialog().setTitle("Google Drive • Connected")
             .setItems(options.toTypedArray()) { _, index ->
                 when (options[index]) {
                     "Upload a saved file" -> chooseDirectDriveUpload(token, email, account, false)
@@ -7819,6 +7914,7 @@ class MainActivity : AppCompatActivity() {
                         appDialog().setTitle("Manage Google access")
                             .setMessage("Authorized Google account: " + email + "\n\nManage or remove DocNexa access on your Google Account. Existing Drive backups are not deleted.")
                             .setPositiveButton("Open Google Account") { _, _ ->
+                                if (account == signedInUserId()) prefs.edit().remove(accountPrefKey("drive_last_email")).apply()
                                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/connections"))) }
                             }.setNegativeButton("Cancel", null).show()
                     }
