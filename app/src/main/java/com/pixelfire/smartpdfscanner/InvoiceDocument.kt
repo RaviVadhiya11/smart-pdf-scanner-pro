@@ -21,31 +21,41 @@ internal object InvoiceDocument {
     }
     data class Draft(val kind:String,val number:String,val date:String,val due:String,val business:String,val businessAddress:String,
         val contact:String,val gstin:String,val customer:String,val customerAddress:String,val customerGstin:String,val supply:String,
-        val items:List<Item>,val discount:BigDecimal,val interstate:Boolean,val notes:String,val template:Int,val logo:ByteArray?,val signature:ByteArray?)
+        val items:List<Item>,val discount:BigDecimal,val interstate:Boolean,val notes:String,val template:Int,val logo:ByteArray?,val signature:ByteArray?,
+        val paid:BigDecimal=zero,val paymentMethod:String="",val paymentReference:String="")
     data class Amounts(val base:BigDecimal,val discount:BigDecimal,val net:BigDecimal,val cgst:BigDecimal,val sgst:BigDecimal,val igst:BigDecimal,val total:BigDecimal)
-    fun totals(d:Draft):Amounts {
-        require(d.items.isNotEmpty() && d.items.size<=100)
-        val base=d.items.fold(zero){a,i->a+i.base}
-        require(d.discount>=zero && d.discount<=base){"Discount cannot exceed subtotal"}
+    fun totals(d:Draft):Amounts = totals(d.items,d.discount,d.interstate)
+    fun totals(items:List<Item>,discount:BigDecimal,interstate:Boolean):Amounts {
+        require(items.isNotEmpty() && items.size<=100)
+        val base=items.fold(zero){a,i->a+i.base}
+        require(discount>=zero && discount<=base){"Discount cannot exceed subtotal"}
         var allocated=zero; var runningBase=zero; var cgst=zero; var sgst=zero; var igst=zero
-        d.items.forEachIndexed { index,i->
+        items.forEachIndexed { index,i->
             runningBase+=i.base
-            val cumulative=if(index==d.items.lastIndex)d.discount else if(base.signum()==0)zero else money(d.discount.multiply(runningBase).divide(base,12,RoundingMode.HALF_UP))
+            val cumulative=if(index==items.lastIndex)discount else if(base.signum()==0)zero else money(discount.multiply(runningBase).divide(base,12,RoundingMode.HALF_UP))
             val cut=cumulative-allocated
             allocated=cumulative
             val taxable=(i.base-cut).coerceAtLeast(zero)
-            if(d.interstate)igst+=money(taxable.multiply(i.gst).movePointLeft(2))
+            if(interstate)igst+=money(taxable.multiply(i.gst).movePointLeft(2))
             else {
                 val half=money(taxable.multiply(i.gst).movePointLeft(2).divide(BigDecimal(2)))
                 cgst+=half;sgst+=half
             }
         }
-        val net=base-d.discount
-        return Amounts(base,d.discount,net,cgst,sgst,igst,net+cgst+sgst+igst)
+        val net=base-discount
+        return Amounts(base,discount,net,cgst,sgst,igst,net+cgst+sgst+igst)
+    }
+
+    fun paymentTracked(kind:String)=kind in listOf("Invoice","GST Invoice","Bill","Receipt")
+    fun paymentStatus(total:BigDecimal,paid:BigDecimal):String {
+        require(paid>=zero && paid<=total){"Received amount must be between zero and total"}
+        return when { paid==total || paid.compareTo(total)==0 -> "PAID"; paid.signum()==0 -> "UNPAID"; else -> "PARTIALLY PAID" }
     }
 
     fun pdf(d:Draft):ByteArray {
         val t=totals(d)
+        val tracked=paymentTracked(d.kind)
+        val status=if(tracked)paymentStatus(t.total,d.paid) else ""
         val accent=when(d.template){1->0xFF303846.toInt();2->0xFF087C56.toInt();3->0xFF6546C8.toInt();4->0xFF9B3434.toInt();5->0xFFB17C16.toInt();else->0xFF205FBC.toInt()}
         val ink=0xFF18283D.toInt();val muted=0xFF536477.toInt()
         val p=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -92,7 +102,9 @@ internal object InvoiceDocument {
         fun newPage(){
             finish();pageNo++;page=doc.startPage(PdfDocument.PageInfo.Builder(595,842,pageNo).create());canvas=page!!.canvas
             canvas!!.drawColor(Color.WHITE)
-            rect(0f,0f,595f,8f,accent)
+            if(d.template==1) rect(34f,16f,527f,2f,accent) else rect(0f,0f,595f,8f,accent)
+            if(d.template==3) rect(0f,8f,12f,834f,0xFFE9E0FA.toInt())
+            if(d.template==5) rect(34f,20f,527f,2f,accent)
             if(pageNo==1){
                 image(d.logo,34f,26f,58f,48f)
                 val bx=if(d.logo==null)34f else 104f
@@ -103,7 +115,11 @@ internal object InvoiceDocument {
                 text("No. "+d.number,561f,56f,9f,ink,true,true)
                 text("Date: "+d.date,561f,70f,10f,muted,right=true)
                 if(d.due.isNotBlank())text("Due: "+d.due,561f,84f,10f,muted,right=true)
-                y=maxOf(hy,90f)+14f
+                if(tracked){
+                    val statusColor=when(status){"PAID"->0xFF087C56.toInt();"PARTIALLY PAID"->0xFF9A6512.toInt();else->0xFF9B3434.toInt()}
+                    text(status,561f,99f,10f,statusColor,true,true)
+                }
+                y=maxOf(hy,if(tracked)105f else 90f)+14f
                 rect(34f,y,527f,1f,0xFFD8E1EC.toInt());y+=17f
                 text("BILL TO / RECIPIENT",34f,y,10f,accent,true);y+=15f
                 wrapped(d.customer,527f,12f,true).forEach{text(it,34f,y,12f,ink,true);y+=15f}
@@ -135,7 +151,7 @@ internal object InvoiceDocument {
                 text(format(i.base),552f,y+15f,right=true)
                 y+=h
             }
-            if(y+180f>780f)newPage()
+            if(y+(if(tracked)235f else 180f)>780f)newPage()
             y+=18f
             fun amount(name:String,value:BigDecimal){text(name,324f,y,11f,muted);text("INR "+format(value),552f,y,11f,ink,true,true);y+=18f}
             amount("Subtotal",t.base);if(t.discount.signum()>0)amount("Discount",-t.discount)
@@ -143,6 +159,15 @@ internal object InvoiceDocument {
             if(t.igst.signum()>0){amount("Taxable value",t.net);amount("IGST",t.igst)}
             rect(315f,y-3f,246f,34f,accent);text("TOTAL",325f,y+18f,12f,Color.WHITE,true)
             text("INR "+format(t.total),551f,y+18f,13f,Color.WHITE,true,true);y+=49f
+            if(tracked){
+                amount("Amount received",d.paid)
+                amount("Balance due",t.total-d.paid)
+                if(d.paymentMethod.isNotBlank()||d.paymentReference.isNotBlank()){
+                    if(y+35f>780f)newPage()
+                    wrapped(listOf(if(d.paymentMethod.isNotBlank())"Payment: "+d.paymentMethod else "",if(d.paymentReference.isNotBlank())"Reference: "+d.paymentReference else "").filter{it.isNotBlank()}.joinToString("\n"),527f).forEach{if(y>779f)newPage();text(it,34f,y);y+=13f}
+                    y+=8f
+                }
+            }
             if(d.notes.isNotBlank()){
                 if(y+35f>780f)newPage()
                 text("NOTES / PAYMENT TERMS",34f,y,10f,accent,true);y+=15f
