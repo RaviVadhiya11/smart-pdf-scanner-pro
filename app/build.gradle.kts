@@ -35,8 +35,8 @@ android {
         applicationId = "com.pixelfire.smartpdfscanner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.6.0"
+        versionCode = 14
+        versionName = "1.7.0"
     }
     buildTypes {
         release {
@@ -53,6 +53,7 @@ android {
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 }
 dependencies {
+    implementation("com.android.billingclient:billing:8.0.0")
     testImplementation("junit:junit:4.13.2")
     implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
     implementation("com.google.firebase:firebase-analytics")
