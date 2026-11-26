@@ -1444,6 +1444,8 @@ class MainActivity : AppCompatActivity() {
 
         content.addView(toolCard("Image Studio", "Convert • Resize • Remove BG • Upscale", "▧", 0xFF6546C8.toInt()) { showImageStudio() })
         content.addView(gap(10))
+        content.addView(toolCard("Bill / Invoice Maker", "Bills • GST invoices • Quotations • Receipts", "₹", 0xFFEA580C.toInt()) { showInvoiceStudio() })
+        content.addView(gap(10))
         addNativeAdCard(content)
 
         // Before first successful scan show onboarding; afterwards reserve this area for ads.
@@ -2263,6 +2265,7 @@ class MainActivity : AppCompatActivity() {
         section("Tools")
         item("⚒", "PDF Tools") { showPdfTools() }
         item("▧", "Image Studio") { showImageStudio() }
+        item("₹", "Bill / Invoice Maker") { showInvoiceStudio() }
         item("✦", "AI Document Assistant") { showAiAssistant() }
         item("▣", "Edit/Create PDF") { showEditCreateFileChoices() }
         item("✍", "Signature") { openSignatureEditor() }
@@ -5556,6 +5559,276 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             runOnUiThread{if(!isFinishing&&!isDestroyed)saveDocumentBytes(output.toByteArray(),"Image_Archive","application/zip","zip")}
+        }
+    }
+
+
+    private var invoiceLogoCallback: ((ByteArray) -> Unit)? = null
+    private val invoiceLogoPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val callback=invoiceLogoCallback;invoiceLogoCallback=null
+        if(uri!=null && callback!=null && requirePremiumTool("Business logo")){
+            advancedToolJob("Preparing business logo…"){
+                val image=decodeImageSafely(uri,600,360_000L)
+                try {
+                    val data=ByteArrayOutputStream().also{check(image.compress(Bitmap.CompressFormat.PNG,100,it))}.toByteArray()
+                    runOnUiThread{if(!isFinishing&&!isDestroyed)callback(data)}
+                }finally{image.recycle()}
+            }
+        }
+    }
+
+    private fun showInvoiceStudio(){
+        val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xFFF4F7FC.toInt())}
+        val header=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(14),dp(14),dp(14),dp(14));setBackgroundColor(0xFF10254C.toInt())}
+        header.addView(label("‹",26f,android.graphics.Color.WHITE,true).apply{setPadding(dp(8),0,dp(16),0);contentDescription="Back to Home";setOnClickListener{buildScreen()}})
+        header.addView(label("Bill / Invoice Maker",19f,android.graphics.Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(label("♛ PRO",12f,0xFFFFD66B.toInt(),true).apply{setOnClickListener{studioPremiumInfo()}})
+        root.addView(header)
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(14),dp(14),dp(20))}
+        val banner=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(18),dp(18),dp(18));background=gradient(0xFF1756C8.toInt(),0xFF7541DF.toInt(),22)}
+        banner.addView(label("DOCNEXA • BUSINESS STUDIO",11f,0xFFE4E7FF.toInt(),true))
+        banner.addView(gap(6));banner.addView(label("Create professional bills & invoices",22f,android.graphics.Color.WHITE,true))
+        banner.addView(gap(5));banner.addView(label("Private on-device records • A4 PDF • Share and print",12f,0xFFE4E7FF.toInt()))
+        panel.addView(banner);panel.addView(gap(12))
+        val kinds=listOf("Invoice" to "Professional service invoice","Bill" to "Simple sales bill","GST Invoice" to "Item tax and GST details","Quotation" to "Price proposal","Estimate" to "Estimated project cost","Receipt" to "Payment received document","Delivery Challan" to "Goods delivery document")
+        val tiles=kinds.map{(kind,desc)->Triple(kind,desc,{showInvoiceEditor(kind)})}+listOf(
+            Triple("Business Profile","Save business details",{showInvoiceDirectory("Business")}),
+            Triple("Customers • PRO","Reusable customer records",{if(requirePremiumTool("Customer manager"))showInvoiceDirectory("Customers")}),
+            Triple("Products • PRO","Reusable product records",{if(requirePremiumTool("Product manager"))showInvoiceDirectory("Products")}),
+            Triple("Invoice History","Open saved billing PDFs",{showInvoiceHistory()})
+        )
+        tiles.chunked(2).forEach{pair->
+            val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+            pair.forEach{(title,description,action)->row.addView(toolCard(title,description,"₹",0xFF2563EB.toInt(),action),LinearLayout.LayoutParams(0,dp(128),1f).apply{setMargins(dp(4),dp(4),dp(4),dp(4))})}
+            if(pair.size==1)row.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+            panel.addView(row)
+        }
+        panel.addView(gap(10));panel.addView(label("Check all tax rates, invoice numbers and statutory requirements before issuing a bill. This tool does not submit GST returns or government e-invoices.",11f,0xFF64748B.toInt()))
+        addNativeAdCard(panel)
+        root.addView(ScrollView(this).apply{addView(panel)},LinearLayout.LayoutParams(-1,0,1f))
+        setScreenContent(root)
+    }
+
+    private fun invoiceRecords(kind:String):org.json.JSONArray =
+        runCatching{org.json.JSONArray(prefs.getString(accountPrefKey("invoice_records_"+kind),"[]")?:"[]")}.getOrDefault(org.json.JSONArray())
+
+    private fun showInvoiceDirectory(kind:String){
+        val records=invoiceRecords(kind)
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
+        if(records.length()==0)panel.addView(label("No saved records yet.",13f,0xFF64748B.toInt()))
+        for(i in 0 until records.length()){
+            val obj=records.optJSONObject(i)?:continue
+            val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
+            row.addView(label(obj.optString("name")+"\n"+obj.optString("detail"),13f,0xFF263957.toInt(),true),LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(Button(this).apply{text="Delete";isAllCaps=false;setOnClickListener{
+                appDialog().setTitle("Delete record?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
+                    val updated=org.json.JSONArray();for(j in 0 until records.length())if(j!=i)updated.put(records.get(j))
+                    prefs.edit().putString(accountPrefKey("invoice_records_"+kind),updated.toString()).apply()
+                    panel.removeView(row)
+                }.show()
+            }})
+            panel.addView(row)
+        }
+        appDialog().setTitle(kind).setView(toolDialogScroll(panel)).setNegativeButton("Close",null).setPositiveButton("Add record"){_,_->editInvoiceRecord(kind)}.show()
+    }
+
+    private fun editInvoiceRecord(kind:String){
+        if(kind!="Business" && !requirePremiumTool(kind))return
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
+        fun field(hint:String)=EditText(this).apply{this.hint=hint;setSingleLine(true);filters=arrayOf(android.text.InputFilter.LengthFilter(150));panel.addView(this)}
+        val name=field(if(kind=="Products")"Product name" else "Name")
+        val detail=field(if(kind=="Products")"HSN / SAC (optional)" else "Address")
+        val extra=field(if(kind=="Products")"Unit price (INR)" else "GSTIN (optional)")
+        val contact=if(kind=="Business")field("Phone / email")else null
+        val dialog=appDialog().setTitle("Add "+kind.lowercase(Locale.ROOT)).setView(panel).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val n=name.text.toString().trim()
+            val e=extra.text.toString().trim()
+            if(n.isEmpty() || (kind=="Products" && (e.toBigDecimalOrNull()?.let{it>=java.math.BigDecimal.ZERO && it<=java.math.BigDecimal("100000000") }!=true))){Toast.makeText(this,"Enter valid details",Toast.LENGTH_SHORT).show();return@setOnClickListener}
+            val records=if(kind=="Business")org.json.JSONArray()else invoiceRecords(kind)
+            if(records.length()>=100){Toast.makeText(this,"Maximum 100 records",Toast.LENGTH_SHORT).show();return@setOnClickListener}
+            records.put(org.json.JSONObject().put("name",n).put("detail",detail.text.toString()).put("extra",e).put("contact",contact?.text?.toString()?:""))
+            prefs.edit().putString(accountPrefKey("invoice_records_"+kind),records.toString()).apply()
+            dialog.dismiss();Toast.makeText(this,"Record saved",Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showInvoiceHistory(){
+        val records=getSavedPdfs().filter{it.first.startsWith("Billing_")}
+        if(records.isEmpty()){appDialog().setTitle("Invoice History").setMessage("Your exported bills will appear here.").setPositiveButton("OK",null).show();return}
+        appDialog().setTitle("Invoice History").setItems(records.map{it.first}.toTypedArray()){_,i->
+            val item=records[i]
+            appDialog().setTitle(item.first).setItems(arrayOf("Open PDF","Share PDF","Print PDF","Save a copy")){_,action->
+                when(action){0->openPdf(item.second);1->sharePdf(item.second);2->printPdfDocument(item.second);3->showExportSuccess(item.second,item.first,"application/pdf")}
+            }.show()
+        }.setNegativeButton("Close",null).show()
+    }
+
+    private fun showInvoiceEditor(kind:String){
+        val owner=signedInUserId()
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
+        fun section(title:String){panel.addView(gap(12));panel.addView(label(title,14f,0xFF2563EB.toInt(),true));panel.addView(gap(5))}
+        fun field(title:String,initial:String="",max:Int=100,numeric:Boolean=false):EditText{
+            panel.addView(label(title,11f,0xFF52627A.toInt(),true))
+            return EditText(this).apply{hint=title;setText(initial);setSingleLine(true);filters=arrayOf(android.text.InputFilter.LengthFilter(max))
+                if(numeric)inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                panel.addView(this)}
+        }
+        val profile=invoiceRecords("Business").optJSONObject(0)
+        section("1 • Business details")
+        val business=field("Business name",profile?.optString("name").orEmpty(),70)
+        val address=field("Business address",profile?.optString("detail").orEmpty(),150)
+        val contact=field("Phone / email",profile?.optString("contact").orEmpty(),80)
+        val gstin=field("Business GSTIN (if registered)",profile?.optString("extra").orEmpty(),15)
+        var logo:ByteArray?=null;var signature:ByteArray?=null
+        panel.addView(Button(this).apply{text="Add business logo • PRO";isAllCaps=false;setOnClickListener{
+            if(requirePremiumTool("Business logo")){invoiceLogoCallback={data->logo=data;text="Logo added • Change"};invoiceLogoPicker.launch(arrayOf("image/*"))}
+        }})
+        section("2 • Customer details")
+        val customer=field("Customer name","",70)
+        val customerAddress=field("Customer address","",150)
+        val customerGstin=field("Customer GSTIN (optional)","",15)
+        val supply=field("Place of supply / state","",50)
+        panel.addView(Button(this).apply{text="Use saved customer • PRO";isAllCaps=false;setOnClickListener{
+            if(requirePremiumTool("Customer manager")){
+                val records=invoiceRecords("Customers")
+                if(records.length()==0){Toast.makeText(this@MainActivity,"Save a customer in Customers first",Toast.LENGTH_LONG).show();return@setOnClickListener}
+                appDialog().setTitle("Select customer").setItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
+                    val obj=records.getJSONObject(i);customer.setText(obj.optString("name"));customerAddress.setText(obj.optString("detail"));customerGstin.setText(obj.optString("extra"))
+                }.show()
+            }
+        }})
+        section("3 • Document details")
+        val number=field("Document number","INV-"+SimpleDateFormat("yyMMdd-HHmmss",Locale.US).format(Date()),24)
+        val date=field("Date (DD/MM/YYYY)",SimpleDateFormat("dd/MM/yyyy",Locale.US).format(Date()),10)
+        val due=field("Due date (optional)","",10)
+        val taxMode=android.widget.CheckBox(this).apply{text="Interstate supply (IGST instead of CGST + SGST)";panel.addView(this)}
+        section("4 • Items / products")
+        val rows=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL};panel.addView(rows)
+        data class Entry(val box:LinearLayout,val name:EditText,val hsn:EditText,val qty:EditText,val price:EditText,val tax:EditText)
+        val entries=mutableListOf<Entry>()
+        fun addEntry(){
+            if(entries.size>=100){Toast.makeText(this,"Maximum 100 items",Toast.LENGTH_SHORT).show();return}
+            val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(8));background=rounded(0xFFF3F7FF.toInt(),12,0xFFDCE6F5.toInt())}
+            fun itemField(hint:String,initial:String,max:Int,numeric:Boolean=false)=EditText(this).apply{
+                this.hint=hint;setText(initial);setSingleLine(true);filters=arrayOf(android.text.InputFilter.LengthFilter(max))
+                if(numeric)inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                box.addView(label(hint,11f,0xFF52627A.toInt()));box.addView(this)
+            }
+            val n=itemField("Item / service description","",160)
+            val h=itemField("HSN / SAC","",12)
+            val q=itemField("Quantity","1",10,true)
+            val p=itemField("Unit rate (INR)","",13,true)
+            val t=itemField("GST rate (%)","0",6,true)
+            val entry=Entry(box,n,h,q,p,t);entries.add(entry)
+            box.addView(Button(this).apply{text="Use saved product • PRO";isAllCaps=false;setOnClickListener{
+                if(requirePremiumTool("Product manager")){
+                    val records=invoiceRecords("Products")
+                    if(records.length()==0){Toast.makeText(this@MainActivity,"Save a product first",Toast.LENGTH_LONG).show();return@setOnClickListener}
+                    appDialog().setTitle("Select product").setItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
+                        val obj=records.getJSONObject(i);n.setText(obj.optString("name"));h.setText(obj.optString("detail"));p.setText(obj.optString("extra"))
+                    }.show()
+                }
+            }})
+            box.addView(Button(this).apply{text="Remove item";isAllCaps=false;setOnClickListener{if(entries.size>1){entries.remove(entry);rows.removeView(box)}}})
+            rows.addView(box);rows.addView(gap(4))
+        }
+        addEntry()
+        panel.addView(Button(this).apply{text="+ Add item";isAllCaps=false;setOnClickListener{addEntry()}})
+        val discount=field("Total discount (INR)","0",13,true)
+        val notes=field(if(kind=="Receipt")"Payment method / reference / received confirmation" else "Notes / payment terms","",300)
+        section("5 • PDF template")
+        val template=android.widget.Spinner(this).apply{
+            adapter=android.widget.ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Modern Blue • Free","Minimal Clean • Free","Corporate Green • PRO","Creative Purple • PRO","Classic Red • PRO","Gold Premium • PRO"))
+        }
+        panel.addView(template)
+        panel.addView(Button(this).apply{text="Add handwritten signature • PRO";isAllCaps=false;setOnClickListener{
+            if(requirePremiumTool("Invoice signature")){
+                val pad=SignatureCanvas(this@MainActivity).apply{setBackgroundColor(android.graphics.Color.WHITE)}
+                val container=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL;addView(pad,LinearLayout.LayoutParams(-1,dp(180)));addView(Button(this@MainActivity).apply{text="Clear";setOnClickListener{pad.clear()}})}
+                appDialog().setTitle("Draw signature").setView(container).setNegativeButton("Cancel",null).setPositiveButton("Use signature"){_,_->
+                    if(pad.hasSignature()){val bitmap=pad.toBitmap();try{signature=ByteArrayOutputStream().also{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}.toByteArray();text="Signature added • Change"}finally{bitmap.recycle()}}
+                }.show()
+            }
+        }})
+        panel.addView(label("Enter your own verified GSTIN, tax rates and invoice numbering. Preview before issuing. This is a PDF document maker, not an accounting or government e-invoicing service.",11f,0xFF64748B.toInt()))
+        val dialog=appDialog().setTitle("Create $kind").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Cancel",null).setPositiveButton("Preview",null).create()
+        dialog.show()
+        dialog.setOnDismissListener{invoiceLogoCallback=null}
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            try{
+                require(owner==signedInUserId()){"Account changed; reopen the invoice editor"}
+                fun value(e:EditText)=e.text.toString().trim()
+                fun decimal(e:EditText,max:String,scale:Int):java.math.BigDecimal{
+                    val n=value(e).toBigDecimalOrNull()?:error("Enter valid "+e.hint)
+                    require(n>=java.math.BigDecimal.ZERO&&n<=java.math.BigDecimal(max)&&n.scale()<=scale){"Invalid "+e.hint}
+                    return n
+                }
+                require(value(business).isNotBlank()&&value(customer).isNotBlank()&&value(number).isNotBlank()){"Enter business, customer and document number"}
+                val parser=SimpleDateFormat("dd/MM/yyyy",Locale.US).apply{isLenient=false}
+                fun validDate(s:String):Boolean=runCatching{val p=parser.parse(s);p!=null&&parser.format(p)==s}.getOrDefault(false)
+                require(validDate(value(date))&&(value(due).isBlank()||validDate(value(due)))){"Use valid DD/MM/YYYY dates"}
+                val items=entries.map{e->
+                    require(value(e.name).isNotBlank()){"Enter each item description"}
+                    val quantity=decimal(e.qty,"1000000",3);require(quantity.signum()>0){"Quantity must be positive"}
+                    InvoiceDocument.Item(value(e.name),value(e.hsn),quantity,decimal(e.price,"100000000",2),decimal(e.tax,"100",2))
+                }
+                if(kind=="GST Invoice"){require(value(gstin).matches(Regex("[0-9A-Za-z]{15}"))&&value(supply).isNotBlank()){"Enter supplier GSTIN and place of supply"}}
+                if(kind=="Receipt")require(value(notes).isNotBlank()){"Enter payment details and confirmation before issuing a receipt"}
+                val pro=template.selectedItemPosition>=2||logo!=null||signature!=null
+                if(pro&&!requirePremiumTool("Premium invoice design"))return@setOnClickListener
+                val draft=InvoiceDocument.Draft(kind,value(number),value(date),value(due),value(business),value(address),value(contact),value(gstin).uppercase(Locale.ROOT),value(customer),value(customerAddress),value(customerGstin).uppercase(Locale.ROOT),value(supply),items,decimal(discount,"100000000000000",2),taxMode.isChecked,value(notes),template.selectedItemPosition,logo,signature)
+                InvoiceDocument.totals(draft)
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
+                Thread{
+                    try{
+                        val data=InvoiceDocument.pdf(draft)
+                        runOnUiThread{
+                            if(!isFinishing&&!isDestroyed&&dialog.isShowing){
+                                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true
+                                showInvoicePreview(draft,data,owner,pro)
+                            }
+                        }
+                    }catch(e:Exception){runOnUiThread{if(dialog.isShowing){dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true;Toast.makeText(this,e.message?:"PDF creation failed",Toast.LENGTH_LONG).show()}}}
+                }.start()
+            }catch(e:Exception){Toast.makeText(this,e.message?:"Check invoice details",Toast.LENGTH_LONG).show()}
+        }
+    }
+
+    private fun showInvoicePreview(draft:InvoiceDocument.Draft,data:ByteArray,owner:String,pro:Boolean){
+        if(owner!=signedInUserId())return
+        val temp=java.io.File.createTempFile("invoice_preview_",".pdf",cacheDir)
+        try{temp.writeBytes(data)}catch(e:Exception){temp.delete();Toast.makeText(this,"Could not preview invoice",Toast.LENGTH_LONG).show();return}
+        val renderer=try{PdfRenderer(android.os.ParcelFileDescriptor.open(temp,android.os.ParcelFileDescriptor.MODE_READ_ONLY))}
+        catch(e:Exception){temp.delete();Toast.makeText(this,"Could not open preview",Toast.LENGTH_LONG).show();return}
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(8))}
+        val image=ImageView(this).apply{adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER}
+        val info=label("",12f,0xFF263957.toInt(),true)
+        panel.addView(info);panel.addView(image,LinearLayout.LayoutParams(-1,dp(360)))
+        val nav=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        var index=0;var bitmap:Bitmap?=null
+        fun render(){
+            renderer.openPage(index).use{page->
+                val next=Bitmap.createBitmap(page.width,page.height,Bitmap.Config.ARGB_8888)
+                next.eraseColor(android.graphics.Color.WHITE);page.render(next,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                image.setImageBitmap(next);bitmap?.recycle();bitmap=next
+            }
+            info.text="Page ${index+1} / ${renderer.pageCount} • Total INR "+InvoiceDocument.format(InvoiceDocument.totals(draft).total)
+        }
+        nav.addView(Button(this).apply{text="‹ Previous";setOnClickListener{if(index>0){index--;render()}}},LinearLayout.LayoutParams(0,-2,1f))
+        nav.addView(Button(this).apply{text="Next ›";setOnClickListener{if(index<renderer.pageCount-1){index++;render()}}},LinearLayout.LayoutParams(0,-2,1f))
+        panel.addView(nav)
+        val dialog=appDialog().setTitle("Invoice PDF preview").setView(panel).setNegativeButton("Edit",null).setPositiveButton("Save PDF",null).create()
+        dialog.setOnDismissListener{image.setImageDrawable(null);bitmap?.recycle();renderer.close();temp.delete()}
+        dialog.show();render()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            if(owner!=signedInUserId()){dialog.dismiss();return@setOnClickListener}
+            if(pro&&!requirePremiumTool("Premium invoice export"))return@setOnClickListener
+            val prefix="Billing_"+draft.kind.replace(" ","_")+"_"+draft.number.take(24)
+            val saved=savePdfBytes(data,prefix)
+            if(saved!=null){dialog.dismiss();Toast.makeText(this,"Invoice saved. Share or print from the result screen.",Toast.LENGTH_LONG).show()}
+            else Toast.makeText(this,"Could not save PDF",Toast.LENGTH_LONG).show()
         }
     }
 
