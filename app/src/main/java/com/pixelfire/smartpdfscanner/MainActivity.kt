@@ -5600,6 +5600,7 @@ class MainActivity : AppCompatActivity() {
             Triple("Customers • PRO","Reusable customer records",{if(requirePremiumTool("Customer manager"))showInvoiceDirectory("Customers")}),
             Triple("Products • PRO","Reusable product records",{if(requirePremiumTool("Product manager"))showInvoiceDirectory("Products")}),
             Triple("Invoice History","Open saved billing PDFs",{showInvoiceHistory()}),
+            Triple("Saved Drafts","Continue or delete unfinished documents",{showInvoiceDrafts()}),
             Triple("Billing Reports • PRO","Invoice totals and CSV export",{if(requirePremiumTool("Billing reports"))showBillingReports()})
         )
         tiles.chunked(2).forEach{pair->
@@ -5662,7 +5663,7 @@ class MainActivity : AppCompatActivity() {
     private fun recordBillingExport(draft:InvoiceDocument.Draft,uri:Uri){
         val records=invoiceRecords("Exports")
         val entry=org.json.JSONObject().put("number",draft.number).put("kind",draft.kind).put("date",draft.date)
-            .put("customer",draft.customer).put("amount",InvoiceDocument.format(InvoiceDocument.totals(draft).total)).put("uri",uri.toString())
+            .put("customer",draft.customer).put("amount",InvoiceDocument.format(InvoiceDocument.totals(draft).total)).put("paid",InvoiceDocument.format(draft.paid)).put("uri",uri.toString())
         val updated=org.json.JSONArray()
         for(i in maxOf(0,records.length()-499) until records.length()){
             val existing=records.optJSONObject(i)?:continue
@@ -5678,8 +5679,9 @@ class MainActivity : AppCompatActivity() {
         val records=invoiceRecords("Exports")
         val bills=(0 until records.length()).mapNotNull{records.optJSONObject(it)}.filter{it.optString("uri") in saved && it.optString("kind") in listOf("Invoice","GST Invoice","Bill")}
         val total=bills.fold(java.math.BigDecimal.ZERO){a,b->a+(b.optString("amount").toBigDecimalOrNull()?:java.math.BigDecimal.ZERO)}
+        val paidTotal=bills.fold(java.math.BigDecimal.ZERO){a,b->a+(b.optString("paid").toBigDecimalOrNull()?:java.math.BigDecimal.ZERO)}
         appDialog().setTitle("Billing reports • Invoice totals")
-            .setMessage("${bills.size} saved invoice(s) / bill(s)\nTotal invoiced: INR ${InvoiceDocument.format(total)}\n\nLocal export records only. This is not verified revenue or payment collection. Quotes, receipts and delivery challans are excluded.")
+            .setMessage("${bills.size} saved invoice(s) / bill(s)\nTotal invoiced: INR ${InvoiceDocument.format(total)}\nRecorded received: INR ${InvoiceDocument.format(paidTotal)}\nRecorded balance: INR ${InvoiceDocument.format(total-paidTotal)}\n\nLocal export records only. This is not verified revenue or payment collection. Quotes, receipts and delivery challans are excluded.")
             .setNegativeButton("Close",null).setPositiveButton("Export CSV"){_,_->
                 if(requirePremiumTool("Billing report export")){
                     fun cell(value:String):String{
@@ -5687,8 +5689,8 @@ class MainActivity : AppCompatActivity() {
                         return "\""+safe.replace("\"","\"\"")+"\""
                     }
                     val csv=buildString{
-                        append("Document,Number,Date,Customer,Total INR\r\n")
-                        bills.forEach{b->append(listOf("kind","number","date","customer","amount").joinToString(","){cell(b.optString(it))});append("\r\n")}
+                        append("Document,Number,Date,Customer,Total INR,Recorded received INR\r\n")
+                        bills.forEach{b->append(listOf("kind","number","date","customer","amount","paid").joinToString(","){cell(b.optString(it))});append("\r\n")}
                     }
                     saveDocumentBytes(csv.toByteArray(Charsets.UTF_8),"Billing_Report","text/csv","csv")
                 }
@@ -5706,8 +5708,36 @@ class MainActivity : AppCompatActivity() {
         }.setNegativeButton("Close",null).show()
     }
 
-    private fun showInvoiceEditor(kind:String){
+    private fun showInvoiceDrafts(){
+        val drafts=invoiceRecords("Drafts")
+        val entries=(0 until drafts.length()).mapNotNull{drafts.optJSONObject(it)}
+        if(entries.isEmpty()){appDialog().setTitle("Saved drafts").setMessage("Use Save draft in any bill editor to continue later.").setPositiveButton("OK",null).show();return}
+        appDialog().setTitle("Saved drafts").setItems(entries.map{it.optString("kind")+" • "+it.optString("number")+" • "+it.optString("customer").ifBlank{"Unnamed customer"}}.toTypedArray()){_,i->
+            val item=entries[i]
+            appDialog().setTitle("Draft options").setItems(arrayOf("Continue editing","Delete draft")){_,action->
+                if(action==0)showInvoiceEditor(item.optString("kind","Invoice"),item)
+                else appDialog().setTitle("Delete this draft?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
+                    val latest=invoiceRecords("Drafts");val updated=org.json.JSONArray()
+                    for(j in 0 until latest.length()){val obj=latest.optJSONObject(j)?:continue;if(obj.optString("id")!=item.optString("id"))updated.put(obj)}
+                    prefs.edit().putString(accountPrefKey("invoice_records_Drafts"),updated.toString()).apply()
+                    showInvoiceDrafts()
+                }.show()
+            }.show()
+        }.setNegativeButton("Close",null).show()
+    }
+
+    private fun saveInvoiceDraft(obj:org.json.JSONObject){
+        val existing=invoiceRecords("Drafts");val updated=org.json.JSONArray()
+        for(i in 0 until existing.length()){val item=existing.optJSONObject(i)?:continue;if(item.optString("id")!=obj.optString("id"))updated.put(item)}
+        require(updated.length()<50){"Maximum 50 drafts. Delete an older draft first."}
+        updated.put(obj)
+        prefs.edit().putString(accountPrefKey("invoice_records_Drafts"),updated.toString()).apply()
+    }
+
+    private fun showInvoiceEditor(kind:String,initialDraft:org.json.JSONObject?=null){
         val owner=signedInUserId()
+        val draftId=initialDraft?.optString("id")?.takeIf{it.isNotBlank()}?:java.util.UUID.randomUUID().toString()
+        fun initial(key:String,fallback:String="")=initialDraft?.optString(key,fallback)?:fallback
         val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
         fun section(title:String){panel.addView(gap(12));panel.addView(label(title,14f,0xFF2563EB.toInt(),true));panel.addView(gap(5))}
         fun field(title:String,initial:String="",max:Int=100,numeric:Boolean=false):EditText{
@@ -5718,19 +5748,19 @@ class MainActivity : AppCompatActivity() {
         }
         val profile=invoiceRecords("Business").optJSONObject(0)
         section("1 • Business details")
-        val business=field("Business name",profile?.optString("name").orEmpty(),70)
-        val address=field("Business address",profile?.optString("detail").orEmpty(),150)
-        val contact=field("Phone / email",profile?.optString("contact").orEmpty(),80)
-        val gstin=field("Business GSTIN (if registered)",profile?.optString("extra").orEmpty(),15)
+        val business=field("Business name",initial("business",profile?.optString("name").orEmpty()),70)
+        val address=field("Business address",initial("address",profile?.optString("detail").orEmpty()),150)
+        val contact=field("Phone / email",initial("contact",profile?.optString("contact").orEmpty()),80)
+        val gstin=field("Business GSTIN (if registered)",initial("gstin",profile?.optString("extra").orEmpty()),15)
         var logo:ByteArray?=null;var signature:ByteArray?=null
         panel.addView(Button(this).apply{text="Add business logo • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Business logo")){invoiceLogoCallback={data->logo=data;text="Logo added • Change"};invoiceLogoPicker.launch(arrayOf("image/*"))}
         }})
         section("2 • Customer details")
-        val customer=field("Customer name","",70)
-        val customerAddress=field("Customer address","",150)
-        val customerGstin=field("Customer GSTIN (optional)","",15)
-        val supply=field("Place of supply / state","",50)
+        val customer=field("Customer name",initial("customer"),70)
+        val customerAddress=field("Customer address",initial("customerAddress"),150)
+        val customerGstin=field("Customer GSTIN (optional)",initial("customerGstin"),15)
+        val supply=field("Place of supply / state",initial("supply"),50)
         panel.addView(Button(this).apply{text="Use saved customer • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Customer manager")){
                 val records=invoiceRecords("Customers")
@@ -5741,15 +5771,17 @@ class MainActivity : AppCompatActivity() {
             }
         }})
         section("3 • Document details")
-        val number=field("Document number","INV-"+SimpleDateFormat("yyMMdd-HHmmss",Locale.US).format(Date()),24)
-        val date=field("Date (DD/MM/YYYY)",SimpleDateFormat("dd/MM/yyyy",Locale.US).format(Date()),10)
-        val due=field("Due date (optional)","",10)
-        val taxMode=android.widget.CheckBox(this).apply{text="Interstate supply (IGST instead of CGST + SGST)";panel.addView(this)}
+        val number=field("Document number",initial("number",when(kind){"Bill"->"BILL";"Receipt"->"REC";"Quotation"->"QUO";"Estimate"->"EST";"Delivery Challan"->"DC";else->"INV"}+"-"+SimpleDateFormat("yyMMdd-HHmmss",Locale.US).format(Date())),24)
+        val date=field("Date (DD/MM/YYYY)",initial("date",SimpleDateFormat("dd/MM/yyyy",Locale.US).format(Date())),10)
+        val due=field("Due date (optional)",initial("due"),10)
+        val taxMode=android.widget.CheckBox(this).apply{text="Interstate supply (IGST instead of CGST + SGST)";isChecked=initialDraft?.optBoolean("interstate")?:false;panel.addView(this)}
         section("4 • Items / products")
         val rows=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL};panel.addView(rows)
         data class Entry(val box:LinearLayout,val name:EditText,val hsn:EditText,val qty:EditText,val price:EditText,val tax:EditText)
         val entries=mutableListOf<Entry>()
-        fun addEntry(){
+        var updateTotals:()->Unit={}
+        fun watch(input:EditText){input.addTextChangedListener(object:android.text.TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){updateTotals()};override fun afterTextChanged(s:android.text.Editable?){}})}
+        fun addEntry(saved:org.json.JSONObject?=null){
             if(entries.size>=100){Toast.makeText(this,"Maximum 100 items",Toast.LENGTH_SHORT).show();return}
             val box=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(8));background=rounded(0xFFF3F7FF.toInt(),12,0xFFDCE6F5.toInt())}
             fun itemField(hint:String,initial:String,max:Int,numeric:Boolean=false)=EditText(this).apply{
@@ -5757,12 +5789,17 @@ class MainActivity : AppCompatActivity() {
                 if(numeric)inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
                 box.addView(label(hint,11f,0xFF52627A.toInt()));box.addView(this)
             }
-            val n=itemField("Item / service description","",160)
-            val h=itemField("HSN / SAC","",12)
-            val q=itemField("Quantity","1",10,true)
-            val p=itemField("Unit rate (INR)","",13,true)
-            val t=itemField("GST rate (%)","0",6,true)
+            val n=itemField("Item / service description",saved?.optString("name").orEmpty(),160)
+            val h=itemField("HSN / SAC",saved?.optString("hsn").orEmpty(),12)
+            val q=itemField("Quantity",saved?.optString("qty","1")?:"1",10,true)
+            val p=itemField("Unit rate (INR)",saved?.optString("rate").orEmpty(),13,true)
+            val t=itemField("GST rate (%)",saved?.optString("tax","0")?:"0",6,true)
             val entry=Entry(box,n,h,q,p,t);entries.add(entry)
+            val lineTotal=label("Item subtotal: INR 0.00",12f,0xFF2563EB.toInt(),true)
+            box.addView(lineTotal)
+            fun updateLine(){val qty=q.text.toString().toBigDecimalOrNull();val rate=p.text.toString().toBigDecimalOrNull();lineTotal.text=if(qty!=null&&rate!=null) "Item subtotal: INR "+InvoiceDocument.format(qty*rate) else "Enter quantity and rate"}
+            listOf(q,p,t).forEach{input->watch(input);input.addTextChangedListener(object:android.text.TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){updateLine()};override fun afterTextChanged(s:android.text.Editable?){}})}
+            updateLine()
             box.addView(Button(this).apply{text="Use saved product • PRO";isAllCaps=false;setOnClickListener{
                 if(requirePremiumTool("Product manager")){
                     val records=invoiceRecords("Products")
@@ -5772,17 +5809,42 @@ class MainActivity : AppCompatActivity() {
                     }.show()
                 }
             }})
-            box.addView(Button(this).apply{text="Remove item";isAllCaps=false;setOnClickListener{if(entries.size>1){entries.remove(entry);rows.removeView(box)}}})
-            rows.addView(box);rows.addView(gap(4))
+            box.addView(Button(this).apply{text="Remove item";isAllCaps=false;setOnClickListener{if(entries.size>1){entries.remove(entry);rows.removeView(box);updateTotals()}}})
+            rows.addView(box);rows.addView(gap(4));updateTotals()
         }
-        addEntry()
+        val savedItems=initialDraft?.optJSONArray("items")
+        if(savedItems==null||savedItems.length()==0)addEntry() else for(i in 0 until minOf(savedItems.length(),100))addEntry(savedItems.optJSONObject(i))
         panel.addView(Button(this).apply{text="+ Add item";isAllCaps=false;setOnClickListener{addEntry()}})
-        val discount=field("Total discount (INR)","0",13,true)
-        val notes=field(if(kind=="Receipt")"Payment method / reference / received confirmation" else "Notes / payment terms","",300)
+        val discount=field("Total discount (INR)",initial("discount","0"),13,true)
+        val notes=field("Notes / payment terms",initial("notes"),300)
+        val tracked=InvoiceDocument.paymentTracked(kind)
+        val paid=if(tracked)field("Amount received (INR)",initial("paid","0"),16,true)else EditText(this).apply{setText("0")}
+        val method=if(tracked)field("Payment method (Cash / UPI / Bank / Card)",initial("method"),60)else EditText(this)
+        val reference=if(tracked)field("Payment reference (optional)",initial("reference"),80)else EditText(this)
+        val summary=label("",14f,0xFF172B4D.toInt(),true).apply{setPadding(dp(12),dp(14),dp(12),dp(14));background=rounded(0xFFEAF2FF.toInt(),14)}
+        panel.addView(gap(8));panel.addView(summary)
+        updateTotals={
+            summary.text=runCatching{
+                val items=entries.map{e->
+                    val q=e.qty.text.toString().toBigDecimalOrNull()?:error("Enter quantity")
+                    val p=e.price.text.toString().toBigDecimalOrNull()?:error("Enter item rate")
+                    val t=e.tax.text.toString().toBigDecimalOrNull()?:error("Enter GST rate")
+                    require(q.signum()>0&&p.signum()>=0&&t.signum()>=0&&t<=java.math.BigDecimal("100")){"Check item values"}
+                    InvoiceDocument.Item("","",q,p,t)
+                }
+                val cut=discount.text.toString().toBigDecimalOrNull()?:error("Enter discount")
+                val t=InvoiceDocument.totals(items,cut,taxMode.isChecked)
+                val received=paid.text.toString().toBigDecimalOrNull()?:error("Enter received amount")
+                val payment=if(tracked)"\nReceived: INR "+InvoiceDocument.format(received)+"\nBalance: INR "+InvoiceDocument.format(t.total-received)+" • "+InvoiceDocument.paymentStatus(t.total,received) else ""
+                "Subtotal: INR "+InvoiceDocument.format(t.base)+"\nDiscount: INR "+InvoiceDocument.format(t.discount)+"\nCGST: "+InvoiceDocument.format(t.cgst)+"  SGST: "+InvoiceDocument.format(t.sgst)+"  IGST: "+InvoiceDocument.format(t.igst)+"\nTOTAL: INR "+InvoiceDocument.format(t.total)+payment
+            }.getOrElse{it.message?:"Enter valid item values"}
+        }
+        watch(discount);watch(paid);taxMode.setOnCheckedChangeListener{_,_->updateTotals()};updateTotals()
         section("5 • PDF template")
         val template=android.widget.Spinner(this).apply{
             adapter=android.widget.ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Modern Blue • Free","Minimal Clean • Free","Corporate Green • PRO","Creative Purple • PRO","Classic Red • PRO","Gold Premium • PRO"))
         }
+        template.setSelection((initialDraft?.optInt("template",0)?:0).coerceIn(0,5))
         panel.addView(template)
         panel.addView(Button(this).apply{text="Add handwritten signature • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Invoice signature")){
@@ -5794,9 +5856,23 @@ class MainActivity : AppCompatActivity() {
             }
         }})
         panel.addView(label("Enter your own verified GSTIN, tax rates and invoice numbering. Preview before issuing. This is a PDF document maker, not an accounting or government e-invoicing service.",11f,0xFF64748B.toInt()))
-        val dialog=appDialog().setTitle("Create $kind").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Cancel",null).setPositiveButton("Preview",null).create()
+        val dialog=appDialog().setTitle("Create $kind").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Cancel",null).setNeutralButton("Save draft",null).setPositiveButton("Preview",null).create()
         dialog.show()
         dialog.setOnDismissListener{invoiceLogoCallback=null}
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener{
+            if(owner!=signedInUserId()){dialog.dismiss();return@setOnClickListener}
+            try{
+                fun raw(e:EditText)=e.text.toString()
+                val items=org.json.JSONArray()
+                entries.forEach{e->items.put(org.json.JSONObject().put("name",raw(e.name)).put("hsn",raw(e.hsn)).put("qty",raw(e.qty)).put("rate",raw(e.price)).put("tax",raw(e.tax)))}
+                val obj=org.json.JSONObject().put("id",draftId).put("kind",kind).put("business",raw(business)).put("address",raw(address)).put("contact",raw(contact)).put("gstin",raw(gstin))
+                    .put("customer",raw(customer)).put("customerAddress",raw(customerAddress)).put("customerGstin",raw(customerGstin)).put("supply",raw(supply))
+                    .put("number",raw(number)).put("date",raw(date)).put("due",raw(due)).put("interstate",taxMode.isChecked).put("items",items)
+                    .put("discount",raw(discount)).put("notes",raw(notes)).put("paid",raw(paid)).put("method",raw(method)).put("reference",raw(reference)).put("template",template.selectedItemPosition)
+                saveInvoiceDraft(obj)
+                Toast.makeText(this,"Draft saved on this device. Logo and signature must be added again.",Toast.LENGTH_LONG).show()
+            }catch(e:Exception){Toast.makeText(this,e.message?:"Could not save draft",Toast.LENGTH_LONG).show()}
+        }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             try{
                 require(owner==signedInUserId()){"Account changed; reopen the invoice editor"}
@@ -5816,11 +5892,13 @@ class MainActivity : AppCompatActivity() {
                     InvoiceDocument.Item(value(e.name),value(e.hsn),quantity,decimal(e.price,"100000000",2),decimal(e.tax,"100",2))
                 }
                 if(kind=="GST Invoice"){require(value(gstin).matches(Regex("[0-9A-Za-z]{15}"))&&value(supply).isNotBlank()){"Enter supplier GSTIN and place of supply"}}
-                if(kind=="Receipt")require(value(notes).isNotBlank()){"Enter payment details and confirmation before issuing a receipt"}
+                if(kind=="Receipt")require(value(method).isNotBlank()){"Enter payment method before issuing a receipt"}
                 val pro=template.selectedItemPosition>=2||logo!=null||signature!=null
                 if(pro&&!requirePremiumTool("Premium invoice design"))return@setOnClickListener
-                val draft=InvoiceDocument.Draft(kind,value(number),value(date),value(due),value(business),value(address),value(contact),value(gstin).uppercase(Locale.ROOT),value(customer),value(customerAddress),value(customerGstin).uppercase(Locale.ROOT),value(supply),items,decimal(discount,"100000000000000",2),taxMode.isChecked,value(notes),template.selectedItemPosition,logo,signature)
-                InvoiceDocument.totals(draft)
+                val draft=InvoiceDocument.Draft(kind,value(number),value(date),value(due),value(business),value(address),value(contact),value(gstin).uppercase(Locale.ROOT),value(customer),value(customerAddress),value(customerGstin).uppercase(Locale.ROOT),value(supply),items,decimal(discount,"100000000000000",2),taxMode.isChecked,value(notes),template.selectedItemPosition,logo,signature,decimal(paid,"10000000000000000",2),value(method),value(reference))
+                val totals=InvoiceDocument.totals(draft)
+                if(tracked)InvoiceDocument.paymentStatus(totals.total,draft.paid)
+                if(kind=="Receipt")require(draft.paid.signum()>0 && draft.paid.compareTo(totals.total)==0){"A receipt must record the full received amount. Use an invoice for an outstanding balance."}
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
                 Thread{
                     try{
@@ -5851,7 +5929,7 @@ class MainActivity : AppCompatActivity() {
         var index=0;var bitmap:Bitmap?=null
         fun render(){
             renderer.openPage(index).use{page->
-                val next=Bitmap.createBitmap(page.width,page.height,Bitmap.Config.ARGB_8888)
+                val next=Bitmap.createBitmap(page.width*2,page.height*2,Bitmap.Config.ARGB_8888)
                 next.eraseColor(android.graphics.Color.WHITE);page.render(next,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 image.setImageBitmap(next);bitmap?.recycle();bitmap=next
             }
@@ -5866,7 +5944,7 @@ class MainActivity : AppCompatActivity() {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             if(owner!=signedInUserId()){dialog.dismiss();return@setOnClickListener}
             if(pro&&!requirePremiumTool("Premium invoice export"))return@setOnClickListener
-            val prefix="Billing_"+draft.kind.replace(" ","_")+"_"+draft.number.take(24)
+            val prefix="Billing_"+draft.kind.replace(" ","_")+"_"+draft.number.replace(Regex("[^A-Za-z0-9_-]"),"_").take(24)
             val saved=savePdfBytes(data,prefix)
             if(saved!=null){recordBillingExport(draft,saved);dialog.dismiss();Toast.makeText(this,"Invoice saved. Share or print from the result screen.",Toast.LENGTH_LONG).show()}
             else Toast.makeText(this,"Could not save PDF",Toast.LENGTH_LONG).show()
