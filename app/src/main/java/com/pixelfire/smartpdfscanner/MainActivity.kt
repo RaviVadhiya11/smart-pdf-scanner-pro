@@ -1,6 +1,15 @@
 package com.pixelfire.smartpdfscanner
 
 import android.Manifest
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.BillingFlowParams
+import com.android.billingclient.api.PendingPurchasesParams
+import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
+import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.pdf.PdfRenderer
@@ -696,6 +705,7 @@ class MainActivity : AppCompatActivity() {
             .addOnFailureListener { error -> android.util.Log.w("DocNexa", "Announcement topic subscription failed", error) }
         PDFBoxResourceLoader.init(applicationContext)
         buildScreen()
+        connectPlayBilling()
         requestAdConsent()
         openNotificationPdf(intent)
         initializeRemoteConfig()
@@ -1273,6 +1283,7 @@ class MainActivity : AppCompatActivity() {
         quickItem("⌂ Home", true) { buildScreen() }
         quickItem("▤ PDF Tools") { showPdfTools() }
         quickItem("▧ Studio") { showImageStudio() }
+        quickItem("♛ Premium") { studioPremiumInfo() }
         quickItem("▣ ID Photo") { showIdPhotoMenu() }
         quickItem("PDF Editor") { pdfEditorPicker.launch(arrayOf("application/pdf")) }
         quickItem("✍ Signature") { openSignatureEditor() }
@@ -1896,6 +1907,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        billingHandler.removeCallbacks(billingRefreshTask)
+        playBillingClient?.endConnection()
+        premiumAdDisposers.toList().forEach { it() }
         exportResultDialog?.dismiss()
         pagePreviewExecutor.shutdownNow()
         closeQrCamera()
@@ -4167,7 +4181,7 @@ class MainActivity : AppCompatActivity() {
      * The ad is inserted between Quick Access and the PDF Tools grid.
      */
     private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount): () -> Unit {
-        if (!adsConsentAllowed) return {}
+        if (!adsConsentAllowed || hasVerifiedPremium()) return {}
         val disposed = AtomicBoolean(false)
         var displayedAd: NativeAd? = null
         var displayedAdView: NativeAdView? = null
@@ -4189,12 +4203,12 @@ class MainActivity : AppCompatActivity() {
 
         val loader = AdLoader.Builder(this, getString(R.string.native_ad_unit_id))
             .forNativeAd { nativeAd ->
-                if (disposed.get() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
+                if (disposed.get() || hasVerifiedPremium() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                     nativeAd.destroy()
                     return@forNativeAd
                 }
                 runOnUiThread {
-                    if (disposed.get() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
+                    if (disposed.get() || hasVerifiedPremium() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                         nativeAd.destroy()
                         return@runOnUiThread
                     }
@@ -4278,7 +4292,9 @@ class MainActivity : AppCompatActivity() {
                 }
             })
             .build()
+        lateinit var disposeSlot: () -> Unit
         fun releaseAd() {
+            premiumAdDisposers.remove(disposeSlot)
             if (disposed.compareAndSet(false, true)) {
                 displayedAdView?.destroy()
                 displayedAdView = null
@@ -4287,12 +4303,14 @@ class MainActivity : AppCompatActivity() {
                 slot.visibility = View.GONE
             }
         }
+        disposeSlot = { releaseAd(); (slot.parent as? ViewGroup)?.removeView(slot) }
+        premiumAdDisposers.add(disposeSlot)
         slot.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) = Unit
             override fun onViewDetachedFromWindow(view: View) { releaseAd() }
         })
         loader.loadAd(AdRequest.Builder().build())
-        return { releaseAd(); (slot.parent as? ViewGroup)?.removeView(slot) }
+        return disposeSlot
     }
 
 
@@ -4894,10 +4912,229 @@ class MainActivity : AppCompatActivity() {
         setScreenContent(root)
     }
 
+    private val premiumAdDisposers = mutableListOf<() -> Unit>()
+    private val billingHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var playBillingClient: BillingClient? = null
+    private var billingConnecting = false
+    private var billingChecking = false
+    private var billingCheckGeneration = 0
+    @Volatile private var verifiedPremiumUser = ""
+    @Volatile private var verifiedPremiumUntil = 0L
+    private var premiumDialog: AlertDialog? = null
+    private val premiumProduct = "docnexa_premium"
+    private val premiumPlans = listOf("premium-monthly", "premium-yearly")
+    private val billingRefreshTask = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            if (verifiedPremiumUser != signedInUserId() || verifiedPremiumUntil <= System.currentTimeMillis()) {
+                verifiedPremiumUser = ""
+                verifiedPremiumUntil = 0
+            }
+            refreshPlayPurchases(false)
+            billingHandler.postDelayed(this, 60_000L)
+        }
+    }
+
+    private fun hasVerifiedPremium(): Boolean =
+        verifiedPremiumUser.isNotBlank() && verifiedPremiumUser == signedInUserId() &&
+            verifiedPremiumUntil > System.currentTimeMillis()
+
+    override fun onResume() {
+        super.onResume()
+        refreshPlayPurchases(false)
+        billingHandler.removeCallbacks(billingRefreshTask)
+        billingHandler.postDelayed(billingRefreshTask, 60_000L)
+    }
+
+    override fun onPause() {
+        billingHandler.removeCallbacks(billingRefreshTask)
+        super.onPause()
+    }
+
+    private fun connectPlayBilling(onReady: (() -> Unit)? = null) {
+        if (isFinishing || isDestroyed) return
+        val client = playBillingClient ?: BillingClient.newBuilder(this)
+            .setListener { result, purchases ->
+                runOnUiThread {
+                    when (result.responseCode) {
+                        BillingClient.BillingResponseCode.OK -> {
+                            if (purchases.orEmpty().any { it.purchaseState == Purchase.PurchaseState.PENDING }) {
+                                Toast.makeText(this, "Payment pending. Premium unlocks after payment verification.", Toast.LENGTH_LONG).show()
+                            }
+                            refreshPlayPurchases(true)
+                        }
+                        BillingClient.BillingResponseCode.USER_CANCELED -> Unit
+                        BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> refreshPlayPurchases(true)
+                        else -> Toast.makeText(this, "Google Play purchase unavailable. Try again later.", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
+            .enableAutoServiceReconnection()
+            .build().also { playBillingClient = it }
+        if (client.isReady) { onReady?.invoke(); return }
+        if (billingConnecting) {
+            if (onReady != null) Toast.makeText(this, "Connecting to Google Play. Please try again shortly.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        billingConnecting = true
+        client.startConnection(object : BillingClientStateListener {
+            override fun onBillingSetupFinished(result: BillingResult) {
+                runOnUiThread {
+                    billingConnecting = false
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                        if (onReady != null) onReady() else refreshPlayPurchases(false)
+                    } else if (onReady != null) Toast.makeText(this@MainActivity, "Google Play Billing is unavailable.", Toast.LENGTH_LONG).show()
+                }
+            }
+            override fun onBillingServiceDisconnected() { runOnUiThread { billingConnecting = false } }
+        })
+    }
+
+    private fun refreshPlayPurchases(notify: Boolean) {
+        if (isFinishing || isDestroyed || billingChecking) return
+        val user = signedInUserId()
+        val auth = cloudToken()
+        if (user == "guest" || auth.isBlank()) {
+            verifiedPremiumUser = ""; verifiedPremiumUntil = 0L
+            if (notify) Toast.makeText(this, "Sign in to restore your membership.", Toast.LENGTH_LONG).show()
+            return
+        }
+        connectPlayBilling {
+            val client = playBillingClient ?: return@connectPlayBilling
+            if (billingChecking) return@connectPlayBilling
+            billingChecking = true
+            val generation = ++billingCheckGeneration
+            client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()) { result, purchases ->
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) { billingChecking = false; return@runOnUiThread }
+                    if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                        billingChecking = false
+                        if (notify) Toast.makeText(this, "Could not check purchases. Try Restore Purchase again.", Toast.LENGTH_LONG).show()
+                        return@runOnUiThread
+                    }
+                    val tokens = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED && premiumProduct in it.products }.map { it.purchaseToken }
+                    Thread {
+                        var expiry = 0L
+                        var unavailable = false
+                        for (token in tokens) {
+                            try {
+                                val verified = SupabaseCloud.playBilling(auth, "verify", token)
+                                if (verified.optBoolean("active")) expiry = maxOf(expiry, verified.optLong("expiresAt"))
+                            } catch (_: Exception) { unavailable = true }
+                        }
+                        runOnUiThread {
+                            billingChecking = false
+                            if (isFinishing || isDestroyed || generation != billingCheckGeneration || user != signedInUserId()) return@runOnUiThread
+                            val wasPremium = hasVerifiedPremium()
+                            if (expiry > System.currentTimeMillis()) {
+                                verifiedPremiumUser = user
+                                verifiedPremiumUntil = minOf(expiry, System.currentTimeMillis() + 5 * 60_000L)
+                                premiumAdDisposers.toList().forEach { it() }
+                            } else if (!unavailable) {
+                                verifiedPremiumUser = ""; verifiedPremiumUntil = 0L
+                            }
+                            if (wasPremium && !hasVerifiedPremium()) buildScreen()
+                            if (notify) {
+                                val message = when {
+                                    hasVerifiedPremium() -> "Premium active • Ads removed"
+                                    unavailable -> "Purchase verification unavailable. Please restore again later."
+                                    else -> "No active verified membership found."
+                                }
+                                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                                if (hasVerifiedPremium()) premiumDialog?.dismiss()
+                            }
+                        }
+                    }.start()
+                }
+            }
+        }
+    }
+
+    private fun managePlaySubscription() {
+        val url = "https://play.google.com/store/account/subscriptions?sku=$premiumProduct&package=$packageName"
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure {
+            Toast.makeText(this, "Open Google Play Store to manage your subscription.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun studioPremiumInfo() {
-        appDialog().setTitle("DocNexa Premium • Coming soon")
-            .setMessage("Planned: ad-free experience and 4K / 8K image export. Google Play subscriptions are not yet activated. No payment is collected; premium export remains locked until verified membership is available.")
-            .setPositiveButton("OK",null).show()
+        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(12)) }
+        val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(18),dp(18),dp(18)); background=gradient(0xFF10254C.toInt(),0xFF6546C8.toInt(),20) }
+        hero.addView(label("♛ DOCNEXA PREMIUM",12f,0xFFFFD66B.toInt(),true))
+        hero.addView(gap(6)); hero.addView(label(if(hasVerifiedPremium()) "Your membership is active" else "Unlock more. Work without ads.",21f,android.graphics.Color.WHITE,true))
+        hero.addView(gap(6)); hero.addView(label("Ad-free documents • 4K and 8K image export",12f,0xFFE5EDFF.toInt()))
+        panel.addView(hero); panel.addView(gap(12))
+        listOf("✓ All existing PDF and image tools", "✓ No native ads with verified Premium", "✓ High-resolution 4K / 8K image scaling", "✓ Restore using the same Play and DocNexa accounts").forEach {
+            panel.addView(label(it,13f,0xFF263957.toInt())); panel.addView(gap(6))
+        }
+        val message = label(if(hasVerifiedPremium()) "Verified membership" else "Loading prices from Google Play…",12f,0xFF64748B.toInt())
+        panel.addView(message)
+        val options = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        panel.addView(options)
+        val dialog=appDialog().setTitle("Premium membership").setView(toolDialogScroll(panel,0.68f))
+            .setNegativeButton("Close",null).setNeutralButton("Restore"){_,_->
+                if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true)
+            }.setPositiveButton("Manage"){_,_->managePlaySubscription()}.create()
+        premiumDialog=dialog
+        dialog.setOnDismissListener { if(premiumDialog===dialog) premiumDialog=null }
+        dialog.show()
+        if(hasVerifiedPremium()) return
+        if(cloudToken().isBlank()){
+            message.text="Sign in to link purchases to your DocNexa account."
+            options.addView(Button(this).apply { text="Sign in"; isAllCaps=false; setOnClickListener { dialog.dismiss(); showCloudLoginDialog() } })
+            return
+        }
+        connectPlayBilling {
+            val client=playBillingClient ?: return@connectPlayBilling
+            val product=QueryProductDetailsParams.Product.newBuilder().setProductId(premiumProduct).setProductType(BillingClient.ProductType.SUBS).build()
+            client.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()) { result, details ->
+                runOnUiThread {
+                    if(!dialog.isShowing || isFinishing || isDestroyed) return@runOnUiThread
+                    val item=details.productDetailsList.firstOrNull{it.productId==premiumProduct}
+                    if(result.responseCode!=BillingClient.BillingResponseCode.OK || item==null){
+                        message.text="Plans are not available yet. No payment is collected."
+                        return@runOnUiThread
+                    }
+                    message.text="Select an auto-renewing plan. Cancel in Google Play anytime."
+                    val offers=item.subscriptionOfferDetails.orEmpty().filter{it.offerId==null && it.basePlanId in premiumPlans}
+                    premiumPlans.forEach { plan ->
+                        val offer=offers.firstOrNull{it.basePlanId==plan} ?: return@forEach
+                        val phase=offer.pricingPhases.pricingPhaseList.lastOrNull() ?: return@forEach
+                        val period=if(plan=="premium-monthly") "month" else "year"
+                        options.addView(Button(this).apply {
+                            text=(if(period=="month")"Monthly Premium" else "Yearly Premium")+" • "+phase.formattedPrice+" / "+period
+                            isAllCaps=false
+                            setOnClickListener { isEnabled=false; beginVerifiedPurchase(dialog,this,item,offer.offerToken) }
+                        })
+                    }
+                    if(options.childCount==0)message.text="No active subscription plans found."
+                    panel.addView(label("Auto-renewal applies until canceled. Google Play displays final price and billing terms before purchase.",11f,0xFF64748B.toInt()))
+                }
+            }
+        }
+    }
+
+    private fun beginVerifiedPurchase(dialog:AlertDialog,button:Button,product:ProductDetails,offerToken:String){
+        val account=signedInUserId();val auth=cloudToken()
+        if(account=="guest"||auth.isBlank()){button.isEnabled=true;return}
+        Thread {
+            val ready=runCatching{SupabaseCloud.playBilling(auth,"ready").optBoolean("ready")}.getOrDefault(false)
+            runOnUiThread {
+                if(isFinishing||isDestroyed||!dialog.isShowing)return@runOnUiThread
+                button.isEnabled=true
+                if(!ready || account!=signedInUserId()){
+                    Toast.makeText(this,"Secure subscription service is not activated. No payment collected.",Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                if(hasVerifiedPremium()){managePlaySubscription();return@runOnUiThread}
+                val id=MessageDigest.getInstance("SHA-256").digest(account.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it.toInt() and 255)}
+                val params=BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product).setOfferToken(offerToken).build()
+                val result=playBillingClient?.launchBillingFlow(this,BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(params)).setObfuscatedAccountId(id).build())
+                if(result?.responseCode!=BillingClient.BillingResponseCode.OK)Toast.makeText(this,"Could not start Google Play checkout.",Toast.LENGTH_LONG).show()
+            }
+        }.start()
     }
 
     private fun studioEncode(bitmap:Bitmap,format:String,quality:Int=95):ByteArray {
@@ -5021,15 +5258,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun studioUpscaleDialog(uri:Uri){
         appDialog().setTitle("Image Upscaler • Resolution")
-            .setItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px","4K • Premium locked","8K • Premium locked")){_,i->
-                if(i>=2){studioPremiumInfo();return@setItems}
+            .setItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px",if(hasVerifiedPremium())"4K • 3840 px" else "4K • Premium locked",if(hasVerifiedPremium())"8K • 7680 px" else "8K • Premium locked")){_,i->
+                if(i>=2 && !hasVerifiedPremium()){studioPremiumInfo();return@setItems}
                 advancedToolJob("Upscaling image…"){
                     val source=decodeImageSafely(uri,2048,4_000_000L)
-                    val edge=if(i==0)1280 else 2048
+                    val edge=listOf(1280,2048,3840,7680)[i]
+                    if(i>=2 && !hasVerifiedPremium()){source.recycle();error("Premium verification required")}
+                    val runtime=Runtime.getRuntime()
+                    val estimated=edge.toLong()*edge*4L*source.width.coerceAtMost(source.height)/maxOf(source.width,source.height)
+                    if(estimated*2L > runtime.maxMemory()-(runtime.totalMemory()-runtime.freeMemory())){source.recycle();error("Not enough memory for this resolution. Try a smaller image or 4K.")}
                     val scale=edge.toFloat()/maxOf(source.width,source.height)
                     val resized=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
                     if(resized!==source) source.recycle()
-                    studioResult(resized,"Upscaled")
+                    if(i>=2 && !hasVerifiedPremium()){resized.recycle();error("Premium verification required")}
+                    studioResult(resized,"Upscaled",if(i>=2)"jpg" else "png",98)
                 }
             }.setNegativeButton("Cancel",null).show()
     }
