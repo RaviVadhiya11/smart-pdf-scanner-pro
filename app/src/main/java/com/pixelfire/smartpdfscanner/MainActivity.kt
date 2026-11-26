@@ -713,6 +713,8 @@ class MainActivity : AppCompatActivity() {
         pendingResultName = savedInstanceState?.getString("result_pending_name")
         pendingDriveBackupAccount = savedInstanceState?.getString("drive_backup_account")
         pendingDriveImportAccount = savedInstanceState?.getString("drive_import_account")
+        directDriveAccount = savedInstanceState?.getString("direct_drive_account")
+        directDriveResolutionPending = directDriveAccount != null
         val resultUris = savedInstanceState?.getStringArrayList("result_uris")
         val resultNames = savedInstanceState?.getStringArrayList("result_names")
         val resultMimes = savedInstanceState?.getStringArrayList("result_mimes")
@@ -1973,6 +1975,7 @@ class MainActivity : AppCompatActivity() {
         outState.putString("result_pending_name", pendingResultName)
         outState.putString("drive_backup_account", pendingDriveBackupAccount)
         outState.putString("drive_import_account", pendingDriveImportAccount)
+        if (directDriveResolutionPending) outState.putString("direct_drive_account", directDriveAccount)
         if (exportResultDialog?.isShowing == true) {
             val files = exportResults.items
             outState.putStringArrayList("result_uris", ArrayList(files.map { it.uri }))
@@ -7691,23 +7694,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var directDriveAccount: String? = null
+    private var directDriveResolutionPending = false
     private val directDriveBusy = AtomicBoolean(false)
     private val directDriveScope = "https://www.googleapis.com/auth/drive.file"
 
     private val directDriveAuthorization = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode != RESULT_OK || result.data == null) {
+        directDriveResolutionPending = false
+        val data = result.data
+        if (data == null) {
             directDriveAccount = null
-            Toast.makeText(this, "Google Drive authorization cancelled.", Toast.LENGTH_SHORT).show()
+            showDriveAuthorizationHelp("Google returned no authorization result (Android result " + result.resultCode + ").")
         } else {
             try {
                 val authorization = com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this)
-                    .getAuthorizationResultFromIntent(result.data)
+                    .getAuthorizationResultFromIntent(data)
                 finishDirectDriveAuthorization(authorization)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 directDriveAccount = null
-                Toast.makeText(this, "Google Drive authorization failed. Manual backup remains available.", Toast.LENGTH_LONG).show()
+                showDriveAuthorizationHelp(driveAuthorizationError(e, "Consent result " + result.resultCode))
             }
         }
+    }
+
+    private fun driveAuthorizationError(error: Throwable, stage: String): String {
+        val code = (error as? com.google.android.gms.common.api.ApiException)?.statusCode
+        return if (code != null) stage + ": Google status " + code + " (" +
+            com.google.android.gms.common.api.CommonStatusCodes.getStatusCodeString(code) + ")."
+        else stage + ": " + error.javaClass.simpleName + "."
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installedDriveCertificate(): String = runCatching {
+        val signatures = if (Build.VERSION.SDK_INT >= 28) {
+            packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo?.apkContentsSigners
+        } else {
+            packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES).signatures
+        }
+        val cert = signatures?.firstOrNull() ?: error("No signing certificate")
+        MessageDigest.getInstance("SHA-1").digest(cert.toByteArray())
+            .joinToString(":") { "%02X".format(it.toInt() and 255) }
+    }.getOrDefault("Unavailable")
+
+    private fun showDriveAuthorizationHelp(reason: String) {
+        if (isFinishing || isDestroyed) return
+        val certificate = installedDriveCertificate()
+        val details = reason + "\n\nPackage: " + packageName + "\nInstalled APK SHA-1:\n" + certificate +
+            "\n\nCheck that this exact certificate is registered for the Android OAuth client in your DocNexa Google Cloud project. Use an updated Google Play services installation, then select your account and approve Drive access. If you intentionally cancelled, you can close this message."
+        appDialog().setTitle("Google Drive connection")
+            .setMessage(details)
+            .setPositiveButton("Retry") { _, _ -> authorizeDirectDrive() }
+            .setNeutralButton("Manual backup") { _, _ -> chooseDriveBackupFile() }
+            .setNegativeButton("Close", null).show()
     }
 
     private fun authorizeDirectDrive() {
@@ -7725,16 +7763,18 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if (authorization.hasResolution()) {
                         val pending = authorization.pendingIntent ?: error("Authorization unavailable")
+                        directDriveResolutionPending = true
                         directDriveAuthorization.launch(IntentSenderRequest.Builder(pending.intentSender).build())
                     } else finishDirectDriveAuthorization(authorization)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     directDriveAccount = null
-                    Toast.makeText(this, "Google Drive authorization unavailable.", Toast.LENGTH_LONG).show()
+                    directDriveResolutionPending = false
+                    showDriveAuthorizationHelp(driveAuthorizationError(e, "Unable to open Google consent"))
                 }
-            }.addOnFailureListener {
+            }.addOnFailureListener { e ->
                 directDriveAccount = null
-                if (!isFinishing && !isDestroyed) Toast.makeText(this,
-                    "Google Drive authorization unavailable. Check Google Cloud OAuth setup or use manual backup.", Toast.LENGTH_LONG).show()
+                directDriveResolutionPending = false
+                showDriveAuthorizationHelp(driveAuthorizationError(e, "Authorization request"))
             }
     }
 
@@ -7744,7 +7784,11 @@ class MainActivity : AppCompatActivity() {
         val token = result.accessToken
         if (account == null || account != signedInUserId() || token.isNullOrBlank() ||
             !result.grantedScopes.contains(directDriveScope)) {
-            Toast.makeText(this, "Drive authorization not granted. Please connect again.", Toast.LENGTH_LONG).show()
+            showDriveAuthorizationHelp(when {
+                account == null || account != signedInUserId() -> "DocNexa account changed or authorization state expired."
+                token.isNullOrBlank() -> "Google returned no access token."
+                else -> "The required Drive file permission was not granted."
+            })
             return
         }
         if (!directDriveBusy.compareAndSet(false, true)) return
