@@ -1101,6 +1101,64 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Resolution-independent native toolbar icons; no font glyph or emoji dependency. */
+    private fun homeHeaderGlyph(kind: String): View = object : View(this) {
+        private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = if (kind == "crown") 0xFFFFC542.toInt() else android.graphics.Color.WHITE
+            strokeWidth = 2.1f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val size = minOf(width, height, dp(26)).toFloat()
+            if (size <= 0f) return
+            canvas.save()
+            canvas.translate((width - size) / 2f, (height - size) / 2f)
+            canvas.scale(size / 24f, size / 24f)
+            ink.style = Paint.Style.STROKE
+            when (kind) {
+                "menu" -> {
+                    for (y in listOf(5f, 12f, 19f)) canvas.drawLine(3f, y, 21f, y, ink)
+                }
+                "search" -> {
+                    canvas.drawCircle(10f, 10f, 6.5f, ink)
+                    canvas.drawLine(15f, 15f, 21f, 21f, ink)
+                }
+                "more" -> {
+                    ink.style = Paint.Style.FILL
+                    for (y in listOf(5f, 12f, 19f)) canvas.drawCircle(12f, y, 1.8f, ink)
+                }
+                "crown" -> {
+                    ink.style = Paint.Style.FILL
+                    val crown = android.graphics.Path().apply {
+                        moveTo(2f, 6f); lineTo(7.5f, 10.5f); lineTo(12f, 3f)
+                        lineTo(16.5f, 10.5f); lineTo(22f, 6f); lineTo(19.5f, 18f)
+                        lineTo(4.5f, 18f); close()
+                    }
+                    canvas.drawPath(crown, ink)
+                    canvas.drawRoundRect(4.5f, 20f, 19.5f, 22f, 1f, 1f, ink)
+                }
+            }
+            canvas.restore()
+        }
+    }.apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+
+    private fun homeHeaderAction(kind: String, description: String, action: (View) -> Unit): View =
+        android.widget.FrameLayout(this).apply {
+            contentDescription = description
+            isClickable = true
+            isFocusable = true
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
+            val selectable = android.util.TypedValue()
+            if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+                setBackgroundResource(selectable.resourceId)
+            }
+            addView(homeHeaderGlyph(kind), android.widget.FrameLayout.LayoutParams(-1, -1))
+            setOnClickListener { action(this) }
+        }
+
     private fun buildScreen() {
         loadFolders()
         selectedFolder = "New Folder"
@@ -1127,22 +1185,29 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(12), dp(18), dp(18))
         }
 
-        // Premium blue header.
+        // Full-width native toolbar: retain the blue brand, with Premium in the header.
+        val compactHeader = resources.configuration.screenWidthDp < 360 ||
+            resources.configuration.fontScale > 1.15f
+        val headerShell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(88)
+            setPadding(dp(6), dp(10), dp(6), dp(10))
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 18)
+            elevation = dp(3).toFloat()
+        }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 20)
-            elevation = dp(3).toFloat()
         }
-        header.addView(TextView(this).apply {
-            text = "☰"
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(0, 0, dp(10), 0)
-            setOnClickListener { showAppDrawer() }
-        })
+        headerShell.addView(header, LinearLayout.LayoutParams(-1, -2))
+        val headerActions = if (compactHeader) LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            headerShell.addView(this, LinearLayout.LayoutParams(-1, -2))
+        } else header
+        header.addView(homeHeaderAction("menu", "Open navigation menu") { showAppDrawer() },
+            LinearLayout.LayoutParams(dp(48), dp(48)))
         header.addView(object : View(this) {
             private val scannerInk = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF1557A8.toInt()
@@ -1188,52 +1253,50 @@ class MainActivity : AppCompatActivity() {
         }.apply {
             background = rounded(0xFFFFFFFF.toInt(), 15, 0xFFDCE8FF.toInt())
             contentDescription = "DocNexa document scanner icon"
-            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(44))
         })
         val brand = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
+            setPadding(dp(7), 0, dp(2), 0)
         }
-        brand.addView(label("DocNexa", 20f, 0xFFFFFFFF.toInt(), true))
-        brand.addView(label("PDF Scanner & Editor", 11f, 0xFFDCE8FF.toInt()))
+        brand.addView(label("DocNexa", 18f, 0xFFFFFFFF.toInt(), true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        brand.addView(label("PDF Scanner & Editor", 10f, 0xFFDCE8FF.toInt()).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(TextView(this).apply {
-            text = "★"
-            textSize = 24f
+        val premiumChip = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFB82E.toInt())
-            contentDescription = "Favourite documents"
-            setOnClickListener { showFavouriteDocs() }
-        })
-        header.addView(TextView(this).apply {
-            text = "⌕"
-            textSize = 27f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            setPadding(dp(12), 0, dp(4), 0)
-            setOnClickListener { showDocumentSearch() }
-        })
-        header.addView(TextView(this).apply {
-            text = "⋮"
-            textSize = 32f
-            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-            includeFontPadding = false
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            minWidth = dp(42)
-            minHeight = dp(48)
-            setPadding(dp(8), 0, dp(4), 0)
-            contentDescription = "More options"
+            minimumHeight = dp(52)
+            background = rounded(0x244A8CFF, 12)
             isClickable = true
             isFocusable = true
-            setOnClickListener { showHomeOverflowMenu(this) }
-        })
-        // Keep the brand header outside the ScrollView so it stays fixed while content moves.
-        root.addView(header, LinearLayout.LayoutParams(-1, -2).apply {
-            leftMargin = dp(18)
-            rightMargin = dp(18)
-            topMargin = dp(12)
-            bottomMargin = dp(12)
+            contentDescription = "DocNexa Premium plans"
+            setOnClickListener { studioPremiumInfo() }
+        }
+        premiumChip.addView(homeHeaderGlyph("crown"), LinearLayout.LayoutParams(dp(28), dp(25)))
+        val premiumLabel = label(if (hasVerifiedPremium()) "PRO Active" else "Premium", 10f, 0xFFFFD66B.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            maxLines = 1
+        }
+        headerMembershipLabels.add(java.lang.ref.WeakReference(premiumLabel))
+        premiumChip.addView(premiumLabel, LinearLayout.LayoutParams(-1, -2))
+        headerActions.addView(premiumChip, LinearLayout.LayoutParams(dp(if (compactHeader) 88 else 64), -2))
+        headerActions.addView(homeHeaderAction("search", "Search documents") { showDocumentSearch() },
+            LinearLayout.LayoutParams(dp(48), dp(48)))
+        headerActions.addView(homeHeaderAction("more", "More options") { anchor -> showHomeOverflowMenu(anchor) },
+            LinearLayout.LayoutParams(dp(48), dp(48)))
+        // Fixed header above the scroll region; no overlap with the hero.
+        root.addView(headerShell, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = dp(6)
+            rightMargin = dp(6)
+            topMargin = dp(6)
+            bottomMargin = dp(10)
         })
 
         // Functional search field styled after the DocNexa reference screen.
@@ -1361,8 +1424,6 @@ class MainActivity : AppCompatActivity() {
         }
         hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
         content.addView(hero)
-        content.addView(gap(12))
-        content.addView(membershipHomeCard())
         content.addView(gap(20))
 
         // Tool section title.
@@ -1810,6 +1871,7 @@ class MainActivity : AppCompatActivity() {
     private fun showHomeOverflowMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add("Premium plans").setOnMenuItemClickListener { studioPremiumInfo(); true }
+        popup.menu.add("Favourite documents").setOnMenuItemClickListener { showFavouriteDocs(); true }
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
             appDialog()
                 .setTitle("PDF / JPG")
@@ -5206,8 +5268,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val membershipLabels = mutableListOf<java.lang.ref.WeakReference<TextView>>()
+    private val headerMembershipLabels = mutableListOf<java.lang.ref.WeakReference<TextView>>()
 
     private fun refreshMembershipLabels() {
+        val headerIterator = headerMembershipLabels.iterator()
+        while (headerIterator.hasNext()) {
+            val view = headerIterator.next().get()
+            if (view == null) headerIterator.remove()
+            else view.text = if (hasVerifiedPremium()) "PRO Active" else "Premium"
+        }
         val iterator = membershipLabels.iterator()
         while(iterator.hasNext()) {
             val view = iterator.next().get()
