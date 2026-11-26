@@ -4926,9 +4926,10 @@ class MainActivity : AppCompatActivity() {
     private val billingRefreshTask = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (verifiedPremiumUser != signedInUserId() || verifiedPremiumUntil <= System.currentTimeMillis()) {
+            if (verifiedPremiumUser.isNotBlank() && (verifiedPremiumUser != signedInUserId() || verifiedPremiumUntil <= System.currentTimeMillis())) {
                 verifiedPremiumUser = ""
                 verifiedPremiumUntil = 0
+                buildScreen()
             }
             refreshPlayPurchases(false)
             billingHandler.postDelayed(this, 60_000L)
@@ -5176,7 +5177,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun studioMime(format:String)=when(format){"jpg"->"image/jpeg";"webp"->"image/webp";"bmp"->"image/bmp";else->"image/png"}
 
-    private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95) {
+    private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95,requiresPremium:Boolean=false) {
         val bytes=studioEncode(bitmap,format,quality)
         val width=bitmap.width; val height=bitmap.height
         val thumbScale=minOf(1f,900f/maxOf(width,height))
@@ -5189,7 +5190,10 @@ class MainActivity : AppCompatActivity() {
             panel.addView(ImageView(this).apply{setImageBitmap(preview);adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER},LinearLayout.LayoutParams(-1,dp(250)))
             panel.addView(label("${width} × ${height} px • ${format.uppercase(Locale.ROOT)} • ${bytes.size/1024} KB",12f,0xFF64748B.toInt()))
             val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
-                .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->saveDocumentBytes(bytes,prefix,studioMime(format),format)}.create()
+                .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->
+                    if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo()
+                    else saveDocumentBytes(bytes,prefix,studioMime(format),format)
+                }.create()
             dialog.setOnDismissListener{preview.recycle()}
             dialog.show()
         }
@@ -5271,7 +5275,7 @@ class MainActivity : AppCompatActivity() {
                     val resized=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
                     if(resized!==source) source.recycle()
                     if(i>=2 && !hasVerifiedPremium()){resized.recycle();error("Premium verification required")}
-                    studioResult(resized,"Upscaled",if(i>=2)"jpg" else "png",98)
+                    studioResult(resized,"Upscaled",if(i>=2)"jpg" else "png",98,i>=2)
                 }
             }.setNegativeButton("Cancel",null).show()
     }
