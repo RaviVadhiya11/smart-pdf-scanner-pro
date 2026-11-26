@@ -35,8 +35,8 @@ android {
         applicationId = "com.pixelfire.smartpdfscanner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.5.0"
+        versionCode = 13
+        versionName = "1.6.0"
     }
     buildTypes {
         release {
@@ -68,6 +68,7 @@ dependencies {
     implementation("androidx.browser:browser:1.8.0")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.camera:camera-core:1.4.2")
