@@ -3737,7 +3737,7 @@ class MainActivity : AppCompatActivity() {
                 for (index in 0 until count) {
                     if (premium && !hasVerifiedPremium()) error("Premium verification expired. Previously exported pages are retained.")
                     renderer.openPage(index).use { page ->
-                        val dimensions = NativeExportPlan.pdfDimensions(page.width, page.height, dpi, 7680, exportPixelBudget())
+                        val dimensions = NativeExportPlan.pdfDimensions(page.width, page.height, dpi, 7680, exportPixelBudget(36_000_000L, 8L))
                         capped = capped || dimensions.limited
                         val bitmap = Bitmap.createBitmap(dimensions.width, dimensions.height, Bitmap.Config.ARGB_8888)
                         try {
@@ -3761,11 +3761,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun exportPixelBudget(): Long {
+    private fun exportPixelBudget(maxPixels: Long = 16_000_000L, bytesPerPixel: Long = 16L): Long {
         val runtime = Runtime.getRuntime()
         val available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
         require(available >= 16L * 1024 * 1024) { "Not enough memory. Close other documents and try again." }
-        return (available / 16L).coerceIn(1_000_000L, 16_000_000L)
+        return (available / bytesPerPixel).coerceIn(1_000_000L, maxPixels)
     }
 
     private fun showPageCollage(uri: Uri) {
@@ -5272,6 +5272,7 @@ class MainActivity : AppCompatActivity() {
         row("AI background removal","Preview","Export")
         row("Background changer","—","✓")
         row("4K / 8K image scaling","—","✓")
+        row("Custom resize above 2048 px","—","✓")
         row("PDF image export up to 300 DPI","✓","✓")
         row("PDF image export up to 600 DPI*","—","✓")
         row("Bill / invoice PDF","✓","✓")
@@ -5410,12 +5411,15 @@ class MainActivity : AppCompatActivity() {
     private fun studioMime(format:String)=when(format){"jpg"->"image/jpeg";"webp"->"image/webp";"bmp"->"image/bmp";else->"image/png"}
 
     private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95,requiresPremium:Boolean=false) {
-        val bytes=studioEncode(bitmap,format,quality)
         val width=bitmap.width; val height=bitmap.height
-        val thumbScale=minOf(1f,900f/maxOf(width,height))
-        val thumb=Bitmap.createScaledBitmap(bitmap,(width*thumbScale).toInt().coerceAtLeast(1),(height*thumbScale).toInt().coerceAtLeast(1),true)
-        val preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
-        bitmap.recycle()
+        val bytes: ByteArray
+        val preview: Bitmap
+        try {
+            bytes=studioEncode(bitmap,format,quality)
+            val thumbScale=minOf(1f,900f/maxOf(width,height))
+            val thumb=Bitmap.createScaledBitmap(bitmap,(width*thumbScale).toInt().coerceAtLeast(1),(height*thumbScale).toInt().coerceAtLeast(1),true)
+            preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
+        } finally { bitmap.recycle() }
         runOnUiThread {
             if(isFinishing || isDestroyed){preview.recycle();return@runOnUiThread}
             val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8))}
@@ -5424,7 +5428,10 @@ class MainActivity : AppCompatActivity() {
             val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
                 .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->
                     if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo("High-quality image export")
-                    else saveDocumentBytes(bytes,prefix,studioMime(format),format)
+                    else advancedToolJob("Saving image…") {
+                        if(requiresPremium && !hasVerifiedPremium()) error("Premium verification required")
+                        saveDocumentBytes(bytes,prefix,studioMime(format),format) ?: error("Unable to save image")
+                    }
                 }.create()
             dialog.setOnDismissListener{preview.recycle()}
             dialog.show()
@@ -5478,20 +5485,25 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             val width=w.text.toString().toIntOrNull()?:0;val height=h.text.toString().toIntOrNull()?:0
-            if(width !in 1..2048 || height !in 1..2048){Toast.makeText(this,"Use 1–2048 px per side. Higher resolution export requires Premium.",Toast.LENGTH_LONG).show();return@setOnClickListener}
+            if(width !in 1..4096 || height !in 1..4096 || width.toLong()*height > 16_000_000L){Toast.makeText(this,"Use 1–4096 px per side, up to 16 megapixels.",Toast.LENGTH_LONG).show();return@setOnClickListener}
+            if(maxOf(width,height)>2048 && !hasVerifiedPremium()){dialog.dismiss();studioPremiumInfo("High-resolution image resize");return@setOnClickListener}
             dialog.dismiss();studioResize(uri,width,height,fit.isChecked)
         }
     }
 
     private fun studioResize(uri:Uri,width:Int,height:Int,fit:Boolean){
         advancedToolJob("Resizing image…"){
-            val source=decodeImageSafely(uri,2048,4_000_000L)
+            val premium = maxOf(width,height)>2048
+            if(premium && !hasVerifiedPremium()) error("Premium verification required")
+            val budget = exportPixelBudget(16_000_000L, 8L)
+            require(width.toLong()*height <= budget) { "Not enough memory for these dimensions. Choose a smaller size." }
+            val source=decodeImageSafely(uri,if(premium) 4200 else 2048,minOf(budget,if(premium) 12_000_000L else 4_000_000L))
             try{
                 val output=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
                 val canvas=Canvas(output);canvas.drawColor(android.graphics.Color.WHITE)
                 val rect=if(fit)fitRect(source.width,source.height,width,height,0,0) else Rect(0,0,width,height)
                 canvas.drawBitmap(source,null,rect,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                studioResult(output,"Resized")
+                studioResult(output,"Resized",requiresPremium=premium)
             }finally{source.recycle()}
         }
     }
