@@ -35,8 +35,8 @@ android {
         applicationId = "com.pixelfire.smartpdfscanner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.7.1"
+        versionCode = 16
+        versionName = "1.7.2"
     }
     buildTypes {
         release {
