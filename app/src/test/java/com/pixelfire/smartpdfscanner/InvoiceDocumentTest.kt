@@ -21,4 +21,22 @@ class InvoiceDocumentTest {
         assertEquals("16.20",InvoiceDocument.format(t.sgst))
         assertEquals("212.40",InvoiceDocument.format(t.total))
     }
+    @Test fun paymentStates() {
+        val total=BigDecimal("236.00")
+        assertEquals("UNPAID",InvoiceDocument.paymentStatus(total,BigDecimal.ZERO))
+        assertEquals("PARTIALLY PAID",InvoiceDocument.paymentStatus(total,BigDecimal("100.00")))
+        assertEquals("PAID",InvoiceDocument.paymentStatus(total,BigDecimal("236")))
+    }
+    @Test(expected=IllegalArgumentException::class) fun rejectsOverpayment() {
+        InvoiceDocument.paymentStatus(BigDecimal("236"),BigDecimal("237"))
+    }
+    @Test fun mixedRateDiscount() {
+        val items=listOf(
+            InvoiceDocument.Item("A","",BigDecimal.ONE,BigDecimal("100"),BigDecimal("18")),
+            InvoiceDocument.Item("B","",BigDecimal.ONE,BigDecimal("100"),BigDecimal("5"))
+        )
+        val t=InvoiceDocument.totals(items,BigDecimal("20"),true)
+        assertEquals("20.70",InvoiceDocument.format(t.igst))
+        assertEquals("200.70",InvoiceDocument.format(t.total))
+    }
 }
