@@ -3614,7 +3614,7 @@ class MainActivity : AppCompatActivity() {
         action("Open with Google Docs", "Open using a compatible app", "G") { openPdfWithGoogleDocs(uri) }
 
         section("Convert and export")
-        action("Export first page as JPG", "Create a JPG with Save As and Share", "▧") { savePdfPageAsJpg(uri) }
+        action("Export first page as image", "Choose JPEG or lossless PNG with Save As and Share", "▧") { savePdfPageAsJpg(uri) }
         action("Export all pages as images", "Save every page as a separate image", "▧") { convertPdfToImages(uri) }
         action("Create ZIP archive", "Package this PDF into a ZIP file", "ZIP") { zipPdf(uri) }
         action("Extract PDF text", "Read and copy selectable text", "T") { extractPdfText(uri) }
@@ -3693,30 +3693,79 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun savePdfPageAsJpg(uri: Uri) {
-        Thread {
-            try {
-                val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
-                descriptor.use { pfd ->
-                    PdfRenderer(pfd).use { renderer ->
-                        require(renderer.pageCount > 0) { "PDF has no pages" }
-                        renderer.openPage(0).use { page ->
-                            val scale = minOf(2f, 2400f / maxOf(page.width, page.height))
-                            val bitmap = Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-                            try {
-                                Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
-                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                val bytes = ByteArrayOutputStream().also { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)) }.toByteArray()
-                                val name = "DocNexa_Page1_${System.currentTimeMillis()}.jpg"
-                                val saved = saveBytesPrivately(bytes, name) ?: error("Could not save JPG. Check available storage.")
-                                showExportSuccess(saved, name, "image/jpeg")
-                            } finally { bitmap.recycle() }
-                        }
+        showPdfImageExportOptions(uri, true)
+    }
+
+    private fun showPdfImageExportOptions(uri: Uri, firstOnly: Boolean) {
+        val options = arrayOf("JPEG • up to 200 DPI", "PNG • up to 300 DPI (lossless)", "JPEG • up to 300 DPI", if (hasVerifiedPremium()) "PNG • up to 600 DPI (Premium)" else "PNG • up to 600 DPI (Premium locked)")
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            addView(label("Export original PDF pages at print-quality resolution. Large pages or low-memory devices may use a lower resolution. The original PDF is unchanged.", 12f, 0xFF53627A.toInt()))
+        }
+        val group = android.widget.RadioGroup(this)
+        options.forEachIndexed { index, option ->
+            group.addView(android.widget.RadioButton(this).apply {
+                id = 6200 + index
+                text = option
+            })
+        }
+        panel.addView(group)
+        group.check(if (firstOnly) 6202 else 6201)
+        appDialog().setTitle(if (firstOnly) "Export first page" else "Export PDF pages")
+            .setView(panel).setNegativeButton("Cancel", null)
+            .setPositiveButton("Export") { _, _ ->
+                val index = (group.checkedRadioButtonId - 6200).coerceIn(0, 3)
+                val premium = index == 3
+                if (premium && !requirePremiumTool("600 DPI PDF image export")) return@setPositiveButton
+                exportPdfPageImages(uri, firstOnly, listOf(200, 300, 300, 600)[index], index == 1 || index == 3, premium)
+            }.show()
+    }
+
+    private fun exportPdfPageImages(uri: Uri, firstOnly: Boolean, dpi: Int, png: Boolean, premium: Boolean) {
+        advancedToolJob("Exporting high-quality PDF images…") {
+            val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
+            val renderer = try { PdfRenderer(descriptor) } catch (e: Exception) { descriptor.close(); throw e }
+            renderer.use {
+                require(renderer.pageCount > 0) { "PDF has no pages" }
+                val count = if (firstOnly) 1 else renderer.pageCount
+                var completed = 0
+                var capped = false
+                val extension = if (png) "png" else "jpg"
+                val mime = if (png) "image/png" else "image/jpeg"
+                val stamp = System.currentTimeMillis()
+                for (index in 0 until count) {
+                    if (premium && !hasVerifiedPremium()) error("Premium verification expired. Previously exported pages are retained.")
+                    renderer.openPage(index).use { page ->
+                        val dimensions = NativeExportPlan.pdfDimensions(page.width, page.height, dpi, 7680, exportPixelBudget(36_000_000L, 8L))
+                        capped = capped || dimensions.limited
+                        val bitmap = Bitmap.createBitmap(dimensions.width, dimensions.height, Bitmap.Config.ARGB_8888)
+                        try {
+                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                            val name = "DocNexa_Page_" + (index + 1) + "_" + stamp + "_" + dimensions.width + "x" + dimensions.height + "." + extension
+                            val file = PrivateDocumentStore.save(privateDocumentsDir(), name) { stream ->
+                                check(bitmap.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 98, stream)) { "Image encoding failed" }
+                            }
+                            showExportSuccess(privateDocumentUri(file), name, mime)
+                            completed++
+                        } finally { bitmap.recycle() }
                     }
                 }
-            } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to JPG failed", Toast.LENGTH_LONG).show() }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Exported " + completed + " page(s)" + (if (capped) " • resolution limited for device safety" else " • high quality")
+                    }
+                }
             }
-        }.start()
+        }
+    }
+
+    private fun exportPixelBudget(maxPixels: Long = 16_000_000L, bytesPerPixel: Long = 16L): Long {
+        val runtime = Runtime.getRuntime()
+        val available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+        require(available >= 16L * 1024 * 1024) { "Not enough memory. Close other documents and try again." }
+        return (available / bytesPerPixel).coerceIn(1_000_000L, maxPixels)
     }
 
     private fun showPageCollage(uri: Uri) {
@@ -5223,6 +5272,9 @@ class MainActivity : AppCompatActivity() {
         row("AI background removal","Preview","Export")
         row("Background changer","—","✓")
         row("4K / 8K image scaling","—","✓")
+        row("Custom resize above 2048 px","—","✓")
+        row("PDF image export up to 300 DPI","✓","✓")
+        row("PDF image export up to 600 DPI*","—","✓")
         row("Bill / invoice PDF","✓","✓")
         row("Premium invoice styles / logo","—","✓")
         row("Customer / product records","—","✓")
@@ -5252,7 +5304,7 @@ class MainActivity : AppCompatActivity() {
         panel.addView(message);panel.addView(gap(12))
         section("Compare Free & Premium")
         panel.addView(comparison);panel.addView(gap(12))
-        panel.addView(label("Subscriptions renew automatically until canceled in Google Play. Prices, taxes and final terms are shown before purchase. High-resolution scaling does not recreate missing image detail.",11f,0xFF64748B.toInt()))
+        panel.addView(label("Subscriptions renew automatically until canceled in Google Play. Prices, taxes and final terms are shown before purchase. High-resolution scaling does not recreate missing image detail. *PDF export resolution depends on page size and available memory.",11f,0xFF64748B.toInt()))
         panel.addView(gap(10))
         val dialog=appDialog().setTitle("Plans & membership").setView(toolDialogScroll(panel,0.74f))
             .setNegativeButton("Close",null).setNeutralButton("Restore"){_,_->
@@ -5359,12 +5411,15 @@ class MainActivity : AppCompatActivity() {
     private fun studioMime(format:String)=when(format){"jpg"->"image/jpeg";"webp"->"image/webp";"bmp"->"image/bmp";else->"image/png"}
 
     private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95,requiresPremium:Boolean=false) {
-        val bytes=studioEncode(bitmap,format,quality)
         val width=bitmap.width; val height=bitmap.height
-        val thumbScale=minOf(1f,900f/maxOf(width,height))
-        val thumb=Bitmap.createScaledBitmap(bitmap,(width*thumbScale).toInt().coerceAtLeast(1),(height*thumbScale).toInt().coerceAtLeast(1),true)
-        val preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
-        bitmap.recycle()
+        val bytes: ByteArray
+        val preview: Bitmap
+        try {
+            bytes=studioEncode(bitmap,format,quality)
+            val thumbScale=minOf(1f,900f/maxOf(width,height))
+            val thumb=Bitmap.createScaledBitmap(bitmap,(width*thumbScale).toInt().coerceAtLeast(1),(height*thumbScale).toInt().coerceAtLeast(1),true)
+            preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
+        } finally { bitmap.recycle() }
         runOnUiThread {
             if(isFinishing || isDestroyed){preview.recycle();return@runOnUiThread}
             val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8))}
@@ -5373,7 +5428,10 @@ class MainActivity : AppCompatActivity() {
             val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
                 .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->
                     if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo("High-quality image export")
-                    else saveDocumentBytes(bytes,prefix,studioMime(format),format)
+                    else advancedToolJob("Saving image…") {
+                        if(requiresPremium && !hasVerifiedPremium()) error("Premium verification required")
+                        saveDocumentBytes(bytes,prefix,studioMime(format),format) ?: error("Unable to save image")
+                    }
                 }.create()
             dialog.setOnDismissListener{preview.recycle()}
             dialog.show()
@@ -5388,7 +5446,10 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf("JPEG • white background","PNG • lossless","WebP • compact","BMP • uncompressed")){_,choice->
                 val format=formats[choice]
                 advancedToolJob("Converting images…"){
-                    if(files.size==1) studioResult(decodeImageSafely(files[0],2048,4_000_000L),"Converted",format)
+                    if(files.size==1) {
+                        val premium = hasVerifiedPremium()
+                        studioResult(decodeImageSafely(files[0],if(premium) 4200 else 2048,minOf(exportPixelBudget(),if(premium) 12_000_000L else 4_000_000L)),"Converted",format,98,premium)
+                    }
                     else {
                         val bytes=ByteArrayOutputStream()
                         ZipOutputStream(bytes).use{zip->
@@ -5424,20 +5485,25 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             val width=w.text.toString().toIntOrNull()?:0;val height=h.text.toString().toIntOrNull()?:0
-            if(width !in 1..2048 || height !in 1..2048){Toast.makeText(this,"Use 1–2048 px per side. Higher resolution export requires Premium.",Toast.LENGTH_LONG).show();return@setOnClickListener}
+            if(width !in 1..4096 || height !in 1..4096 || width.toLong()*height > 16_000_000L){Toast.makeText(this,"Use 1–4096 px per side, up to 16 megapixels.",Toast.LENGTH_LONG).show();return@setOnClickListener}
+            if(maxOf(width,height)>2048 && !hasVerifiedPremium()){dialog.dismiss();studioPremiumInfo("High-resolution image resize");return@setOnClickListener}
             dialog.dismiss();studioResize(uri,width,height,fit.isChecked)
         }
     }
 
     private fun studioResize(uri:Uri,width:Int,height:Int,fit:Boolean){
         advancedToolJob("Resizing image…"){
-            val source=decodeImageSafely(uri,2048,4_000_000L)
+            val premium = maxOf(width,height)>2048
+            if(premium && !hasVerifiedPremium()) error("Premium verification required")
+            val budget = exportPixelBudget(16_000_000L, 8L)
+            require(width.toLong()*height <= budget) { "Not enough memory for these dimensions. Choose a smaller size." }
+            val source=decodeImageSafely(uri,if(premium) 4200 else 2048,minOf(budget,if(premium) 12_000_000L else 4_000_000L))
             try{
                 val output=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
                 val canvas=Canvas(output);canvas.drawColor(android.graphics.Color.WHITE)
                 val rect=if(fit)fitRect(source.width,source.height,width,height,0,0) else Rect(0,0,width,height)
                 canvas.drawBitmap(source,null,rect,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                studioResult(output,"Resized")
+                studioResult(output,"Resized",requiresPremium=premium)
             }finally{source.recycle()}
         }
     }
@@ -5447,12 +5513,12 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px",if(hasVerifiedPremium())"4K • 3840 px" else "4K • Premium locked",if(hasVerifiedPremium())"8K • 7680 px" else "8K • Premium locked")){_,i->
                 if(i>=2 && !hasVerifiedPremium()){studioPremiumInfo();return@setItems}
                 advancedToolJob("Upscaling image…"){
-                    val source=decodeImageSafely(uri,2048,4_000_000L)
                     val edge=listOf(1280,2048,3840,7680)[i]
+                    val source=decodeImageSafely(uri,edge,minOf(exportPixelBudget(),if(i>=2) 16_000_000L else 4_000_000L))
                     if(i>=2 && !hasVerifiedPremium()){source.recycle();error("Premium verification required")}
                     val runtime=Runtime.getRuntime()
                     val estimated=edge.toLong()*edge*4L*source.width.coerceAtMost(source.height)/maxOf(source.width,source.height)
-                    if(estimated*2L > runtime.maxMemory()-(runtime.totalMemory()-runtime.freeMemory())){source.recycle();error("Not enough memory for this resolution. Try a smaller image or 4K.")}
+                    if(estimated*3L > runtime.maxMemory()-(runtime.totalMemory()-runtime.freeMemory())){source.recycle();error("Not enough memory for this resolution. Try a smaller image or 4K.")}
                     val scale=edge.toFloat()/maxOf(source.width,source.height)
                     val resized=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
                     if(resized!==source) source.recycle()
@@ -7697,8 +7763,9 @@ class MainActivity : AppCompatActivity() {
                 try {
                     for (index in 0 until renderer.pageCount) {
                         renderer.openPage(index).use { sourcePage ->
-                            val width = (sourcePage.width * preset.dpi / 72f).toInt().coerceAtLeast(1)
-                            val height = (sourcePage.height * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                            val dimensions = NativeExportPlan.pdfDimensions(sourcePage.width, sourcePage.height, preset.dpi.toInt(), 4096, exportPixelBudget())
+                            val width = dimensions.width
+                            val height = dimensions.height
                             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                             try {
                                 bitmap.eraseColor(android.graphics.Color.WHITE)
@@ -8303,8 +8370,9 @@ class MainActivity : AppCompatActivity() {
                                             PdfRenderer(descriptor).use { renderer ->
                                                 for (pageIndex in 0 until renderer.pageCount) {
                                                     renderer.openPage(pageIndex).use { sourcePage ->
-                                                        val width = (sourcePage.width * preset.dpi / 72f).toInt().coerceAtLeast(1)
-                                                        val height = (sourcePage.height * preset.dpi / 72f).toInt().coerceAtLeast(1)
+                                                        val dimensions = NativeExportPlan.pdfDimensions(sourcePage.width, sourcePage.height, preset.dpi.toInt(), 4096, exportPixelBudget())
+                                                        val width = dimensions.width
+                                                        val height = dimensions.height
                                                         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                                                         try {
                                                             bitmap.eraseColor(android.graphics.Color.WHITE)
@@ -8627,26 +8695,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun convertPdfToImages(uri: Uri) {
-        Thread {
-            try {
-                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: error("Cannot open PDF")
-                val renderer = PdfRenderer(pfd)
-                try {
-                    for (index in 0 until renderer.pageCount) {
-                        renderer.openPage(index).use { page ->
-                            val bitmap = Bitmap.createBitmap((page.width * 2).coerceAtLeast(1), (page.height * 2).coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-                            bitmap.eraseColor(android.graphics.Color.WHITE)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            val out = ByteArrayOutputStream()
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
-                            bitmap.recycle()
-                            saveDocumentBytes(out.toByteArray(), "PDF_Page_${index + 1}", "image/jpeg", "jpg")
-                        }
-                    }
-                } finally { renderer.close(); pfd.close() }
-                runOnUiThread { Toast.makeText(this, "PDF pages exported as images to DocNexa app storage", Toast.LENGTH_LONG).show() }
-            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, e.localizedMessage ?: "PDF to Image failed", Toast.LENGTH_LONG).show() } }
-        }.start()
+        showPdfImageExportOptions(uri, false)
     }
 
     private fun zipPdf(uri: Uri) {
@@ -9567,8 +9616,8 @@ class MainActivity : AppCompatActivity() {
                 val row = view as LinearLayout
                 (row.getChildAt(1) as TextView).text = "Page ${index + 1}"
                 val actions = row.getChildAt(2) as LinearLayout
-                actions.getChildAt(0).isEnabled = index > 0
-                actions.getChildAt(1).isEnabled = index < rows.lastIndex
+                actions.getChildAt(1)?.isEnabled = index > 0
+                actions.getChildAt(2)?.isEnabled = index < rows.lastIndex
             }
             refreshHeader()
         }
@@ -9666,6 +9715,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(action("Duplicate") {
                 val p = rows.indexOf(row)
                 if (p >= 0) {
+                    if (orderedUris.size >= 100) { Toast.makeText(this@MainActivity, "Maximum 100 pages", Toast.LENGTH_SHORT).show(); return@action }
                     orderedUris.add(p + 1, orderedUris[p])
                     croppedBitmaps.add(p + 1, croppedBitmaps[p]?.copy(Bitmap.Config.ARGB_8888, true))
                     val duplicateRow = LinearLayout(this@MainActivity).apply {
@@ -9703,6 +9753,14 @@ class MainActivity : AppCompatActivity() {
                             }
                         })
                     }
+                    duplicateActions.addView(Button(this@MainActivity).apply {
+                            text = "↑"; isAllCaps = false
+                            setOnClickListener { val at = rows.indexOf(duplicateRow); movePage(at, at - 1) }
+                        })
+                        duplicateActions.addView(Button(this@MainActivity).apply {
+                            text = "↓"; isAllCaps = false
+                            setOnClickListener { val at = rows.indexOf(duplicateRow); movePage(at, at + 1) }
+                        })
                     duplicateRow.addView(duplicateActions)
                     rows.add(p + 1, duplicateRow)
                     previewList.addView(duplicateRow, p + 3)
@@ -9904,8 +9962,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun fitRect(w: Int, h: Int, maxW: Int, maxH: Int, left: Int, top: Int): Rect {
         val scale = minOf(maxW.toFloat() / w, maxH.toFloat() / h)
-        val outW = (w * scale).toInt()
-        val outH = (h * scale).toInt()
+        val outW = (w * scale).toInt().coerceAtLeast(1)
+        val outH = (h * scale).toInt().coerceAtLeast(1)
         val x = left + (maxW - outW) / 2
         val y = top + (maxH - outH) / 2
         return Rect(x, y, x + outW, y + outH)
