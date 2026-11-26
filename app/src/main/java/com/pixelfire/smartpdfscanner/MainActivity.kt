@@ -7661,7 +7661,7 @@ class MainActivity : AppCompatActivity() {
         val stamp = prefs.getLong(accountPrefKey("manual_backup_time"), 0L)
         val last = if (stamp > 0L) java.text.DateFormat.getDateTimeInstance().format(Date(stamp)) else "No manual backup yet"
         panel.addView(label("Last copy written: " + last, 12f, 0xFF53627A.toInt()))
-        panel.addView(label("Choose Drive in the Android picker. No direct Google account is linked to DocNexa, and cloud sync is not verified by the app.", 12f, 0xFF64748B.toInt()))
+        panel.addView(label("Choose Drive in the Android picker. Manual picker copies are not verified as cloud uploads. Direct authorization is available separately.", 12f, 0xFF64748B.toInt()))
         panel.addView(gap(12))
         val dialog = appDialog().setTitle("Backup & Restore").setView(toolDialogScroll(panel, 0.72f))
             .setNegativeButton("Close", null).create()
@@ -7678,6 +7678,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(label(detail, 12f, 0xFF64748B.toInt()))
             panel.addView(row); panel.addView(gap(8))
         }
+        option("Connect Google Drive", "Authorize selected-file access for direct uploads and restore. Google Cloud setup required.") { authorizeDirectDrive() }
         option("Import / restore a file", "Choose an existing PDF, image or supported export from Drive or another provider.") { launchDriveImport() }
         option("Manual backup", "Select a saved document, image or invoice export. Copy to the folder you choose.") { chooseDriveBackupFile() }
         option("Open Google Drive", "Manage your Google account and uploaded files in Drive.") {
@@ -7685,8 +7686,204 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive")))
             } catch (_: Exception) { Toast.makeText(this, "Google Drive unavailable.", Toast.LENGTH_LONG).show() }
         }
-        panel.addView(label("Automatic backup, direct Google OAuth and multi-device sync are not available in this version.", 11f, 0xFF64748B.toInt()))
+        panel.addView(label("Automatic background backup and continuous multi-device sync require a separately configured service. Manual backup remains available.", 11f, 0xFF64748B.toInt()))
         dialog.show()
+    }
+
+    private var directDriveAccount: String? = null
+    private val directDriveBusy = AtomicBoolean(false)
+    private val directDriveScope = "https://www.googleapis.com/auth/drive.file"
+
+    private val directDriveAuthorization = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode != RESULT_OK || result.data == null) {
+            directDriveAccount = null
+            Toast.makeText(this, "Google Drive authorization cancelled.", Toast.LENGTH_SHORT).show()
+        } else {
+            try {
+                val authorization = com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this)
+                    .getAuthorizationResultFromIntent(result.data)
+                finishDirectDriveAuthorization(authorization)
+            } catch (_: Exception) {
+                directDriveAccount = null
+                Toast.makeText(this, "Google Drive authorization failed. Manual backup remains available.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun authorizeDirectDrive() {
+        if (directDriveAccount != null || directDriveBusy.get()) {
+            Toast.makeText(this, "Finish the current Drive operation first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!requireInternet("Google Drive")) return
+        directDriveAccount = signedInUserId()
+        val request = com.google.android.gms.auth.api.identity.AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(directDriveScope))).build()
+        com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this).authorize(request)
+            .addOnSuccessListener { authorization ->
+                if (isFinishing || isDestroyed) return@addOnSuccessListener
+                try {
+                    if (authorization.hasResolution()) {
+                        val pending = authorization.pendingIntent ?: error("Authorization unavailable")
+                        directDriveAuthorization.launch(IntentSenderRequest.Builder(pending.intentSender).build())
+                    } else finishDirectDriveAuthorization(authorization)
+                } catch (_: Exception) {
+                    directDriveAccount = null
+                    Toast.makeText(this, "Google Drive authorization unavailable.", Toast.LENGTH_LONG).show()
+                }
+            }.addOnFailureListener {
+                directDriveAccount = null
+                if (!isFinishing && !isDestroyed) Toast.makeText(this,
+                    "Google Drive authorization unavailable. Check Google Cloud OAuth setup or use manual backup.", Toast.LENGTH_LONG).show()
+            }
+    }
+
+    private fun finishDirectDriveAuthorization(result: com.google.android.gms.auth.api.identity.AuthorizationResult) {
+        val account = directDriveAccount
+        directDriveAccount = null
+        val token = result.accessToken
+        if (account == null || account != signedInUserId() || token.isNullOrBlank() ||
+            !result.grantedScopes.contains(directDriveScope)) {
+            Toast.makeText(this, "Drive authorization not granted. Please connect again.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!directDriveBusy.compareAndSet(false, true)) return
+        advancedToolJob("Checking Google Drive access…") {
+            try {
+                val email = DirectDriveApi.accountEmail(token)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId()) {
+                        status.text = "Google Drive authorized"
+                        showDirectDriveActions(token, email, account)
+                    }
+                }
+            } finally { directDriveBusy.set(false) }
+        }
+    }
+
+    private fun showDirectDriveActions(token: String, email: String, account: String) {
+        if (account != signedInUserId()) return
+        val options = mutableListOf("Upload a saved file", "Restore a DocNexa backup", "Manage Google access")
+        if (hasVerifiedPremium()) options.add(1, "Batch upload (Premium)")
+        appDialog().setTitle("Google Drive • Authorized")
+            .setItems(options.toTypedArray()) { _, index ->
+                when (options[index]) {
+                    "Upload a saved file" -> chooseDirectDriveUpload(token, email, account, false)
+                    "Batch upload (Premium)" -> chooseDirectDriveUpload(token, email, account, true)
+                    "Restore a DocNexa backup" -> listDirectDriveBackups(token, email, account)
+                    else -> {
+                        appDialog().setTitle("Manage Google access")
+                            .setMessage("Authorized Google account: " + email + "\n\nManage or remove DocNexa access on your Google Account. Existing Drive backups are not deleted.")
+                            .setPositiveButton("Open Google Account") { _, _ ->
+                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/connections"))) }
+                            }.setNegativeButton("Cancel", null).show()
+                    }
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun chooseDirectDriveUpload(token: String, email: String, account: String, batch: Boolean) {
+        if (account != signedInUserId() || (batch && !requirePremiumTool("Batch Drive backup"))) return
+        val trashed = prefs.getStringSet("trash_uris", emptySet()).orEmpty()
+        val files = privateDocumentsDir().listFiles().orEmpty().filter {
+            it.isFile && it.length() in 1L..DirectDriveApi.MAX_BYTES && backupMime(it.name) != null &&
+                !trashed.contains(privateDocumentUri(it).toString())
+        }.sortedByDescending { it.lastModified() }.take(200)
+        if (files.isEmpty()) {
+            Toast.makeText(this, "No supported saved files (up to 128 MB).", Toast.LENGTH_LONG).show()
+            return
+        }
+        val labels = files.map { it.name + " • " + formatFileSize(it.length()) }.toTypedArray()
+        fun confirm(chosen: List<java.io.File>) {
+            if (chosen.isEmpty()) { Toast.makeText(this, "Select at least one file.", Toast.LENGTH_SHORT).show(); return }
+            appDialog().setTitle("Confirm Google Drive upload")
+                .setMessage("Upload " + chosen.size + " original file(s) to " + email + "? Existing Drive files will not be overwritten.")
+                .setPositiveButton("Upload") { _, _ -> uploadDirectDriveFiles(token, account, chosen, batch) }
+                .setNegativeButton("Cancel", null).show()
+        }
+        if (!batch) appDialog().setTitle("Select file • " + email).setItems(labels) { _, index -> confirm(listOf(files[index])) }
+            .setNegativeButton("Cancel", null).show()
+        else {
+            val checked = BooleanArray(files.size)
+            appDialog().setTitle("Select up to 10 files")
+                .setMultiChoiceItems(labels, checked) { _, index, selected -> checked[index] = selected }
+                .setPositiveButton("Continue") { _, _ ->
+                    val chosen = files.filterIndexed { index, _ -> checked[index] }
+                    if (chosen.size > 10) Toast.makeText(this, "Select up to 10 files.", Toast.LENGTH_LONG).show()
+                    else confirm(chosen)
+                }.setNegativeButton("Cancel", null).show()
+        }
+    }
+
+    private fun uploadDirectDriveFiles(token: String, account: String, files: List<java.io.File>, batch: Boolean) {
+        if (!directDriveBusy.compareAndSet(false, true)) return
+        advancedToolJob("Uploading original files to Drive…") {
+            try {
+                var complete = 0
+                var failed = 0
+                for (file in files) {
+                    if (account != signedInUserId() || (batch && !hasVerifiedPremium())) break
+                    try {
+                        require(privateDocumentFile(privateDocumentUri(file)) == file)
+                        DirectDriveApi.upload(token, file, backupMime(file.name) ?: error("Unsupported file"), account)
+                        complete++
+                        if (account == signedInUserId()) prefs.edit().putLong(accountPrefKey("manual_backup_time"), System.currentTimeMillis()).apply()
+                    } catch (_: Exception) { failed++ }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId()) {
+                        status.text = "Drive upload: " + complete + " saved"
+                        appDialog().setTitle("Google Drive backup")
+                            .setMessage("Uploaded: " + complete + "\nFailed: " + failed + "\nNot attempted: " + (files.size - complete - failed) + "\nOriginal local files retained.")
+                            .setPositiveButton("Done", null).show()
+                    }
+                }
+            } finally { directDriveBusy.set(false) }
+        }
+    }
+
+    private fun listDirectDriveBackups(token: String, email: String, account: String) {
+        if (account != signedInUserId() || !directDriveBusy.compareAndSet(false, true)) return
+        advancedToolJob("Loading DocNexa Drive backups…") {
+            try {
+                val backups = DirectDriveApi.list(token, account).filter { backupMime(it.name) != null }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId()) {
+                        status.text = "Drive backup list ready"
+                        if (backups.isEmpty()) Toast.makeText(this, "No direct backups found for this account.", Toast.LENGTH_LONG).show()
+                        else appDialog().setTitle("Latest Drive backups • " + email)
+                            .setItems(backups.map { it.name }.toTypedArray()) { _, index ->
+                                val item = backups[index]
+                                appDialog().setTitle("Restore file?")
+                                    .setMessage("Save an unchanged local copy of " + item.name + "?")
+                                    .setPositiveButton("Restore") { _, _ -> restoreDirectDriveBackup(token, account, item) }
+                                    .setNegativeButton("Cancel", null).show()
+                            }.setNegativeButton("Close", null).show()
+                    }
+                }
+            } finally { directDriveBusy.set(false) }
+        }
+    }
+
+    private fun restoreDirectDriveBackup(token: String, account: String, item: DirectDriveApi.Backup) {
+        if (account != signedInUserId() || !directDriveBusy.compareAndSet(false, true)) return
+        val directory = privateDocumentsDir()
+        advancedToolJob("Restoring original Drive file…") {
+            try {
+                val mime = backupMime(item.name) ?: error("Unsupported file")
+                val target = PrivateDocumentStore.save(directory, item.name) { output ->
+                    DirectDriveApi.download(token, item.id, output) { account == signedInUserId() }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId()) {
+                        val saved = privateDocumentUri(target)
+                        if (mime == "application/pdf") { assignPdf(saved); lastPdf = saved; buildScreen() }
+                        status.text = "Drive backup restored"
+                        showExportSuccess(saved, target.name, mime)
+                    }
+                }
+            } finally { directDriveBusy.set(false) }
+        }
     }
 
     private fun chooseDriveBackupFile() {

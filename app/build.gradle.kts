@@ -54,6 +54,7 @@ android {
 }
 dependencies {
     implementation("com.android.billingclient:billing:8.0.0")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
     testImplementation("junit:junit:4.13.2")
     implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
     implementation("com.google.firebase:firebase-analytics")
