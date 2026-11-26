@@ -1361,6 +1361,8 @@ class MainActivity : AppCompatActivity() {
         }
         hero.addView(scanButton, LinearLayout.LayoutParams(-1, dp(54)))
         content.addView(hero)
+        content.addView(gap(12))
+        content.addView(membershipHomeCard())
         content.addView(gap(20))
 
         // Tool section title.
@@ -1805,6 +1807,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHomeOverflowMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
+        popup.menu.add("Premium plans").setOnMenuItemClickListener { studioPremiumInfo(); true }
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
             appDialog()
                 .setTitle("PDF / JPG")
@@ -1887,6 +1890,11 @@ class MainActivity : AppCompatActivity() {
         }
         bar.addView(camera, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         bar.addView(import, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
+        bar.addView(Button(this).apply {
+            text = "♛ Plans"; isAllCaps = false; textSize = 12f
+            setTextColor(0xFFFFFFFF.toInt()); background = gradient(0xFF6546C8.toInt(), 0xFF4034A4.toInt(), 24); backgroundTintList = null
+            contentDescription = "Open Premium plans"; setOnClickListener { studioPremiumInfo() }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(8) })
         // Keep Scan and Import controls above the responsive horizontal Native Ad.
         footer.addView(bar)
         addNativeAdCard(footer)
@@ -3057,6 +3065,9 @@ class MainActivity : AppCompatActivity() {
             panel.addView(row)
         }
 
+        section("MEMBERSHIP")
+        setting("♛", "DocNexa Premium", if(hasVerifiedPremium()) "Active • manage your subscription" else "Compare Free, Monthly and Yearly plans") { studioPremiumInfo() }
+        setting("↻", "Restore Purchase", "Check your Google Play membership") { if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true) }
         section("DOCUMENT PREFERENCES")
         setting("⇅", "Default sort order", sortNames[currentSort]) {
             appDialog().setTitle("Sort documents")
@@ -4864,6 +4875,7 @@ class MainActivity : AppCompatActivity() {
         banner.addView(gap(6)); banner.addView(label("Create. Convert. Enhance.",22f,android.graphics.Color.WHITE,true))
         banner.addView(gap(5)); banner.addView(label("Private, on-device image processing and high-quality exports",12f,0xFFE5EDFF.toInt()))
         body.addView(banner); body.addView(gap(12))
+        body.addView(membershipHomeCard()); body.addView(gap(12))
         data class StudioTile(val title:String,val description:String,val icon:String,val group:String,val action:()->Unit)
         val tiles = listOf(
             StudioTile("Format Converter","JPG, PNG, WebP, BMP","⇄","Convert"){studioConvertPicker.launch(arrayOf("image/*"))},
@@ -5053,6 +5065,7 @@ class MainActivity : AppCompatActivity() {
                             } else if (!unavailable) {
                                 verifiedPremiumUser = ""; verifiedPremiumUntil = 0L
                             }
+                            refreshMembershipLabels()
                             if (wasPremium && !hasVerifiedPremium()) buildScreen()
                             if (notify) {
                                 val message = when {
@@ -5077,32 +5090,109 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val membershipLabels = mutableListOf<java.lang.ref.WeakReference<TextView>>()
+
+    private fun refreshMembershipLabels() {
+        val iterator = membershipLabels.iterator()
+        while(iterator.hasNext()) {
+            val view = iterator.next().get()
+            if(view == null) iterator.remove()
+            else view.text = if(hasVerifiedPremium()) "PREMIUM ACTIVE • Manage plan" else "FREE PLAN • Explore Premium"
+        }
+    }
+
+    private fun membershipHomeCard(): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            background = gradient(0xFF142C64.toInt(), 0xFF6546C8.toInt(), 20)
+            elevation = dp(2).toFloat()
+            isClickable = true; isFocusable = true
+            setOnClickListener { studioPremiumInfo() }
+        }
+        val badge = label(if(hasVerifiedPremium()) "PREMIUM ACTIVE • Manage plan" else "FREE PLAN • Explore Premium", 10.5f, 0xFFFFD66B.toInt(), true)
+        membershipLabels.add(java.lang.ref.WeakReference(badge))
+        card.addView(badge); card.addView(gap(5))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        text.addView(label("♛ DocNexa Premium", 19f, android.graphics.Color.WHITE, true))
+        text.addView(gap(4))
+        text.addView(label("No ads • Advanced PDF tools • 4K / 8K images", 11f, 0xFFE3E9FF.toInt()))
+        row.addView(text,LinearLayout.LayoutParams(0,-2,1f))
+        row.addView(label("›",28f,0xFFFFD66B.toInt(),true))
+        card.addView(row); card.addView(gap(8))
+        card.addView(label("Compare Free, Monthly & Yearly plans  →",12f,0xFFFFFFFF.toInt(),true))
+        return card
+    }
+
     private fun studioPremiumInfo(feature: String = "") {
-        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(12)) }
-        val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(18),dp(18),dp(18)); background=gradient(0xFF10254C.toInt(),0xFF6546C8.toInt(),20) }
+        premiumDialog?.dismiss()
+        val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(14),dp(8),dp(14),dp(14)) }
+        val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(16)); background=gradient(0xFF10254C.toInt(),0xFF6546C8.toInt(),20) }
         hero.addView(label("♛ DOCNEXA PREMIUM",12f,0xFFFFD66B.toInt(),true))
-        hero.addView(gap(6)); hero.addView(label(if(hasVerifiedPremium()) "Your membership is active" else "Unlock more. Work without ads.",21f,android.graphics.Color.WHITE,true))
-        hero.addView(gap(6)); hero.addView(label("Ad-free documents • 4K and 8K image export",12f,0xFFE5EDFF.toInt()))
+        hero.addView(gap(5))
+        hero.addView(label(if(hasVerifiedPremium()) "Premium membership active" else "Unlock your full workspace",22f,android.graphics.Color.WHITE,true))
+        hero.addView(gap(5))
+        hero.addView(label("Ad-free documents • Advanced tools • 4K and 8K export",12f,0xFFE5EDFF.toInt()))
         if(feature.isNotBlank()) hero.addView(label("$feature requires Premium",13f,0xFFFFD66B.toInt(),true))
         panel.addView(hero); panel.addView(gap(12))
-        listOf("✓ All free tools, plus advanced PDF conversion", "✓ PDF Compare, searchable OCR PDF and batch studio", "✓ AI background cutout export and batch image conversion", "✓ No native ads with verified Premium", "✓ High-resolution 4K / 8K image scaling", "✓ Restore using the same Play and DocNexa accounts").forEach {
-            panel.addView(label(it,13f,0xFF263957.toInt())); panel.addView(gap(6))
+        fun section(title:String){panel.addView(label(title,14f,0xFF172B4D.toInt(),true));panel.addView(gap(6))}
+        section("Compare plans")
+        val comparison=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;background=rounded(0xFFFFFFFF.toInt(),14,0xFFDCE6F5.toInt());setPadding(dp(10),dp(6),dp(10),dp(6))}
+        fun row(name:String,free:String,pro:String,heading:Boolean=false){
+            val line=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(7),0,dp(7))}
+            line.addView(label(name,11.5f,0xFF263957.toInt(),heading),LinearLayout.LayoutParams(0,-2,1.9f))
+            line.addView(label(free,11f,0xFF64748B.toInt(),heading).apply{gravity=Gravity.CENTER},LinearLayout.LayoutParams(0,-2,1f))
+            line.addView(label(pro,11f,0xFF16754A.toInt(),true).apply{gravity=Gravity.CENTER},LinearLayout.LayoutParams(0,-2,1f))
+            comparison.addView(line)
+            comparison.addView(View(this).apply{setBackgroundColor(0xFFEAF0F8.toInt())},LinearLayout.LayoutParams(-1,dp(1)))
         }
-        val message = label(if(hasVerifiedPremium()) "Verified membership" else "Loading prices from Google Play…",12f,0xFF64748B.toInt())
-        panel.addView(message)
-        val options = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        panel.addView(options)
-        val dialog=appDialog().setTitle("Premium membership").setView(toolDialogScroll(panel,0.68f))
+        row("FEATURE","FREE","PRO",true)
+        row("Scan & high-quality PDF","✓","✓")
+        row("Edit, merge, sign & print","✓","✓")
+        row("Format / resize / compress","✓","✓")
+        row("HD & 2K image export","✓","✓")
+        row("PDF to Excel / PowerPoint","—","✓")
+        row("PDF Compare / OCR PDF","—","✓")
+        row("Batch document / image tools","—","✓")
+        row("AI background removal","Preview","Export")
+        row("Background changer","—","✓")
+        row("4K / 8K image scaling","—","✓")
+        row("Native ads","Shown","None")
+        panel.addView(comparison);panel.addView(gap(12))
+        section("Choose your membership")
+        val planButtons=mutableMapOf<String,Button>()
+        val planPrices=mutableMapOf<String,TextView>()
+        val planHints=mutableMapOf<String,TextView>()
+        premiumPlans.forEach { plan ->
+            val monthly=plan=="premium-monthly"
+            val card=LinearLayout(this).apply{
+                orientation=LinearLayout.VERTICAL;setPadding(dp(13),dp(12),dp(13),dp(12))
+                background=rounded(if(monthly)0xFFFFFFFF.toInt() else 0xFFF2EEFF.toInt(),16,if(monthly)0xFFDCE6F5.toInt() else 0xFF9C87E9.toInt())
+            }
+            card.addView(label(if(monthly)"MONTHLY PREMIUM" else "YEARLY PREMIUM",12f,0xFF6546C8.toInt(),true))
+            val price=label(if(monthly)"₹99 / month" else "₹699 / year",22f,0xFF172B4D.toInt(),true)
+            val hint=label("Proposed India price • not yet available for purchase",10.5f,0xFF64748B.toInt())
+            card.addView(price);card.addView(hint);card.addView(gap(5))
+            card.addView(label("All Premium features • Auto-renewing",12f,0xFF263957.toInt()))
+            val button=Button(this).apply{text="Not available yet";isAllCaps=false;isEnabled=false}
+            card.addView(button,LinearLayout.LayoutParams(-1,-2))
+            planButtons[plan]=button;planPrices[plan]=price;planHints[plan]=hint
+            panel.addView(card);panel.addView(gap(8))
+        }
+        val message=label(if(hasVerifiedPremium())"Your active membership unlocks Premium tools." else "Live prices are provided by Google Play when available. No payment is collected before activation.",12f,0xFF64748B.toInt())
+        panel.addView(message);panel.addView(gap(8))
+        panel.addView(label("Subscriptions renew automatically until canceled in Google Play. Prices, taxes and final terms are shown before purchase. High-resolution scaling does not recreate missing image detail.",11f,0xFF64748B.toInt()))
+        panel.addView(gap(10))
+        val dialog=appDialog().setTitle("Plans & membership").setView(toolDialogScroll(panel,0.74f))
             .setNegativeButton("Close",null).setNeutralButton("Restore"){_,_->
                 if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true)
             }.setPositiveButton("Manage"){_,_->managePlaySubscription()}.create()
         premiumDialog=dialog
         dialog.setOnDismissListener { if(premiumDialog===dialog) premiumDialog=null }
         dialog.show()
-        if(hasVerifiedPremium()) return
-        if(cloudToken().isBlank()){
-            message.text="Sign in to link purchases to your DocNexa account."
-            options.addView(Button(this).apply { text="Sign in"; isAllCaps=false; setOnClickListener { dialog.dismiss(); showCloudLoginDialog() } })
+        if(hasVerifiedPremium()){
+            planButtons.values.forEach { it.text="Manage current plan";it.isEnabled=true;it.setOnClickListener{managePlaySubscription()} }
             return
         }
         connectPlayBilling {
@@ -5113,23 +5203,26 @@ class MainActivity : AppCompatActivity() {
                     if(!dialog.isShowing || isFinishing || isDestroyed) return@runOnUiThread
                     val item=details.productDetailsList.firstOrNull{it.productId==premiumProduct}
                     if(result.responseCode!=BillingClient.BillingResponseCode.OK || item==null){
-                        message.text="Plans are not available yet. No payment is collected."
+                        message.text="Google Play plans are not activated or not available on this installation. Displayed prices are proposals only."
                         return@runOnUiThread
                     }
-                    message.text="Select an auto-renewing plan. Cancel in Google Play anytime."
+                    message.text="Choose an available auto-renewing plan. Sign in before checkout."
                     val offers=item.subscriptionOfferDetails.orEmpty().filter{it.offerId==null && it.basePlanId in premiumPlans}
                     premiumPlans.forEach { plan ->
                         val offer=offers.firstOrNull{it.basePlanId==plan} ?: return@forEach
                         val phase=offer.pricingPhases.pricingPhaseList.lastOrNull() ?: return@forEach
                         val period=if(plan=="premium-monthly") "month" else "year"
-                        options.addView(Button(this).apply {
-                            text=(if(period=="month")"Monthly Premium" else "Yearly Premium")+" • "+phase.formattedPrice+" / "+period
-                            isAllCaps=false
-                            setOnClickListener { isEnabled=false; beginVerifiedPurchase(dialog,this,item,offer.offerToken) }
-                        })
+                        planPrices[plan]?.text=phase.formattedPrice+" / "+period
+                        planHints[plan]?.text="Price from Google Play"
+                        val button=planButtons[plan] ?: return@forEach
+                        button.text=if(cloudToken().isBlank())"Sign in to subscribe" else "Continue with "+if(period=="month")"Monthly" else "Yearly"
+                        button.isEnabled=true
+                        button.setOnClickListener {
+                            if(cloudToken().isBlank()){dialog.dismiss();showCloudLoginDialog()}
+                            else { button.isEnabled=false;beginVerifiedPurchase(dialog,button,item,offer.offerToken) }
+                        }
                     }
-                    if(options.childCount==0)message.text="No active subscription plans found."
-                    panel.addView(label("Auto-renewal applies until canceled. Google Play displays final price and billing terms before purchase.",11f,0xFF64748B.toInt()))
+                    if(offers.isEmpty())message.text="No eligible active base plans found. Proposed prices only."
                 }
             }
         }
