@@ -1272,6 +1272,7 @@ class MainActivity : AppCompatActivity() {
         }
         quickItem("⌂ Home", true) { buildScreen() }
         quickItem("▤ PDF Tools") { showPdfTools() }
+        quickItem("▧ Studio") { showImageStudio() }
         quickItem("▣ ID Photo") { showIdPhotoMenu() }
         quickItem("PDF Editor") { pdfEditorPicker.launch(arrayOf("application/pdf")) }
         quickItem("✍ Signature") { openSignatureEditor() }
@@ -1428,6 +1429,8 @@ class MainActivity : AppCompatActivity() {
             content.addView(gap(10))
         }
 
+        content.addView(toolCard("Image Studio", "Convert • Resize • Remove BG • Upscale", "▧", 0xFF6546C8.toInt()) { showImageStudio() })
+        content.addView(gap(10))
         addNativeAdCard(content)
 
         // Before first successful scan show onboarding; afterwards reserve this area for ads.
@@ -4801,6 +4804,337 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }.show()
+    }
+
+
+    // Image Studio reuses the existing export and document tools, not duplicate implementations.
+    private val studioConvertPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioFormatDialog(listOf(it)) } }
+    private val studioBatchPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files -> if(files.isNotEmpty()) studioFormatDialog(files) }
+    private val studioResizePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioResizeDialog(it, false) } }
+    private val studioSocialPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioResizeDialog(it, true) } }
+    private val studioUpscalePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioUpscaleDialog(it) } }
+    private val studioBgPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioBackground(it, false) } }
+    private val studioBgChangePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioBackground(it, true) } }
+    private val studioCompressPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioCompressDialog(it) } }
+    private val studioCropPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioCrop(it) } }
+    private val studioWatermarkPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { studioWatermark(it) } }
+    private val studioZipPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { files -> if(files.isNotEmpty()) studioZip(files) }
+
+    private fun showImageStudio() {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFFF4F7FC.toInt()) }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12),dp(12),dp(12),dp(12)); setBackgroundColor(0xFF10254C.toInt())
+        }
+        header.addView(label("‹",26f,android.graphics.Color.WHITE,true).apply {
+            contentDescription="Back to Home"; setPadding(dp(10),dp(5),dp(18),dp(5)); setOnClickListener { buildScreen() }
+        })
+        header.addView(label("Image Studio",20f,android.graphics.Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(label("♛ PRO",12f,0xFFFFD66B.toInt(),true).apply {
+            setPadding(dp(8),dp(8),dp(8),dp(8)); setOnClickListener { studioPremiumInfo() }
+        })
+        root.addView(header)
+        val body = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(14),dp(14),dp(14),dp(24)) }
+        val banner = LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(18),dp(18),dp(18)); background=gradient(0xFF1764DE.toInt(),0xFF7541DF.toInt(),22)
+        }
+        banner.addView(label("ALL-IN-ONE IMAGE TOOLS",11f,0xFFE1E7FF.toInt(),true))
+        banner.addView(gap(6)); banner.addView(label("Create. Convert. Enhance.",22f,android.graphics.Color.WHITE,true))
+        banner.addView(gap(5)); banner.addView(label("Private, on-device image processing and high-quality exports",12f,0xFFE5EDFF.toInt()))
+        body.addView(banner); body.addView(gap(12))
+        data class StudioTile(val title:String,val description:String,val icon:String,val group:String,val action:()->Unit)
+        val tiles = listOf(
+            StudioTile("Format Converter","JPG, PNG, WebP, BMP","⇄","Convert"){studioConvertPicker.launch(arrayOf("image/*"))},
+            StudioTile("Resize Image","Custom dimensions","↔","Edit"){studioResizePicker.launch(arrayOf("image/*"))},
+            StudioTile("Remove Background","AI subject cutout","✦","AI"){studioBgPicker.launch(arrayOf("image/*"))},
+            StudioTile("Image Upscaler","HD / 2K • 4K / 8K locked","4K","Edit"){studioUpscalePicker.launch(arrayOf("image/*"))},
+            StudioTile("Image Enhancer","Contrast and text clarity","◐","Edit"){enhanceDocumentPicker.launch(arrayOf("image/*"))},
+            StudioTile("Compress Image","Target KB / MB","↓","Convert"){studioCompressPicker.launch(arrayOf("image/*"))},
+            StudioTile("Crop & Rotate","Adjust image framing","▧","Edit"){studioCropPicker.launch(arrayOf("image/*"))},
+            StudioTile("Background Changer","AI cutout + solid color","▣","AI"){studioBgChangePicker.launch(arrayOf("image/*"))},
+            StudioTile("Passport Photo","ID and print sizes","▤","Edit"){passportPicker.launch(arrayOf("image/*"))},
+            StudioTile("Social Media Resize","Square, story, thumbnail","▥","Edit"){studioSocialPicker.launch(arrayOf("image/*"))},
+            StudioTile("Image to Text","Offline OCR","Aa","Utility"){ocrPicker.launch("image/*")},
+            StudioTile("Image Watermark","Custom text","W","Edit"){studioWatermarkPicker.launch(arrayOf("image/*"))},
+            StudioTile("Batch Converter","Convert up to 10 images","▦","Convert"){studioBatchPicker.launch(arrayOf("image/*"))},
+            StudioTile("Image to ZIP","Archive original images","ZIP","Utility"){studioZipPicker.launch(arrayOf("image/*"))},
+            StudioTile("Image to PDF","High-quality PDF export","PDF","Convert"){imagePicker.launch(arrayOf("image/*"))},
+            StudioTile("Document Eraser","Manual white brush","✎","Edit"){documentEraserPicker.launch(arrayOf("image/*"))}
+        )
+        val tabs = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        val scroller=HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; addView(tabs) }
+        body.addView(scroller)
+        val search=EditText(this).apply { hint="Search image tools"; setSingleLine(true); textSize=14f; setPadding(dp(12),dp(10),dp(12),dp(10)); background=rounded(0xFFFFFFFF.toInt(),12,0xFFD6E3F5.toInt()) }
+        body.addView(search); body.addView(gap(10))
+        val grid=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        var category="All"
+        fun render(){
+            grid.removeAllViews()
+            val filtered=tiles.filter{ (category=="All" || it.group==category) && (it.title+" "+it.description).contains(search.text.toString(),ignoreCase=true) }
+            if(filtered.isEmpty()) grid.addView(label("No matching tools.",12f,0xFF64748B.toInt()))
+            filtered.chunked(2).forEach { pair ->
+                val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+                pair.forEach { item ->
+                    row.addView(toolCard(item.title,item.description,item.icon,0xFF3478F6.toInt(),item.action),LinearLayout.LayoutParams(0,dp(128),1f).apply { setMargins(dp(4),dp(4),dp(4),dp(4)) })
+                }
+                if(pair.size==1) row.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+                grid.addView(row)
+            }
+        }
+        listOf("All","Convert","Edit","AI","Utility").forEach { name ->
+            tabs.addView(Button(this).apply { text=name; isAllCaps=false; textSize=11f; setOnClickListener { category=name; render() } })
+        }
+        search.addTextChangedListener(object:android.text.TextWatcher{
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){render()}
+            override fun afterTextChanged(s:android.text.Editable?){}
+        })
+        body.addView(grid); render(); addNativeAdCard(body)
+        root.addView(ScrollView(this).apply { addView(body) },LinearLayout.LayoutParams(-1,0,1f))
+        setScreenContent(root)
+    }
+
+    private fun studioPremiumInfo() {
+        appDialog().setTitle("DocNexa Premium • Coming soon")
+            .setMessage("Planned: ad-free experience and 4K / 8K image export. Google Play subscriptions are not yet activated. No payment is collected; premium export remains locked until verified membership is available.")
+            .setPositiveButton("OK",null).show()
+    }
+
+    private fun studioEncode(bitmap:Bitmap,format:String,quality:Int=95):ByteArray {
+        val output=ByteArrayOutputStream()
+        if(format=="bmp"){
+            val w=bitmap.width; val h=bitmap.height
+            val stride=(w*3+3) and -4
+            val header=java.nio.ByteBuffer.allocate(54).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            header.put(66.toByte());header.put(77.toByte());header.putInt(54+stride*h);header.putInt(0);header.putInt(54)
+            header.putInt(40);header.putInt(w);header.putInt(h);header.putShort(1.toShort());header.putShort(24.toShort())
+            header.putInt(0);header.putInt(stride*h);header.putInt(2835);header.putInt(2835);header.putInt(0);header.putInt(0)
+            output.write(header.array())
+            val colors=IntArray(w); val row=ByteArray(stride)
+            for(y in h-1 downTo 0){
+                bitmap.getPixels(colors,0,w,0,y,w,1)
+                for(i in 0 until w){
+                    val c=colors[i];val alpha=android.graphics.Color.alpha(c)
+                    fun white(v:Int)=(v*alpha+255*(255-alpha))/255
+                    row[i*3]=white(android.graphics.Color.blue(c)).toByte()
+                    row[i*3+1]=white(android.graphics.Color.green(c)).toByte()
+                    row[i*3+2]=white(android.graphics.Color.red(c)).toByte()
+                }
+                output.write(row)
+            }
+        } else {
+            val encoding=when(format){
+                "jpg"->Bitmap.CompressFormat.JPEG
+                "webp"->if(Build.VERSION.SDK_INT>=30) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.WEBP
+                else->Bitmap.CompressFormat.PNG
+            }
+            val flattened=if(format=="jpg" && bitmap.hasAlpha()) Bitmap.createBitmap(bitmap.width,bitmap.height,Bitmap.Config.ARGB_8888).apply {
+                Canvas(this).apply { drawColor(android.graphics.Color.WHITE); drawBitmap(bitmap,0f,0f,null) }
+            } else bitmap
+            try { check(flattened.compress(encoding,quality,output)){"Image encoder failed"} }
+            finally { if(flattened!==bitmap) flattened.recycle() }
+        }
+        return output.toByteArray()
+    }
+
+    private fun studioMime(format:String)=when(format){"jpg"->"image/jpeg";"webp"->"image/webp";"bmp"->"image/bmp";else->"image/png"}
+
+    private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95) {
+        val bytes=studioEncode(bitmap,format,quality)
+        val width=bitmap.width; val height=bitmap.height
+        val thumbScale=minOf(1f,900f/maxOf(width,height))
+        val thumb=Bitmap.createScaledBitmap(bitmap,(width*thumbScale).toInt().coerceAtLeast(1),(height*thumbScale).toInt().coerceAtLeast(1),true)
+        val preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
+        bitmap.recycle()
+        runOnUiThread {
+            if(isFinishing || isDestroyed){preview.recycle();return@runOnUiThread}
+            val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8))}
+            panel.addView(ImageView(this).apply{setImageBitmap(preview);adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER},LinearLayout.LayoutParams(-1,dp(250)))
+            panel.addView(label("${width} × ${height} px • ${format.uppercase(Locale.ROOT)} • ${bytes.size/1024} KB",12f,0xFF64748B.toInt()))
+            val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
+                .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->saveDocumentBytes(bytes,prefix,studioMime(format),format)}.create()
+            dialog.setOnDismissListener{preview.recycle()}
+            dialog.show()
+        }
+    }
+
+    private fun studioFormatDialog(files:List<Uri>){
+        if(files.size>10){Toast.makeText(this,"Select up to 10 images",Toast.LENGTH_LONG).show();return}
+        val formats=arrayOf("jpg","png","webp","bmp")
+        appDialog().setTitle(if(files.size==1)"Image Format Converter" else "Batch Image Converter")
+            .setItems(arrayOf("JPEG • white background","PNG • lossless","WebP • compact","BMP • uncompressed")){_,choice->
+                val format=formats[choice]
+                advancedToolJob("Converting images…"){
+                    if(files.size==1) studioResult(decodeImageSafely(files[0],2048,4_000_000L),"Converted",format)
+                    else {
+                        val bytes=ByteArrayOutputStream()
+                        ZipOutputStream(bytes).use{zip->
+                            files.forEachIndexed{index,uri->
+                                val image=decodeImageSafely(uri,2048,4_000_000L)
+                                try{
+                                    val data=studioEncode(image,format)
+                                    require(bytes.size().toLong()+data.size<=64L*1024*1024){"Batch exceeds 64 MB"}
+                                    zip.putNextEntry(ZipEntry("Image_${index+1}.$format"));zip.write(data);zip.closeEntry()
+                                }finally{image.recycle()}
+                            }
+                        }
+                        runOnUiThread{if(!isFinishing&&!isDestroyed)saveDocumentBytes(bytes.toByteArray(),"Converted_Images","application/zip","zip")}
+                    }
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
+    private fun studioResizeDialog(uri:Uri,social:Boolean){
+        if(social){
+            val sizes=listOf(1080 to 1080,1080 to 1920,1280 to 720,1200 to 630)
+            appDialog().setTitle("Social Media Resize").setItems(arrayOf("Square • 1080 × 1080","Story • 1080 × 1920","Thumbnail • 1280 × 720","Landscape • 1200 × 630")){_,i->
+                studioResize(uri,sizes[i].first,sizes[i].second,true)
+            }.setNegativeButton("Cancel",null).show()
+            return
+        }
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
+        val w=EditText(this).apply{hint="Width (px)";inputType=android.text.InputType.TYPE_CLASS_NUMBER;setText("1920")}
+        val h=EditText(this).apply{hint="Height (px)";inputType=android.text.InputType.TYPE_CLASS_NUMBER;setText("1080")}
+        val fit=android.widget.CheckBox(this).apply{text="Fit without stretching (white margins)";isChecked=true}
+        panel.addView(w);panel.addView(h);panel.addView(fit)
+        val dialog=appDialog().setTitle("Resize Image").setView(panel).setNegativeButton("Cancel",null).setPositiveButton("Resize",null).create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val width=w.text.toString().toIntOrNull()?:0;val height=h.text.toString().toIntOrNull()?:0
+            if(width !in 1..2048 || height !in 1..2048){Toast.makeText(this,"Use 1–2048 px per side. Higher resolution export requires Premium.",Toast.LENGTH_LONG).show();return@setOnClickListener}
+            dialog.dismiss();studioResize(uri,width,height,fit.isChecked)
+        }
+    }
+
+    private fun studioResize(uri:Uri,width:Int,height:Int,fit:Boolean){
+        advancedToolJob("Resizing image…"){
+            val source=decodeImageSafely(uri,2048,4_000_000L)
+            try{
+                val output=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
+                val canvas=Canvas(output);canvas.drawColor(android.graphics.Color.WHITE)
+                val rect=if(fit)fitRect(source.width,source.height,width,height,0,0) else Rect(0,0,width,height)
+                canvas.drawBitmap(source,null,rect,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                studioResult(output,"Resized")
+            }finally{source.recycle()}
+        }
+    }
+
+    private fun studioUpscaleDialog(uri:Uri){
+        appDialog().setTitle("Image Upscaler • Resolution")
+            .setItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px","4K • Premium locked","8K • Premium locked")){_,i->
+                if(i>=2){studioPremiumInfo();return@setItems}
+                advancedToolJob("Upscaling image…"){
+                    val source=decodeImageSafely(uri,2048,4_000_000L)
+                    val edge=if(i==0)1280 else 2048
+                    val scale=edge.toFloat()/maxOf(source.width,source.height)
+                    val resized=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
+                    if(resized!==source) source.recycle()
+                    studioResult(resized,"Upscaled")
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
+    private fun studioBackground(uri:Uri,change:Boolean){
+        val colors=intArrayOf(android.graphics.Color.WHITE,0xFFE2E8F0.toInt(),0xFFBFE4FF.toInt(),0xFF172B4D.toInt())
+        fun process(color:Int?){
+            advancedToolJob("Removing background…"){
+                val source=decodeImageSafely(uri,1600,2_500_000L)
+                val options=com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder().enableForegroundBitmap().build()
+                val client=com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(options)
+                try{
+                    val result=com.google.android.gms.tasks.Tasks.await(client.process(InputImage.fromBitmap(source,0)))
+                    val foreground=result.foregroundBitmap?:error("Subject model may still be downloading, or no subject detected. Check Google Play services and try again.")
+                    val output=if(color==null) foreground.copy(Bitmap.Config.ARGB_8888,true) else Bitmap.createBitmap(foreground.width,foreground.height,Bitmap.Config.ARGB_8888).apply{
+                        Canvas(this).apply{drawColor(color);drawBitmap(foreground,0f,0f,Paint(Paint.FILTER_BITMAP_FLAG))}
+                    }
+                    if(foreground!==source)foreground.recycle()
+                    studioResult(output,if(color==null)"Background_Removed" else "Background_Changed")
+                }finally{client.close();source.recycle()}
+            }
+        }
+        if(change)appDialog().setTitle("Choose background").setItems(arrayOf("White","Light gray","Sky blue","Navy")){_,i->process(colors[i])}.setNegativeButton("Cancel",null).show()
+        else process(null)
+    }
+
+    private fun studioCompressDialog(uri:Uri){
+        val field=EditText(this).apply{hint="Target size in KB";inputType=android.text.InputType.TYPE_CLASS_NUMBER;setText("300")}
+        appDialog().setTitle("Compress Image • JPEG").setView(field)
+            .setPositiveButton("Compress"){_,_->
+                val target=field.text.toString().toIntOrNull()?:0
+                if(target !in 20..5000){Toast.makeText(this,"Enter 20–5000 KB",Toast.LENGTH_LONG).show();return@setPositiveButton}
+                advancedToolJob("Compressing image…"){
+                    var image=decodeImageSafely(uri,2048,4_000_000L)
+                    try{
+                        var quality=95
+                        var data=studioEncode(image,"jpg",quality)
+                        while(data.size>target*1024 && quality>20){quality=(quality-10).coerceAtLeast(20);data=studioEncode(image,"jpg",quality)}
+                        while(data.size>target*1024 && maxOf(image.width,image.height)>320){
+                            val resized=Bitmap.createScaledBitmap(image,(image.width*0.75f).toInt().coerceAtLeast(1),(image.height*0.75f).toInt().coerceAtLeast(1),true)
+                            if(resized===image)break
+                            image.recycle();image=resized;data=studioEncode(image,"jpg",quality)
+                        }
+                        require(data.size<=target*1024){"Cannot meet target size without excessive quality loss"}
+                        val output=image.copy(Bitmap.Config.ARGB_8888,false)
+                        studioResult(output,"Compressed","jpg",quality)
+                    }finally{image.recycle()}
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
+    private fun studioCrop(uri:Uri){
+        advancedToolJob("Preparing crop…"){
+            val source=decodeImageSafely(uri,2048,4_000_000L)
+            runOnUiThread{
+                if(isFinishing||isDestroyed){source.recycle();return@runOnUiThread}
+                val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+                val crop=ImageCropView(this,source)
+                panel.addView(crop,LinearLayout.LayoutParams(-1,dp(320)))
+                panel.addView(Button(this).apply{text="Rotate 90°";setOnClickListener{crop.rotateImage()}})
+                panel.addView(Button(this).apply{text="Reset crop";setOnClickListener{crop.resetCrop()}})
+                val dialog=appDialog().setTitle("Crop & Rotate").setView(panel).setPositiveButton("Preview export"){_,_->
+                    val result=crop.getCroppedBitmap().copy(Bitmap.Config.ARGB_8888,false)
+                    advancedToolJob("Exporting crop…"){studioResult(result,"Cropped")}
+                }.setNegativeButton("Cancel",null).create()
+                dialog.setOnDismissListener{source.recycle()};dialog.show()
+            }
+        }
+    }
+
+    private fun studioWatermark(uri:Uri){
+        val field=EditText(this).apply{hint="Watermark text";setSingleLine(true)}
+        appDialog().setTitle("Image Watermark").setView(field).setPositiveButton("Apply"){_,_->
+            val value=field.text.toString().trim().take(100)
+            if(value.isBlank()){Toast.makeText(this,"Enter watermark text",Toast.LENGTH_SHORT).show();return@setPositiveButton}
+            advancedToolJob("Applying watermark…"){
+                val original=decodeImageSafely(uri,2048,4_000_000L)
+                val image=original.copy(Bitmap.Config.ARGB_8888,true);original.recycle()
+                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=0xEFFFFFFF.toInt();textSize=(image.width*0.05f).coerceAtLeast(12f);typeface=android.graphics.Typeface.DEFAULT_BOLD;setShadowLayer(3f,1f,1f,android.graphics.Color.BLACK)}
+                val width=paint.measureText(value)
+                if(width>image.width*0.9f)paint.textSize*=image.width*0.9f/width
+                Canvas(image).drawText(value,image.width*0.05f,image.height*0.9f,paint)
+                studioResult(image,"Watermarked")
+            }
+        }.setNegativeButton("Cancel",null).show()
+    }
+
+    private fun studioZip(files:List<Uri>){
+        if(files.size>30){Toast.makeText(this,"Select up to 30 images",Toast.LENGTH_LONG).show();return}
+        advancedToolJob("Creating image archive…"){
+            val output=ByteArrayOutputStream()
+            ZipOutputStream(output).use{zip->
+                var total=0L
+                files.forEachIndexed{index,uri->
+                    val ext=when(contentResolver.getType(uri)){"image/jpeg"->"jpg";"image/png"->"png";"image/webp"->"webp";"image/gif"->"gif";"image/bmp"->"bmp";"image/heic"->"heic";"image/avif"->"avif";"image/tiff"->"tiff";else->"image"}
+                    zip.putNextEntry(ZipEntry("Image_${index+1}.$ext"))
+                    contentResolver.openInputStream(uri)?.use{input->
+                        val buffer=ByteArray(8192)
+                        while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=64L*1024*1024){"Archive exceeds 64 MB"};zip.write(buffer,0,n)}
+                    }?:error("Cannot read image")
+                    zip.closeEntry()
+                }
+            }
+            runOnUiThread{if(!isFinishing&&!isDestroyed)saveDocumentBytes(output.toByteArray(),"Image_Archive","application/zip","zip")}
+        }
     }
 
     private fun showCreatePdfHub() {
