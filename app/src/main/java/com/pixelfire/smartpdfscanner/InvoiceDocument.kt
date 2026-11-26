@@ -27,10 +27,12 @@ internal object InvoiceDocument {
         require(d.items.isNotEmpty() && d.items.size<=100)
         val base=d.items.fold(zero){a,i->a+i.base}
         require(d.discount>=zero && d.discount<=base){"Discount cannot exceed subtotal"}
-        var allocated=zero; var cgst=zero; var sgst=zero; var igst=zero
+        var allocated=zero; var runningBase=zero; var cgst=zero; var sgst=zero; var igst=zero
         d.items.forEachIndexed { index,i->
-            val cut=if(index==d.items.lastIndex)d.discount-allocated else if(base.signum()==0)zero else money(d.discount.multiply(i.base).divide(base,12,RoundingMode.HALF_UP)).coerceAtMost(d.discount-allocated).coerceAtMost(i.base)
-            allocated+=cut
+            runningBase+=i.base
+            val cumulative=if(index==d.items.lastIndex)d.discount else if(base.signum()==0)zero else money(d.discount.multiply(runningBase).divide(base,12,RoundingMode.HALF_UP))
+            val cut=cumulative-allocated
+            allocated=cumulative
             val taxable=(i.base-cut).coerceAtLeast(zero)
             if(d.interstate)igst+=money(taxable.multiply(i.gst).movePointLeft(2))
             else {
@@ -97,8 +99,8 @@ internal object InvoiceDocument {
                 var hy=38f
                 wrapped(d.business,345f-(bx-34f),16f,true).forEach{text(it,bx,hy,16f,ink,true);hy+=19f}
                 wrapped(listOf(d.businessAddress,d.contact,if(d.gstin.isNotBlank())"GSTIN: "+d.gstin else "").filter{it.isNotBlank()}.joinToString("\n"),345f-(bx-34f)).forEach{text(it,bx,hy,10f,muted);hy+=13f}
-                text(d.kind.uppercase(Locale.ROOT),561f,38f,16f,accent,true,true)
-                text("No. "+d.number,561f,56f,10f,ink,true,true)
+                text(d.kind.uppercase(Locale.ROOT),561f,38f,14f,accent,true,true)
+                text("No. "+d.number,561f,56f,9f,ink,true,true)
                 text("Date: "+d.date,561f,70f,10f,muted,right=true)
                 if(d.due.isNotBlank())text("Due: "+d.due,561f,84f,10f,muted,right=true)
                 y=maxOf(hy,90f)+14f
