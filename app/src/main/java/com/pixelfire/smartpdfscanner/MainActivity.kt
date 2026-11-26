@@ -8369,11 +8369,11 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun decodeImageSafely(uri: Uri, maxEdge: Int = 2400): Bitmap {
+    private fun decodeImageSafely(uri: Uri, maxEdge: Int = 2400, maxPixels: Long = 6_000_000): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         (contentResolver.openInputStream(uri) ?: error("Cannot open this image.")).use { BitmapFactory.decodeStream(it, null, bounds) }
         val options = BitmapFactory.Options().apply {
-            inSampleSize = ImageDecodePlan.sampleSize(bounds.outWidth, bounds.outHeight, maxEdge)
+            inSampleSize = ImageDecodePlan.sampleSize(bounds.outWidth, bounds.outHeight, maxEdge, maxPixels)
         }
         val bitmap = (contentResolver.openInputStream(uri) ?: error("Cannot open this image.")).use {
             BitmapFactory.decodeStream(it, null, options)
@@ -8608,7 +8608,7 @@ class MainActivity : AppCompatActivity() {
         }
         val quality = android.widget.Spinner(this).apply {
             adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                listOf("Standard (smaller file)", "High (sharper text)", "Maximum (larger file)"))
+                listOf("Standard • smaller file", "High • print quality (recommended)", "Maximum • preserve more detail"))
             setSelection(1)
         }
         val panel = LinearLayout(this).apply {
@@ -8634,7 +8634,7 @@ class MainActivity : AppCompatActivity() {
                 val width = if (landscape) selected.second else selected.first
                 val height = if (landscape) selected.first else selected.second
                 val margins = listOf(20, 40, 64)[margin.selectedItemPosition.coerceIn(0, 2)]
-                createPdfFromImages(uris, croppedBitmaps, base, width, height, margins, fit.selectedItemPosition == 1, autoFit, listOf(1400, 2400, 3072)[quality.selectedItemPosition.coerceIn(0, 2)])
+                createPdfFromImages(uris, croppedBitmaps, base, width, height, margins, fit.selectedItemPosition == 1, autoFit, listOf(1600, 4200, 6000)[quality.selectedItemPosition.coerceIn(0, 2)])
             })
     }
 
@@ -8660,56 +8660,98 @@ class MainActivity : AppCompatActivity() {
         margin: Int = 40,
         fillPage: Boolean = false,
         autoFit: Boolean = false,
-        maxImageDimension: Int = 3072
+        maxImageDimension: Int = 4200
     ) {
-        status.text = "Creating PDF from ${uris.size} image(s)…"
+        status.text = "Creating high-quality PDF from ${uris.size} image(s)…"
         Thread {
-            var document: PdfDocument? = null
             try {
-                document = PdfDocument()
-                uris.forEachIndexed { index, uri ->
-                    val cached = croppedBitmaps.getOrNull(index)
-                    require(cached == null || !cached.isRecycled) { "This image preview has expired. Select the image again." }
-                    val bitmap = cached ?: decodeImageSafely(uri, maxImageDimension.coerceIn(800, 3072))
-                    val w = if (autoFit && bitmap.width > bitmap.height) pageHeight else pageWidth
-                    val h = if (autoFit && bitmap.width > bitmap.height) pageWidth else pageHeight
-                    val pageInfo = PdfDocument.PageInfo.Builder(w, h, index + 1).create()
-                    val page = document.startPage(pageInfo)
-                    page.canvas.drawColor(android.graphics.Color.WHITE)
-                    val availableW = (w - margin * 2).coerceAtLeast(1)
-                    val availableH = (h - margin * 2).coerceAtLeast(1)
-                    val bounds = if (fillPage) {
-                        val scale = maxOf(availableW.toFloat() / bitmap.width, availableH.toFloat() / bitmap.height)
-                        val outW = (bitmap.width * scale).toInt()
-                        val outH = (bitmap.height * scale).toInt()
-                        val left = (w - outW) / 2
-                        val top = (h - outH) / 2
-                        Rect(left, top, left + outW, top + outH)
-                    } else fitRect(bitmap.width, bitmap.height, availableW, availableH, margin, margin)
-                    page.canvas.drawBitmap(bitmap, null, bounds, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                    document.finishPage(page)
-                    if (cached == null) bitmap.recycle()
+                require(uris.isNotEmpty() && uris.size <= 100) { "Select 1–100 images" }
+                val directory = privateDocumentsDir()
+                val limit = maxImageDimension.coerceIn(800, 6000)
+                val pixels = if (limit <= 1600) 3_000_000L else if (limit <= 4200) 12_000_000L else 16_000_000L
+                val name = "${fileName}_${System.currentTimeMillis()}.pdf"
+                val target = PrivateDocumentStore.save(directory, name) { stream ->
+                    PDDocument(MemoryUsageSetting.setupMixed(16L * 1024 * 1024)).use { doc ->
+                        uris.forEachIndexed { index, uri ->
+                            val cached = croppedBitmaps.getOrNull(index)
+                            require(cached == null || !cached.isRecycled) { "This image preview has expired. Select it again." }
+                            val image = qualityPdfImage(doc, uri, cached, limit, pixels, 0)
+                            val landscape = autoFit && image.width > image.height
+                            val w = if (landscape) pageHeight else pageWidth
+                            val h = if (landscape) pageWidth else pageHeight
+                            addQualityImagePage(doc, image, w, h, margin.toFloat(), fillPage)
+                        }
+                        doc.save(stream)
+                    }
                 }
-                val output = savePdfBytes(ByteArrayOutputStream().also { document.writeTo(it) }.toByteArray(), fileName)
+                val output = privateDocumentUri(target)
+                assignPdf(output)
                 runOnUiThread {
-                    lastPdf = output
-                    if (output != null) notifyDocumentReady(output)
-                    status.text = if (output != null) "PDF created • ${uris.size} page(s)" else "PDF save failed"
-                    recent.text = "Latest: ${output?.lastPathSegment ?: "PDF"}"
-                    if (output != null) {
+                    if (!isFinishing && !isDestroyed) {
+                        lastPdf = output
+                        notifyDocumentReady(output)
                         buildScreen()
-
-                    } else Toast.makeText(this, "Could not save PDF. Please try again.", Toast.LENGTH_LONG).show()
+                        status.text = "High-quality PDF created • ${uris.size} page(s)"
+                        showExportSuccess(output, target.name, "application/pdf")
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "PDF creation failed"
                     Toast.makeText(this, e.localizedMessage ?: "Unable to create PDF", Toast.LENGTH_LONG).show()
                 }
-            } finally {
-                document?.close()
             }
         }.start()
+    }
+
+    /** Keep source JPEG bytes when no rotation, crop, filter or downsampling is needed. */
+    private fun qualityPdfImage(doc: PDDocument, uri: Uri, cached: Bitmap?, maxEdge: Int, maxPixels: Long, filter: Int): PDImageXObject {
+        if (cached == null && filter == 0) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            val orientation = runCatching {
+                contentResolver.openInputStream(uri)?.use {
+                    androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, 1)
+                } ?: 1
+            }.getOrDefault(0)
+            if (bounds.outMimeType == "image/jpeg" && orientation == 1 &&
+                bounds.outWidth > 0 && bounds.outHeight > 0 &&
+                maxOf(bounds.outWidth, bounds.outHeight) <= maxEdge &&
+                bounds.outWidth.toLong() * bounds.outHeight <= maxPixels) {
+                return contentResolver.openInputStream(uri)?.use {
+                    com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromStream(doc, it)
+                } ?: error("Cannot read original JPEG")
+            }
+        }
+        val source = cached ?: decodeImageSafely(uri, maxEdge, maxPixels)
+        var filtered: Bitmap? = null
+        try {
+            val image = if (filter == 0) source else filterScannedPage(source, filter).also { filtered = it }
+            return com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory.createFromImage(doc, image)
+        } finally {
+            filtered?.let { if (it !== source) it.recycle() }
+            if (cached == null) source.recycle()
+        }
+    }
+
+    private fun addQualityImagePage(doc: PDDocument, image: PDImageXObject, width: Int, height: Int, margin: Float, fill: Boolean) {
+        val page = com.tom_roush.pdfbox.pdmodel.PDPage(com.tom_roush.pdfbox.pdmodel.common.PDRectangle(width.toFloat(), height.toFloat()))
+        doc.addPage(page)
+        val availableW = (width - 2 * margin).coerceAtLeast(1f)
+        val availableH = (height - 2 * margin).coerceAtLeast(1f)
+        val sx = availableW / image.width
+        val sy = availableH / image.height
+        val scale = if (fill) maxOf(sx, sy) else minOf(sx, sy)
+        val w = image.width * scale
+        val h = image.height * scale
+        PDPageContentStream(doc, page).use { content ->
+            if (fill) {
+                content.addRect(margin, margin, availableW, availableH)
+                content.clip()
+            }
+            content.drawImage(image, (width - w) / 2f, (height - h) / 2f, w, h)
+        }
     }
 
     private fun fitRect(w: Int, h: Int, maxW: Int, maxH: Int, left: Int, top: Int): Rect {
@@ -8858,63 +8900,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createPrintReadyScanPdf(pageUris: List<Uri>): Uri? {
-        var document: PdfDocument? = null
         return try {
-            require(pageUris.isNotEmpty()) { "No scanned pages" }
-            val outputDocument = PdfDocument()
-            document = outputDocument
-            pageUris.forEachIndexed { index, uri ->
-                val original = decodeImageSafely(uri, 4800)
-                val bitmap = try {
-                    filterScannedPage(original, prefs.getInt("scanner_filter_mode", 0))
-                } catch (e: Exception) {
-                    original.recycle()
-                    throw e
-                }
-                if (bitmap !== original) original.recycle()
-                try {
-                    val landscape = bitmap.width > bitmap.height
-                    val pageWidth = if (landscape) 842 else 595
-                    val pageHeight = if (landscape) 595 else 842
-                    val margin = 18f
-                    val availableWidth = pageWidth - margin * 2f
-                    val availableHeight = pageHeight - margin * 2f
-                    val scale = minOf(
-                        availableWidth / bitmap.width.toFloat(),
-                        availableHeight / bitmap.height.toFloat()
-                    )
-                    val drawWidth = bitmap.width * scale
-                    val drawHeight = bitmap.height * scale
-                    val left = (pageWidth - drawWidth) / 2f
-                    val top = (pageHeight - drawHeight) / 2f
-                    val page = outputDocument.startPage(
-                        PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
-                    )
-                    page.canvas.drawColor(android.graphics.Color.WHITE)
-                    page.canvas.drawBitmap(
-                        bitmap,
-                        null,
-                        android.graphics.RectF(left, top, left + drawWidth, top + drawHeight),
-                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                            isDither = true
-                        }
-                    )
-                    outputDocument.finishPage(page)
-                } finally {
-                    bitmap.recycle()
+            require(pageUris.isNotEmpty() && pageUris.size <= 100) { "Select 1–100 scanned pages" }
+            val name = "DocNexa_High_Quality_${System.currentTimeMillis()}.pdf"
+            val mode = prefs.getInt("scanner_filter_mode", 0)
+            val target = PrivateDocumentStore.save(privateDocumentsDir(), name) { stream ->
+                PDDocument(MemoryUsageSetting.setupMixed(16L * 1024 * 1024)).use { doc ->
+                    pageUris.forEach { uri ->
+                        val image = qualityPdfImage(doc, uri, null, 6000, 16_000_000L, mode)
+                        val landscape = image.width > image.height
+                        addQualityImagePage(doc, image, if (landscape) 842 else 595,
+                            if (landscape) 595 else 842, 18f, false)
+                    }
+                    doc.save(stream)
                 }
             }
-            val bytes = ByteArrayOutputStream().also { outputDocument.writeTo(it) }.toByteArray()
-            val name = "DocNexa_Print_Ready_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
-            saveBytesPrivately(bytes, name)
+            privateDocumentUri(target).also { assignPdf(it) }
         } catch (e: Exception) {
             runOnUiThread {
-                status.text = "Print-ready PDF creation failed"
-                Toast.makeText(this, e.localizedMessage ?: "Could not create print-ready PDF", Toast.LENGTH_LONG).show()
+                status.text = "High-quality PDF creation failed"
+                Toast.makeText(this, e.localizedMessage ?: "Could not create high-quality PDF", Toast.LENGTH_LONG).show()
             }
             null
-        } finally {
-            document?.close()
         }
     }
 
