@@ -56,3 +56,16 @@ The function requires a signed-in Supabase user, validates supported tasks and d
 - Office to PDF is an offline text-extraction conversion for DOCX/XLSX/PPTX. It does not reproduce the original Office layout, images or complex tables.
 - PDF to Word creates an editable DOCX from selectable PDF text. Scanned/image-only PDFs should use OCR first.
 - These tools are intentionally described as document utilities rather than pixel-perfect Microsoft Office renderers.
+
+
+## Google Play Premium setup (DocNexa 1.7.0)
+
+The app uses the Google Play Billing SDK with a fail-closed server verification flow. No subscription is sold until the authenticated verification backend reports ready. All existing PDF tools remain free. Verified members can hide native ads and use the 4K/8K upscale resolution options; these use ordinary interpolation, not AI super-resolution.
+
+1. Create the app in Play Console with package `com.pixelfire.smartpdfscanner`, and configure your payments profile and app signing.
+2. Upload a signed AAB to an internal test track. Create subscription product `docnexa_premium` with auto-renewing base plans `premium-monthly` (suggested India price INR 99) and `premium-yearly` (suggested INR 699). Activate the plans. Prices are fetched from Google Play rather than hardcoded.
+3. Enable Google Play Android Developer API in Google Cloud. Create a service account and grant it the minimum Play Console permissions required to read subscription products and verify and acknowledge purchases. Do not commit its private key.
+4. Deploy `supabase/functions/docnexa-play-billing/index.ts` to the same Supabase project already configured in the Android app. Set `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` as a private server secret and `PLAY_BILLING_ENABLED=true` only when ready. Never place the service account JSON in the Android app.
+5. Use license testers and an internal test build to test purchase, pending payment, cancellation, grace period, expiry, restore, account changes and ads. The backend validates Google purchase tokens and the obfuscated DocNexa account ID, verifies subscription state and expiry, and acknowledges valid initial purchases. Client refreshes on resume and periodically. RTDN/Pub/Sub, durable entitlement storage, monitoring and offline entitlement policy are still recommended before public release. The currently implemented client uses a short in-memory entitlement window, so online verification is required.
+6. Complete the Play Console Data safety and subscription disclosures, and ensure the privacy policy explains Google Play purchase processing. Do not activate public sales until the backend and end-to-end license tests pass.
+
