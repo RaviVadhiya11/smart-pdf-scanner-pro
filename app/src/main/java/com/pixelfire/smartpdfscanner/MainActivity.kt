@@ -711,6 +711,8 @@ class MainActivity : AppCompatActivity() {
         initializeRemoteConfig()
         pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
         pendingResultName = savedInstanceState?.getString("result_pending_name")
+        pendingDriveBackupAccount = savedInstanceState?.getString("drive_backup_account")
+        pendingDriveImportAccount = savedInstanceState?.getString("drive_import_account")
         val resultUris = savedInstanceState?.getStringArrayList("result_uris")
         val resultNames = savedInstanceState?.getStringArrayList("result_names")
         val resultMimes = savedInstanceState?.getStringArrayList("result_mimes")
@@ -1872,6 +1874,7 @@ class MainActivity : AppCompatActivity() {
         val popup = PopupMenu(this, anchor)
         popup.menu.add("Premium plans").setOnMenuItemClickListener { studioPremiumInfo(); true }
         popup.menu.add("Favourite documents").setOnMenuItemClickListener { showFavouriteDocs(); true }
+        popup.menu.add("Google Drive & Backup").setOnMenuItemClickListener { showDriveBackupHub(); true }
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
             appDialog()
                 .setTitle("PDF / JPG")
@@ -1968,6 +1971,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         pendingResultSource?.let { outState.putString("result_pending_source", it.toString()) }
         outState.putString("result_pending_name", pendingResultName)
+        outState.putString("drive_backup_account", pendingDriveBackupAccount)
+        outState.putString("drive_import_account", pendingDriveImportAccount)
         if (exportResultDialog?.isShowing == true) {
             val files = exportResults.items
             outState.putStringArrayList("result_uris", ArrayList(files.map { it.uri }))
@@ -2322,6 +2327,7 @@ class MainActivity : AppCompatActivity() {
         item("♡", "Favourite") { showFavouriteDocs() }
         item("◇", "Manage tags") { manageTagsDialog() }
         item("▤", "Trash") { showTrashScreen() }
+        item("☁", "Google Drive & Backup") { showDriveBackupHub() }
         item("⚙", "Settings") { showSettingsDialog() }
         separator()
         section("Tools")
@@ -3194,6 +3200,8 @@ class MainActivity : AppCompatActivity() {
         section("MEMBERSHIP")
         setting("♛", "DocNexa Premium", if(hasVerifiedPremium()) "Active • manage your subscription" else "Compare Free, Monthly and Yearly plans") { studioPremiumInfo() }
         setting("↻", "Restore Purchase", "Check your Google Play membership") { if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true) }
+        section("CLOUD STORAGE & BACKUP")
+        setting("☁", "Google Drive & Backup", "Import, save and restore selected files") { showDriveBackupHub() }
         section("DOCUMENT PREFERENCES")
         setting("⇅", "Default sort order", sortNames[currentSort]) {
             appDialog().setTitle("Sort documents")
@@ -7531,19 +7539,175 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Google Drive receives the PDF through Android's secure share sheet.
-    // This does not store Google passwords or request broad Drive access.
+    // Android Storage Access Framework: only user-selected files and destinations.
     private fun sharePdfToGoogleDrive(uri: Uri) {
-        if (!requireInternet("Google Drive upload")) return
-        val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
-            .putExtra(Intent.EXTRA_STREAM, uri)
-            .putExtra(Intent.EXTRA_TITLE, "Save PDF to Google Drive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try {
-            startActivity(Intent.createChooser(send, "Save PDF using Google Drive"))
-        } catch (_: Exception) {
-            Toast.makeText(this, "Install or update Google Drive, then try again", Toast.LENGTH_LONG).show()
+        val name = privateDocumentFile(uri)?.name ?: runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+        }.getOrNull() ?: "DocNexa_Document.pdf"
+        confirmDriveSave(ExportResultItem(uri.toString(), name, "application/pdf"))
+    }
+
+    private var pendingDriveBackupAccount: String? = null
+    private var pendingDriveImportAccount: String? = null
+    private val driveImportBusy = AtomicBoolean(false)
+
+    private fun backupMime(name: String): String? = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "pdf" -> "application/pdf"
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "bmp" -> "image/bmp"
+        "heic", "heif" -> "image/heif"
+        "gif" -> "image/gif"
+        "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "txt" -> "text/plain"
+        "csv" -> "text/csv"
+        "zip" -> "application/zip"
+        else -> null
+    }
+
+    private val driveImportPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val account = pendingDriveImportAccount
+        pendingDriveImportAccount = null
+        if (uri != null && account != null && account == signedInUserId()) restoreDriveFile(uri, account)
+        else if (uri != null) Toast.makeText(this, "Account changed. Select the file again.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun launchDriveImport() {
+        if (driveImportBusy.get() || pendingDriveImportAccount != null) {
+            Toast.makeText(this, "Finish the current import first.", Toast.LENGTH_SHORT).show()
+            return
         }
+        pendingDriveImportAccount = signedInUserId()
+        try {
+            driveImportPicker.launch(arrayOf("application/pdf", "image/*",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/plain", "text/csv", "application/zip"))
+        } catch (e: Exception) {
+            pendingDriveImportAccount = null
+            Toast.makeText(this, "File picker unavailable.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun restoreDriveFile(uri: Uri, account: String) {
+        if (!driveImportBusy.compareAndSet(false, true)) return
+        val directory = privateDocumentsDir()
+        advancedToolJob("Importing original file…") {
+            try {
+                require(account == signedInUserId()) { "Account changed. Select the file again." }
+                val name = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                } ?: error("Unable to read file name.")
+                val mime = backupMime(name) ?: error("This file format is not supported.")
+                val target = PrivateDocumentStore.save(directory, name) { output ->
+                    (contentResolver.openInputStream(uri) ?: error("Cannot read selected file.")).use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            require(account == signedInUserId()) { "Account changed during import." }
+                            total += count
+                            require(total <= 128L * 1024 * 1024) { "Files larger than 128 MB are not supported." }
+                            output.write(buffer, 0, count)
+                        }
+                        require(total > 0L) { "The selected file is empty." }
+                    }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId()) {
+                        val saved = privateDocumentUri(target)
+                        if (mime == "application/pdf") {
+                            assignPdf(saved)
+                            lastPdf = saved
+                            buildScreen()
+                        }
+                        status.text = "Imported original file"
+                        showExportSuccess(saved, target.name, mime)
+                    }
+                }
+            } finally { driveImportBusy.set(false) }
+        }
+    }
+
+    private fun confirmDriveSave(item: ExportResultItem) {
+        appDialog().setTitle("Save to Google Drive")
+            .setMessage("Select Google Drive in the Android file picker, choose your Google account and a folder, then tap Save. Drive must be available on your device. DocNexa writes an unchanged copy; the provider handles cloud upload. You may also choose local storage.")
+            .setPositiveButton("Choose destination") { _, _ ->
+                saveResultAs(item, privateDocumentFile(Uri.parse(item.uri)) != null)
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showDriveBackupHub() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(15), dp(16), dp(15))
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 18)
+        }
+        hero.addView(label("CLOUD STORAGE", 11f, 0xFFBCD7FF.toInt(), true))
+        hero.addView(label("Google Drive & Backup", 21f, 0xFFFFFFFF.toInt(), true))
+        hero.addView(label("Original quality • User-selected access", 12f, 0xFFE1EDFF.toInt()))
+        panel.addView(hero); panel.addView(gap(10))
+        val stamp = prefs.getLong(accountPrefKey("manual_backup_time"), 0L)
+        val last = if (stamp > 0L) java.text.DateFormat.getDateTimeInstance().format(Date(stamp)) else "No manual backup yet"
+        panel.addView(label("Last copy written: " + last, 12f, 0xFF53627A.toInt()))
+        panel.addView(label("Choose Drive in the Android picker. No direct Google account is linked to DocNexa, and cloud sync is not verified by the app.", 12f, 0xFF64748B.toInt()))
+        panel.addView(gap(12))
+        val dialog = appDialog().setTitle("Backup & Restore").setView(toolDialogScroll(panel, 0.72f))
+            .setNegativeButton("Close", null).create()
+        fun option(title: String, detail: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = rounded(0xFFF1F6FF.toInt(), 14, 0xFFDCE7FA.toInt())
+                isClickable = true; isFocusable = true
+                minimumHeight = dp(60)
+                setOnClickListener { dialog.dismiss(); action() }
+            }
+            row.addView(label(title, 15f, 0xFF172B4D.toInt(), true))
+            row.addView(label(detail, 12f, 0xFF64748B.toInt()))
+            panel.addView(row); panel.addView(gap(8))
+        }
+        option("Import / restore a file", "Choose an existing PDF, image or supported export from Drive or another provider.") { launchDriveImport() }
+        option("Manual backup", "Select a saved document, image or invoice export. Copy to the folder you choose.") { chooseDriveBackupFile() }
+        option("Open Google Drive", "Manage your Google account and uploaded files in Drive.") {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive")))
+            } catch (_: Exception) { Toast.makeText(this, "Google Drive unavailable.", Toast.LENGTH_LONG).show() }
+        }
+        panel.addView(label("Automatic backup, direct Google OAuth and multi-device sync are not available in this version.", 11f, 0xFF64748B.toInt()))
+        dialog.show()
+    }
+
+    private fun chooseDriveBackupFile() {
+        val account = signedInUserId()
+        val trashed = prefs.getStringSet("trash_uris", emptySet()).orEmpty()
+        val files = privateDocumentsDir().listFiles().orEmpty().filter {
+            it.isFile && backupMime(it.name) != null && !trashed.contains(privateDocumentUri(it).toString())
+        }.sortedByDescending { it.lastModified() }
+        if (files.isEmpty()) {
+            Toast.makeText(this, "No saved files to back up yet.", Toast.LENGTH_LONG).show()
+            return
+        }
+        appDialog().setTitle("Choose a file to back up")
+            .setItems(files.map { it.name + "  •  " + formatFileSize(it.length()) }.toTypedArray()) { _, index ->
+                val file = files[index]
+                if (account != signedInUserId() || !file.isFile) {
+                    Toast.makeText(this, "File unavailable. Select again.", Toast.LENGTH_LONG).show()
+                } else {
+                    confirmDriveSave(ExportResultItem(privateDocumentUri(file).toString(), file.name, backupMime(file.name) ?: "application/octet-stream"))
+                }
+            }.setNegativeButton("Cancel", null).show()
     }
 
     // Google Docs import/conversion support depends on the installed Google app version.
@@ -8061,6 +8225,8 @@ class MainActivity : AppCompatActivity() {
     private val resultSaveAsPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val source = pendingResultSource
         val name = pendingResultName ?: "Document"
+        val backupAccount = pendingDriveBackupAccount
+        pendingDriveBackupAccount = null
         pendingResultSource = null
         pendingResultName = null
         val destination = result.data?.data
@@ -8069,12 +8235,18 @@ class MainActivity : AppCompatActivity() {
                 updateResultStatus("Saving a copy…")
                 Thread {
                     try {
+                        if (backupAccount != null) {
+                            require(backupAccount == signedInUserId() && privateDocumentFile(source) != null) { "Account changed or source is no longer available." }
+                        }
                         (contentResolver.openInputStream(source) ?: error("Cannot read the saved file.")).use { input ->
                             (contentResolver.openOutputStream(destination, "wt") ?: error("Cannot write to this location.")).use { output -> input.copyTo(output) }
                         }
+                        if (backupAccount != null && backupAccount == signedInUserId()) {
+                            prefs.edit().putLong(accountPrefKey("manual_backup_time"), System.currentTimeMillis()).apply()
+                        }
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) {
-                                updateResultStatus("Copy saved to your selected location.")
+                                updateResultStatus(if (backupAccount != null) "Backup copy written to selected provider. Check Drive for sync status." else "Copy saved to your selected location.")
                                 Toast.makeText(this, "$name saved", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -8093,13 +8265,14 @@ class MainActivity : AppCompatActivity() {
         else if (!isFinishing && !isDestroyed) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
-    private fun saveResultAs(item: ExportResultItem) {
+    private fun saveResultAs(item: ExportResultItem, driveBackup: Boolean = false) {
         if (resultCopyBusy.get() || pendingResultSource != null) {
             updateResultStatus("Please finish the current export first.")
             return
         }
         pendingResultSource = Uri.parse(item.uri)
         pendingResultName = item.fileName
+        pendingDriveBackupAccount = if (driveBackup) signedInUserId() else null
         try {
             resultSaveAsPicker.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -8109,6 +8282,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             pendingResultSource = null
             pendingResultName = null
+            pendingDriveBackupAccount = null
             updateResultStatus(e.localizedMessage ?: "No file picker is available.")
         }
     }
@@ -8258,20 +8432,7 @@ class MainActivity : AppCompatActivity() {
             )
             destinationRow(
                 "☁ Google Drive", {
-                    exportResults.selected?.let { item ->
-                        try {
-                            val source = Uri.parse(item.uri)
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = item.mime
-                                putExtra(Intent.EXTRA_STREAM, source)
-                                clipData = android.content.ClipData.newRawUri(item.fileName, source)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            startActivity(Intent.createChooser(send, "Choose Google Drive to save"))
-                        } catch (e: Exception) {
-                            updateResultStatus(e.localizedMessage ?: "Unable to open sharing apps.")
-                        }
-                    }
+                    exportResults.selected?.let { item -> confirmDriveSave(item) }
                 },
                 "✉ Email", {
                     exportResults.selected?.let { item ->
@@ -10409,6 +10570,10 @@ class MainActivity : AppCompatActivity() {
         option("Browse all files", "Show images, PDFs, documents, downloads and other file types", "ALL") {
             dialog.dismiss()
             allFilesPicker.launch(arrayOf("*/*"))
+        }
+        option("Google Drive / Cloud storage", "Import a saved PDF or image using the Android file picker", "☁") {
+            dialog.dismiss()
+            launchDriveImport()
         }
         option("Open a PDF", "Browse phone storage, Downloads or cloud files", "PDF") {
             dialog.dismiss()
