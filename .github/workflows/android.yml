@@ -59,9 +59,19 @@ jobs:
         run: gradle :app:lintDebug
       - name: Validate release variant
         run: gradle :app:lintRelease :app:testReleaseUnitTest
-      - name: Build release AAB
+      - name: Build signed release APK and AAB
         if: github.event_name != 'pull_request'
-        run: gradle :app:bundleRelease
+        run: gradle :app:assembleRelease :app:bundleRelease
+      - name: Print public signing certificate fingerprints
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/outputs/signing
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          for variant in debug release; do
+            echo "=== $variant APK ==="
+            "$APKSIGNER" verify --print-certs "app/build/outputs/apk/$variant/app-$variant.apk" | tee "app/build/outputs/signing/$variant-certificate.txt"
+          done
       - name: Upload Android builds
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -69,6 +79,8 @@ jobs:
           name: Smart-PDF-Scanner-Pro-Android-Builds
           path: |
             app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/signing/*-certificate.txt
             app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
       - name: Upload validation reports
