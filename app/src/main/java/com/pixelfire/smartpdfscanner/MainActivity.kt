@@ -5223,6 +5223,10 @@ class MainActivity : AppCompatActivity() {
         row("AI background removal","Preview","Export")
         row("Background changer","—","✓")
         row("4K / 8K image scaling","—","✓")
+        row("Bill / invoice PDF","✓","✓")
+        row("Premium invoice styles / logo","—","✓")
+        row("Customer / product records","—","✓")
+        row("Billing reports / CSV","—","✓")
         row("Native ads","Shown","None")
         section("Choose your membership")
         val planButtons=mutableMapOf<String,Button>()
@@ -5591,11 +5595,12 @@ class MainActivity : AppCompatActivity() {
         banner.addView(gap(5));banner.addView(label("Private on-device records • A4 PDF • Share and print",12f,0xFFE4E7FF.toInt()))
         panel.addView(banner);panel.addView(gap(12))
         val kinds=listOf("Invoice" to "Professional service invoice","Bill" to "Simple sales bill","GST Invoice" to "Item tax and GST details","Quotation" to "Price proposal","Estimate" to "Estimated project cost","Receipt" to "Payment received document","Delivery Challan" to "Goods delivery document")
-        val tiles=kinds.map{(kind,desc)->Triple(kind,desc,{showInvoiceEditor(kind)})}+listOf(
+        val tiles: List<Triple<String,String,()->Unit>> = kinds.map{(kind,desc)->Triple(kind,desc,{showInvoiceEditor(kind)})}+listOf(
             Triple("Business Profile","Save business details",{showInvoiceDirectory("Business")}),
             Triple("Customers • PRO","Reusable customer records",{if(requirePremiumTool("Customer manager"))showInvoiceDirectory("Customers")}),
             Triple("Products • PRO","Reusable product records",{if(requirePremiumTool("Product manager"))showInvoiceDirectory("Products")}),
-            Triple("Invoice History","Open saved billing PDFs",{showInvoiceHistory()})
+            Triple("Invoice History","Open saved billing PDFs",{showInvoiceHistory()}),
+            Triple("Billing Reports • PRO","Invoice totals and CSV export",{if(requirePremiumTool("Billing reports"))showBillingReports()})
         )
         tiles.chunked(2).forEach{pair->
             val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
@@ -5652,6 +5657,42 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putString(accountPrefKey("invoice_records_"+kind),records.toString()).apply()
             dialog.dismiss();Toast.makeText(this,"Record saved",Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun recordBillingExport(draft:InvoiceDocument.Draft,uri:Uri){
+        val records=invoiceRecords("Exports")
+        val entry=org.json.JSONObject().put("number",draft.number).put("kind",draft.kind).put("date",draft.date)
+            .put("customer",draft.customer).put("amount",InvoiceDocument.format(InvoiceDocument.totals(draft).total)).put("uri",uri.toString())
+        val updated=org.json.JSONArray()
+        for(i in maxOf(0,records.length()-499) until records.length()){
+            val existing=records.optJSONObject(i)?:continue
+            if(existing.optString("kind")!=draft.kind||existing.optString("number")!=draft.number)updated.put(existing)
+        }
+        updated.put(entry)
+        prefs.edit().putString(accountPrefKey("invoice_records_Exports"),updated.toString()).apply()
+    }
+
+    private fun showBillingReports(){
+        if(!requirePremiumTool("Billing reports"))return
+        val saved=getSavedPdfs().map{it.second.toString()}.toSet()
+        val records=invoiceRecords("Exports")
+        val bills=(0 until records.length()).mapNotNull{records.optJSONObject(it)}.filter{it.optString("uri") in saved && it.optString("kind") in listOf("Invoice","GST Invoice","Bill")}
+        val total=bills.fold(java.math.BigDecimal.ZERO){a,b->a+(b.optString("amount").toBigDecimalOrNull()?:java.math.BigDecimal.ZERO)}
+        appDialog().setTitle("Billing reports • Invoice totals")
+            .setMessage("${bills.size} saved invoice(s) / bill(s)\nTotal invoiced: INR ${InvoiceDocument.format(total)}\n\nLocal export records only. This is not verified revenue or payment collection. Quotes, receipts and delivery challans are excluded.")
+            .setNegativeButton("Close",null).setPositiveButton("Export CSV"){_,_->
+                if(requirePremiumTool("Billing report export")){
+                    fun cell(value:String):String{
+                        val safe=if(value.trimStart().firstOrNull() in listOf('=','+','-','@','\t','\r')) "'"+value else value
+                        return "\""+safe.replace("\"","\"\"")+"\""
+                    }
+                    val csv=buildString{
+                        append("Document,Number,Date,Customer,Total INR\r\n")
+                        bills.forEach{b->append(listOf("kind","number","date","customer","amount").joinToString(","){cell(b.optString(it))});append("\r\n")}
+                    }
+                    saveDocumentBytes(csv.toByteArray(Charsets.UTF_8),"Billing_Report","text/csv","csv")
+                }
+            }.show()
     }
 
     private fun showInvoiceHistory(){
@@ -5827,7 +5868,7 @@ class MainActivity : AppCompatActivity() {
             if(pro&&!requirePremiumTool("Premium invoice export"))return@setOnClickListener
             val prefix="Billing_"+draft.kind.replace(" ","_")+"_"+draft.number.take(24)
             val saved=savePdfBytes(data,prefix)
-            if(saved!=null){dialog.dismiss();Toast.makeText(this,"Invoice saved. Share or print from the result screen.",Toast.LENGTH_LONG).show()}
+            if(saved!=null){recordBillingExport(draft,saved);dialog.dismiss();Toast.makeText(this,"Invoice saved. Share or print from the result screen.",Toast.LENGTH_LONG).show()}
             else Toast.makeText(this,"Could not save PDF",Toast.LENGTH_LONG).show()
         }
     }
