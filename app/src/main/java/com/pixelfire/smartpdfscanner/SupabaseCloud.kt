@@ -103,6 +103,13 @@ internal object SupabaseCloud {
         return json.optString("answer").ifBlank { "The AI service returned an empty answer." }
     }
 
+    fun playBilling(token: String, action: String, purchaseToken: String = ""): JSONObject {
+        require(token.isNotBlank()) { "Sign in to DocNexa first." }
+        val payload = JSONObject().put("action", action).put("purchaseToken", purchaseToken)
+        return JSONObject(request("POST", "/functions/v1/docnexa-play-billing",
+            payload.toString().toByteArray(Charsets.UTF_8), "application/json", token))
+    }
+
     fun deleteAccount(token: String) {
         require(token.isNotBlank()) { "Please sign in to delete your DocNexa account." }
         val payload = JSONObject().put("confirm", true).toString().toByteArray(Charsets.UTF_8)
