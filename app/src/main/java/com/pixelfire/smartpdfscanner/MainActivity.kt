@@ -1916,6 +1916,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         billingHandler.removeCallbacks(billingRefreshTask)
+        billingReadyCallbacks.clear()
         playBillingClient?.endConnection()
         premiumAdDisposers.toList().forEach { it() }
         exportResultDialog?.dismiss()
@@ -4932,6 +4933,7 @@ class MainActivity : AppCompatActivity() {
     private val billingHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var playBillingClient: BillingClient? = null
     private var billingConnecting = false
+    private val billingReadyCallbacks = mutableListOf<() -> Unit>()
     private var billingChecking = false
     private var billingCheckGeneration = 0
     @Volatile private var verifiedPremiumUser = ""
@@ -5003,22 +5005,23 @@ class MainActivity : AppCompatActivity() {
             .enableAutoServiceReconnection()
             .build().also { playBillingClient = it }
         if (client.isReady) { onReady?.invoke(); return }
-        if (billingConnecting) {
-            if (onReady != null) Toast.makeText(this, "Connecting to Google Play. Please try again shortly.", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (onReady != null) billingReadyCallbacks.add(onReady)
+        if (billingConnecting) return
         billingConnecting = true
         client.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 runOnUiThread {
                     billingConnecting = false
                     if (isFinishing || isDestroyed) return@runOnUiThread
+                    val callbacks = billingReadyCallbacks.toList()
+                    billingReadyCallbacks.clear()
                     if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                        if (onReady != null) onReady() else refreshPlayPurchases(false)
-                    } else if (onReady != null) Toast.makeText(this@MainActivity, "Google Play Billing is unavailable.", Toast.LENGTH_LONG).show()
+                        callbacks.forEach { it() }
+                        if (callbacks.isEmpty()) refreshPlayPurchases(false)
+                    } else if (callbacks.isNotEmpty()) Toast.makeText(this@MainActivity, "Google Play Billing is unavailable. Plan details are still visible.", Toast.LENGTH_LONG).show()
                 }
             }
-            override fun onBillingServiceDisconnected() { runOnUiThread { billingConnecting = false } }
+            override fun onBillingServiceDisconnected() { runOnUiThread { billingConnecting = false; billingReadyCallbacks.clear() } }
         })
     }
 
@@ -5137,7 +5140,6 @@ class MainActivity : AppCompatActivity() {
         if(feature.isNotBlank()) hero.addView(label("$feature requires Premium",13f,0xFFFFD66B.toInt(),true))
         panel.addView(hero); panel.addView(gap(12))
         fun section(title:String){panel.addView(label(title,14f,0xFF172B4D.toInt(),true));panel.addView(gap(6))}
-        section("Compare plans")
         val comparison=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;background=rounded(0xFFFFFFFF.toInt(),14,0xFFDCE6F5.toInt());setPadding(dp(10),dp(6),dp(10),dp(6))}
         fun row(name:String,free:String,pro:String,heading:Boolean=false){
             val line=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(7),0,dp(7))}
@@ -5159,7 +5161,6 @@ class MainActivity : AppCompatActivity() {
         row("Background changer","—","✓")
         row("4K / 8K image scaling","—","✓")
         row("Native ads","Shown","None")
-        panel.addView(comparison);panel.addView(gap(12))
         section("Choose your membership")
         val planButtons=mutableMapOf<String,Button>()
         val planPrices=mutableMapOf<String,TextView>()
@@ -5181,7 +5182,9 @@ class MainActivity : AppCompatActivity() {
             panel.addView(card);panel.addView(gap(8))
         }
         val message=label(if(hasVerifiedPremium())"Your active membership unlocks Premium tools." else "Live prices are provided by Google Play when available. No payment is collected before activation.",12f,0xFF64748B.toInt())
-        panel.addView(message);panel.addView(gap(8))
+        panel.addView(message);panel.addView(gap(12))
+        section("Compare Free & Premium")
+        panel.addView(comparison);panel.addView(gap(12))
         panel.addView(label("Subscriptions renew automatically until canceled in Google Play. Prices, taxes and final terms are shown before purchase. High-resolution scaling does not recreate missing image detail.",11f,0xFF64748B.toInt()))
         panel.addView(gap(10))
         val dialog=appDialog().setTitle("Plans & membership").setView(toolDialogScroll(panel,0.74f))
