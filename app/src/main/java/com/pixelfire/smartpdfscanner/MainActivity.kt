@@ -6395,14 +6395,7 @@ class MainActivity : AppCompatActivity() {
         }
         action("↓","Download PDF","Save an original-quality copy to your device",true){saveResultAs(item)}
         action("↗","Share PDF","Send using WhatsApp, email or another app"){sharePdf(uri)}
-        action("","Google Drive","Upload or choose a Drive folder",drive=true){
-            appDialog().setTitle("Save invoice to Google Drive")
-                .setPremiumItems(arrayOf("Direct Google Drive upload","Choose Drive folder / storage")){_,index->
-                    if(available()){
-                        if(index==0)authorizeDirectDrive(uri) else confirmDriveSave(item)
-                    }
-                }.setNegativeButton("Cancel",null).show()
-        }
+        action("","Google Drive","Upload or choose a Drive folder",drive=true){confirmDriveSave(item)}
         action("▤","Print PDF","A4 • Original PDF, no screenshot conversion"){printPdfDocument(uri,true)}
         action("▣","Open PDF","View the complete saved document"){openPdf(uri)}
         panel.addView(gap(3));panel.addView(info)
@@ -7940,12 +7933,58 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // A Drive-specific action must never fall back to a local document picker.
     private fun confirmDriveSave(item: ExportResultItem) {
-        appDialog().setTitle("Save to Google Drive")
-            .setMessage("Select Google Drive in the Android file picker, choose your Google account and a folder, then tap Save. Drive must be available on your device. DocNexa writes an unchanged copy; the provider handles cloud upload. You may also choose local storage.")
-            .setPositiveButton("Choose destination") { _, _ ->
-                saveResultAs(item, privateDocumentFile(Uri.parse(item.uri)) != null)
-            }.setNegativeButton("Cancel", null).show()
+        val source = Uri.parse(item.uri)
+        val account = signedInUserId()
+        val file = privateDocumentFile(source)
+        if (source.authority == "$packageName.fileprovider" && file == null) {
+            updateResultStatus("This file is no longer available in your DocNexa account.")
+            return
+        }
+        val direct = file != null && file.length() in 1L..DirectDriveApi.MAX_BYTES && backupMime(file.name) != null
+        val dialog = appDialog().setTitle("Save to Google Drive")
+            .setMessage(item.fileName + "\n\nUpload the original file to your Google account without compression. Your existing DocNexa copy stays safe. No phone storage destination will be used.")
+            .setNegativeButton("Cancel", null)
+        if (direct) {
+            dialog.setPositiveButton("Upload to My Drive") { _, _ ->
+                if (account == signedInUserId() && privateDocumentFile(source) != null) authorizeDirectDrive(source)
+                else updateResultStatus("File unavailable or DocNexa account changed.")
+            }.setNeutralButton("Choose folder in Drive") { _, _ ->
+                if (account == signedInUserId()) openDriveUploadApp(item)
+            }
+        } else {
+            dialog.setPositiveButton("Open Google Drive") { _, _ ->
+                if (account == signedInUserId()) openDriveUploadApp(item)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun openDriveUploadApp(item: ExportResultItem) {
+        val source = Uri.parse(item.uri)
+        if (source.authority == "$packageName.fileprovider" && privateDocumentFile(source) == null) {
+            updateResultStatus("This file is no longer available in your DocNexa account.")
+            return
+        }
+        try {
+            // Explicitly target the Drive app; no chooser or local storage fallback.
+            startActivity(Intent(Intent.ACTION_SEND).apply {
+                setPackage("com.google.android.apps.docs")
+                type = item.mime
+                putExtra(Intent.EXTRA_STREAM, source)
+                putExtra(Intent.EXTRA_TITLE, item.fileName)
+                clipData = android.content.ClipData.newRawUri(item.fileName, source)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+            updateResultStatus("Sent to Google Drive. Choose your account and folder, tap Save, and check Drive for upload completion.")
+        } catch (_: Exception) {
+            appDialog().setTitle("Google Drive unavailable")
+                .setMessage("Install or enable the official Google Drive app to choose a cloud folder. Your original file remains safe; no local export was made.")
+                .setPositiveButton("Get Google Drive") { _, _ ->
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.docs"))) }
+                }.setNegativeButton("Close", null).show()
+        }
     }
 
     // Native vector mark, rendered without a bitmap or additional library.
@@ -8044,13 +8083,13 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(connectButton); panel.addView(gap(10))
         option("Import / restore a file", "Choose an existing PDF, image or supported export from Drive or another provider.") { launchDriveImport() }
-        option("Manual backup", "Select a saved document, image or invoice export. Copy to the folder you choose.") { chooseDriveBackupFile() }
+        option("Manual backup", "Upload a saved document, image or invoice to your Google Drive.") { chooseDriveBackupFile() }
         option("Open Google Drive", "Manage your Google account and uploaded files in Drive.") {
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive")))
             } catch (_: Exception) { Toast.makeText(this, "Google Drive unavailable.", Toast.LENGTH_LONG).show() }
         }
-        panel.addView(label("Manual copies use your selected storage provider. Automatic backup and continuous sync are not yet available.", 11f, 0xFF64748B.toInt()))
+        panel.addView(label("Drive uploads retain your original local file. Automatic backup and continuous sync are not yet available.", 11f, 0xFF64748B.toInt()))
         dialog.show()
         // Serialize silent checks with user-initiated authorization. Reuse the
         // verified token for this dialog only; never persist a bearer token.
@@ -8158,21 +8197,28 @@ class MainActivity : AppCompatActivity() {
             .joinToString(":") { "%02X".format(it.toInt() and 255) }
     }.getOrDefault("Unavailable")
 
-    private fun showDriveAuthorizationHelp(reason: String) {
-        val retryTarget=directDriveTarget
+    private fun showDriveAuthorizationHelp(reason: String, retryTarget: Uri? = directDriveTarget) {
         directDriveTarget=null
+        val owner = signedInUserId()
         if (isFinishing || isDestroyed) return
         val certificate = installedDriveCertificate()
         val guidance = if (reason.contains("Google status 8 (")) {
-            "Google could not finish authorization. Retry using a stable internet connection. If this repeats, update Google Play services or review DocNexa access in your Google Account. Manual backup remains available."
+            "Google could not finish authorization. Retry using a stable internet connection. If this repeats, update Google Play services or review DocNexa access in your Google Account. You can also use the official Drive app."
         } else {
             "Check that the installed signing certificate is registered for the Android OAuth client. Select your Google account and approve Drive access."
         }
         val details = guidance + "\n\nTechnical details: " + reason + "\nPackage: " + packageName + "\nInstalled APK SHA-1:\n" + certificate
         appDialog().setTitle("Google Drive connection")
             .setMessage(details)
-            .setPositiveButton("Retry") { _, _ -> authorizeDirectDrive(retryTarget) }
-            .setNeutralButton("Manual backup") { _, _ -> if(retryTarget!=null && privateDocumentFile(retryTarget)!=null)sharePdfToGoogleDrive(retryTarget) else chooseDriveBackupFile() }
+            .setPositiveButton("Retry") { _, _ -> if (owner == signedInUserId()) authorizeDirectDrive(retryTarget) }
+            .setNeutralButton("Use Drive app") { _, _ ->
+                if (owner == signedInUserId()) {
+                    val file = retryTarget?.let { privateDocumentFile(it) }
+                    if (retryTarget != null && file != null) openDriveUploadApp(ExportResultItem(retryTarget.toString(), file.name, backupMime(file.name) ?: "application/octet-stream"))
+                    else if (retryTarget == null) chooseDriveBackupFile()
+                    else updateResultStatus("Original file is no longer available.")
+                }
+            }
             .setNegativeButton("Close", null).show()
     }
 
@@ -8219,7 +8265,7 @@ class MainActivity : AppCompatActivity() {
                 account == null || account != signedInUserId() -> "DocNexa account changed or authorization state expired."
                 token.isNullOrBlank() -> "Google returned no access token."
                 else -> "The required Drive file permission was not granted."
-            })
+            }, if (account == signedInUserId()) target else null)
             return
         }
         if (!directDriveBusy.compareAndSet(false, true)) return
@@ -8233,13 +8279,18 @@ class MainActivity : AppCompatActivity() {
                         if(target==null)showDirectDriveActions(token, email, account)
                         else {
                             val file=privateDocumentFile(target)
-                            if(file!=null)appDialog().setTitle("Upload invoice PDF?")
-                                .setMessage(file.name+"\n\nGoogle account: "+email+"\n\nUpload the original PDF to this account?")
+                            if(file!=null)appDialog().setTitle("Upload to Google Drive?")
+                                .setMessage(file.name+"\n\nGoogle account: "+email+"\nLocation: My Drive\n\nUpload the original file to this account?")
                                 .setPositiveButton("Upload"){_,_->if(account==signedInUserId())uploadDirectDriveFiles(token,account,listOf(file),false)}
                                 .setNegativeButton("Cancel",null).show()
-                            else Toast.makeText(this,"Invoice is no longer available.",Toast.LENGTH_LONG).show()
+                            else updateResultStatus("Original file is no longer available.")
                         }
                     }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && account == signedInUserId())
+                        showDriveAuthorizationHelp(e.localizedMessage ?: "Unable to verify Drive access.", target)
                 }
             } finally { directDriveBusy.set(false) }
         }
@@ -8375,9 +8426,16 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
                         status.text = "Drive upload: " + complete + " saved"
                         if(invoiceReadyDialog?.isShowing==true)invoiceReadyStatus?.text=if(complete>0)"Original PDF uploaded to Google Drive." else "Google Drive upload not completed. Your local PDF is safe."
-                        appDialog().setTitle("Google Drive backup")
+                        if (files.size == 1 && exportResultDialog?.isShowing == true &&
+                            exportResults.selected?.uri == privateDocumentUri(files.first()).toString()) {
+                            exportStatusView?.text = if (complete == 1) "Original file uploaded to Google Drive." else "Drive upload not completed. Your original file is safe."
+                        }
+                        appDialog().setTitle(if (complete == files.size) "Saved to Google Drive" else "Google Drive upload result")
                             .setMessage("Uploaded: " + complete + "\nFailed: " + failed + "\nNot attempted: " + (files.size - complete - failed) + "\nOriginal local files retained.")
-                            .setPositiveButton("Done", null).show()
+                            .setPositiveButton("Done", null)
+                            .setNeutralButton("Open Drive") { _, _ ->
+                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive"))) }
+                            }.show()
                     }
                 }
             } finally { directDriveBusy.set(false) }
