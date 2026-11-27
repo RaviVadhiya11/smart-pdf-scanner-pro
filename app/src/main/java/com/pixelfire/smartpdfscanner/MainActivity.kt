@@ -5078,7 +5078,7 @@ class MainActivity : AppCompatActivity() {
             StudioTile("Format Converter","JPG, PNG, WebP, BMP","⇄","Convert"){studioConvertPicker.launch(arrayOf("image/*"))},
             StudioTile("Resize Image","Custom dimensions","↔","Edit"){studioResizePicker.launch(arrayOf("image/*"))},
             StudioTile("Remove Background","AI subject cutout","✦","AI"){studioBgPicker.launch(arrayOf("image/*"))},
-            StudioTile("Image Upscaler","HD / 2K • 4K / 8K locked","4K","Edit"){studioUpscalePicker.launch(arrayOf("image/*"))},
+            StudioTile("Image Upscaler",if(hasVerifiedPremium())"HD / 2K / 4K / 8K" else "HD / 2K • 4K / 8K Pro","4K","Edit"){studioUpscalePicker.launch(arrayOf("image/*"))},
             StudioTile("Image Enhancer","Contrast and text clarity","◐","Edit"){enhanceDocumentPicker.launch(arrayOf("image/*"))},
             StudioTile("Compress Image","Target KB / MB","↓","Convert"){studioCompressPicker.launch(arrayOf("image/*"))},
             StudioTile("Crop & Rotate","Adjust image framing","▧","Edit"){studioCropPicker.launch(arrayOf("image/*"))},
@@ -5131,6 +5131,7 @@ class MainActivity : AppCompatActivity() {
     private var billingConnecting = false
     private val billingReadyCallbacks = mutableListOf<() -> Unit>()
     private var billingChecking = false
+    private var billingCheckoutPreparing = false
     private var billingCheckGeneration = 0
     @Volatile private var verifiedPremiumUser = ""
     @Volatile private var verifiedPremiumUntil = 0L
@@ -5256,7 +5257,7 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             billingChecking = false
                             if (isFinishing || isDestroyed || generation != billingCheckGeneration || user != signedInUserId()) return@runOnUiThread
-                            val wasPremium = hasVerifiedPremium()
+                            val wasPremium = verifiedPremiumUser == user && verifiedPremiumUser.isNotBlank()
                             if (expiry > System.currentTimeMillis()) {
                                 verifiedPremiumUser = user
                                 verifiedPremiumUntil = minOf(expiry, System.currentTimeMillis() + 5 * 60_000L)
@@ -5370,6 +5371,8 @@ class MainActivity : AppCompatActivity() {
         row("Premium invoice styles / logo","—","✓")
         row("Customer / product records","—","✓")
         row("Billing reports / CSV","—","✓")
+        row("Google Drive manual backup","✓","✓")
+        row("Google Drive batch backup","—","✓")
         row("Native ads","Shown","None")
         section("Choose your membership")
         val planButtons=mutableMapOf<String,Button>()
@@ -5382,11 +5385,11 @@ class MainActivity : AppCompatActivity() {
                 background=rounded(if(monthly)0xFFFFFFFF.toInt() else 0xFFF2EEFF.toInt(),16,if(monthly)0xFFDCE6F5.toInt() else 0xFF9C87E9.toInt())
             }
             card.addView(label(if(monthly)"MONTHLY PREMIUM" else "YEARLY PREMIUM",12f,0xFF6546C8.toInt(),true))
-            val price=label(if(monthly)"₹99 / month" else "₹699 / year",22f,0xFF172B4D.toInt(),true)
-            val hint=label("Proposed India price • not yet available for purchase",10.5f,0xFF64748B.toInt())
+            val price=label("Checking Google Play price…",20f,0xFF172B4D.toInt(),true)
+            val hint=label("Auto-renewing • Price shown when available",11f,0xFF64748B.toInt())
             card.addView(price);card.addView(hint);card.addView(gap(5))
             card.addView(label("All Premium features • Auto-renewing",12f,0xFF263957.toInt()))
-            val button=Button(this).apply{text="Not available yet";isAllCaps=false;isEnabled=false}
+            val button=Button(this).apply{text="Checking availability…";isAllCaps=false;isEnabled=false;minHeight=dp(48);backgroundTintList=android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(0xFFE3EAF5.toInt(),0xFF2563EB.toInt()));setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(0xFF53657E.toInt(),0xFFFFFFFF.toInt())))}
             card.addView(button,LinearLayout.LayoutParams(-1,-2))
             planButtons[plan]=button;planPrices[plan]=price;planHints[plan]=hint
             panel.addView(card);panel.addView(gap(8))
@@ -5405,6 +5408,8 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnDismissListener { if(premiumDialog===dialog) premiumDialog=null }
         dialog.show()
         if(hasVerifiedPremium()){
+            planPrices.values.forEach { it.text="Membership active" }
+            planHints.values.forEach { it.text="View billing details in Google Play" }
             planButtons.values.forEach { it.text="Manage current plan";it.isEnabled=true;it.setOnClickListener{managePlaySubscription()} }
             return
         }
@@ -5416,13 +5421,16 @@ class MainActivity : AppCompatActivity() {
                     if(!dialog.isShowing || isFinishing || isDestroyed) return@runOnUiThread
                     val item=details.productDetailsList.firstOrNull{it.productId==premiumProduct}
                     if(result.responseCode!=BillingClient.BillingResponseCode.OK || item==null){
-                        message.text="Google Play plans are not activated or not available on this installation. Displayed prices are proposals only."
+                        message.text="Google Play plans are not available on this installation. No payment can be started."
+                        planPrices.values.forEach { it.text="Price unavailable" }
+                        planButtons.values.forEach { it.text="Not available"; it.isEnabled=false }
                         return@runOnUiThread
                     }
                     message.text="Choose an available auto-renewing plan. Sign in before checkout."
                     val offers=item.subscriptionOfferDetails.orEmpty().filter{it.offerId==null && it.basePlanId in premiumPlans}
                     premiumPlans.forEach { plan ->
-                        val offer=offers.firstOrNull{it.basePlanId==plan} ?: return@forEach
+                        val offer=offers.firstOrNull{it.basePlanId==plan}
+                        if(offer==null){planPrices[plan]?.text="Price unavailable";planButtons[plan]?.text="Not available";return@forEach}
                         val phase=offer.pricingPhases.pricingPhaseList.lastOrNull() ?: return@forEach
                         val period=if(plan=="premium-monthly") "month" else "year"
                         planPrices[plan]?.text=phase.formattedPrice+" / "+period
@@ -5435,7 +5443,7 @@ class MainActivity : AppCompatActivity() {
                             else { button.isEnabled=false;beginVerifiedPurchase(dialog,button,item,offer.offerToken) }
                         }
                     }
-                    if(offers.isEmpty())message.text="No eligible active base plans found. Proposed prices only."
+                    if(offers.isEmpty())message.text="No eligible active base plans found."
                 }
             }
         }
@@ -5444,11 +5452,16 @@ class MainActivity : AppCompatActivity() {
     private fun beginVerifiedPurchase(dialog:AlertDialog,button:Button,product:ProductDetails,offerToken:String){
         val account=signedInUserId();val auth=cloudToken()
         if(account=="guest"||auth.isBlank()){button.isEnabled=true;return}
+        if(billingCheckoutPreparing){button.isEnabled=true;Toast.makeText(this,"Checkout is already being prepared.",Toast.LENGTH_SHORT).show();return}
+        billingCheckoutPreparing=true
+        button.text="Checking secure checkout…"
         Thread {
             val ready=runCatching{SupabaseCloud.playBilling(auth,"ready").optBoolean("ready")}.getOrDefault(false)
             runOnUiThread {
+                billingCheckoutPreparing=false
                 if(isFinishing||isDestroyed||!dialog.isShowing)return@runOnUiThread
                 button.isEnabled=true
+                button.text="Continue with Google Play"
                 if(!ready || account!=signedInUserId()){
                     Toast.makeText(this,"Secure subscription service is not activated. No payment collected.",Toast.LENGTH_LONG).show()
                     return@runOnUiThread
@@ -5502,6 +5515,7 @@ class MainActivity : AppCompatActivity() {
     private fun studioMime(format:String)=when(format){"jpg"->"image/jpeg";"webp"->"image/webp";"bmp"->"image/bmp";else->"image/png"}
 
     private fun studioResult(bitmap:Bitmap,prefix:String,format:String="png",quality:Int=95,requiresPremium:Boolean=false) {
+        val owner=signedInUserId()
         val width=bitmap.width; val height=bitmap.height
         val bytes: ByteArray
         val preview: Bitmap
@@ -5512,14 +5526,16 @@ class MainActivity : AppCompatActivity() {
             preview=if(thumb===bitmap) bitmap.copy(Bitmap.Config.ARGB_8888,false) else thumb
         } finally { bitmap.recycle() }
         runOnUiThread {
-            if(isFinishing || isDestroyed){preview.recycle();return@runOnUiThread}
+            if(isFinishing || isDestroyed || owner!=signedInUserId()){preview.recycle();return@runOnUiThread}
             val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8))}
             panel.addView(ImageView(this).apply{setImageBitmap(preview);adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER},LinearLayout.LayoutParams(-1,dp(250)))
             panel.addView(label("${width} × ${height} px • ${format.uppercase(Locale.ROOT)} • ${bytes.size/1024} KB",12f,0xFF64748B.toInt()))
             val dialog=appDialog().setTitle("Export preview").setView(panel).setNegativeButton("Close",null)
                 .setPositiveButton("Save ${format.uppercase(Locale.ROOT)}"){_,_->
-                    if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo("High-quality image export")
+                    if(owner!=signedInUserId()) Toast.makeText(this,"Account changed. Please create the image again.",Toast.LENGTH_LONG).show()
+                    else if(requiresPremium && !hasVerifiedPremium()) studioPremiumInfo("High-quality image export")
                     else advancedToolJob("Saving image…") {
+                        require(owner==signedInUserId()) { "Account changed. Please create the image again." }
                         if(requiresPremium && !hasVerifiedPremium()) error("Premium verification required")
                         saveDocumentBytes(bytes,prefix,studioMime(format),format) ?: error("Unable to save image")
                     }
@@ -5542,18 +5558,25 @@ class MainActivity : AppCompatActivity() {
                         studioResult(decodeImageSafely(files[0],if(premium) 4200 else 2048,minOf(exportPixelBudget(),if(premium) 12_000_000L else 4_000_000L)),"Converted",format,98,premium)
                     }
                     else {
-                        val bytes=ByteArrayOutputStream()
-                        ZipOutputStream(bytes).use{zip->
-                            files.forEachIndexed{index,uri->
-                                val image=decodeImageSafely(uri,2048,4_000_000L)
-                                try{
-                                    val data=studioEncode(image,format)
-                                    require(bytes.size().toLong()+data.size<=64L*1024*1024){"Batch exceeds 64 MB"}
-                                    zip.putNextEntry(ZipEntry("Image_${index+1}.$format"));zip.write(data);zip.closeEntry()
-                                }finally{image.recycle()}
+                        val owner=signedInUserId()
+                        require(hasVerifiedPremium()) { "Premium verification required" }
+                        val target=PrivateDocumentStore.save(privateDocumentsDir(),"Converted_Images_"+System.currentTimeMillis()+".zip") { stream ->
+                            ZipOutputStream(stream).use{zip->
+                                var total=0L
+                                files.forEachIndexed{index,uri->
+                                    require(owner==signedInUserId() && hasVerifiedPremium()) { "Account or Premium access changed" }
+                                    val image=decodeImageSafely(uri,2048,minOf(4_000_000L,exportPixelBudget()))
+                                    try{
+                                        val data=studioEncode(image,format)
+                                        total+=data.size
+                                        require(total<=64L*1024*1024){"Batch exceeds 64 MB"}
+                                        zip.putNextEntry(ZipEntry("Image_${index+1}.$format"));zip.write(data);zip.closeEntry()
+                                    }finally{image.recycle()}
+                                }
+                                require(owner==signedInUserId() && hasVerifiedPremium()) { "Account or Premium access changed" }
                             }
                         }
-                        runOnUiThread{if(!isFinishing&&!isDestroyed)saveDocumentBytes(bytes.toByteArray(),"Converted_Images","application/zip","zip")}
+                        runOnUiThread{if(!isFinishing&&!isDestroyed&&owner==signedInUserId())showExportSuccess(privateDocumentUri(target),target.name,"application/zip")}
                     }
                 }
             }.setNegativeButton("Cancel",null).show()
@@ -5614,7 +5637,7 @@ class MainActivity : AppCompatActivity() {
                     val resized=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
                     if(resized!==source) source.recycle()
                     if(i>=2 && !hasVerifiedPremium()){resized.recycle();error("Premium verification required")}
-                    studioResult(resized,"Upscaled",if(i>=2)"jpg" else "png",98,i>=2)
+                    studioResult(resized,"Upscaled",if(i>=2 && !resized.hasAlpha())"jpg" else "png",98,i>=2)
                 }
             }.setNegativeButton("Cancel",null).show()
     }

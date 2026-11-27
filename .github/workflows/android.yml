@@ -72,6 +72,14 @@ jobs:
             echo "=== $variant APK ==="
             "$APKSIGNER" verify --print-certs "app/build/outputs/apk/$variant/app-$variant.apk" | tee "app/build/outputs/signing/$variant-certificate.txt"
           done
+      - name: Verify release 16 KB native library compatibility
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/reports/release-readiness
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK" | tee app/build/reports/release-readiness/zipalign.txt
+          python3 scripts/check_native_alignment.py "$APK" | tee app/build/reports/release-readiness/native-alignment.txt
       - name: Upload Android builds
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -95,4 +103,5 @@ jobs:
             app/build/reports/lint-results-debug.xml
             app/build/reports/lint-results-release.html
             app/build/reports/lint-results-release.xml
+            app/build/reports/release-readiness/
           if-no-files-found: ignore

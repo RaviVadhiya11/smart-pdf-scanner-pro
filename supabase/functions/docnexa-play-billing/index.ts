@@ -37,7 +37,10 @@ Deno.serve(async req => {
     if (body.action === "ready") {
       const product = await fetch(google + "/subscriptions/" + PRODUCT, { headers });
       if (!product.ok) return respond({ ready: false, error: "Subscription configuration unavailable" }, 503);
-      return respond({ ready: true });
+      const config = await product.json();
+      const active = (config.basePlans || []).filter((p: any) => p.state === "ACTIVE" && p.autoRenewingBasePlan && ["premium-monthly", "premium-yearly"].includes(p.basePlanId));
+      if (!active.length) return respond({ ready: false, error: "No active auto-renewing Premium plans" }, 503);
+      return respond({ ready: true, activePlans: active.map((p: any) => p.basePlanId) });
     }
     if (body.action !== "verify" || typeof body.purchaseToken !== "string" || body.purchaseToken.length > 4096 || !body.purchaseToken) return respond({ error: "Invalid request" }, 400);
     const purchaseToken = encodeURIComponent(body.purchaseToken);
