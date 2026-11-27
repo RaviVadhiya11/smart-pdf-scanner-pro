@@ -798,9 +798,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun popupGlyph(symbol:String, color:Int): View = object : View(this) {
+    private fun popupGlyph(symbol:String, tint:Int): View = object : View(this) {
         private val ink=Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color=color;strokeWidth=1.8f;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND;style=Paint.Style.STROKE
+            this.color=tint;strokeWidth=1.8f;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND;style=Paint.Style.STROKE
         }
         override fun onDraw(canvas:Canvas) {
             super.onDraw(canvas)
@@ -5733,7 +5733,7 @@ class MainActivity : AppCompatActivity() {
     private fun studioUpscaleDialog(uri:Uri){
         appDialog().setTitle("Image Upscaler • Resolution")
             .setPremiumItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px",if(hasVerifiedPremium())"4K • 3840 px" else "4K • Premium locked",if(hasVerifiedPremium())"8K • 7680 px" else "8K • Premium locked")){_,i->
-                if(i>=2 && !hasVerifiedPremium()){studioPremiumInfo();return@setItems}
+                if(i>=2 && !hasVerifiedPremium()){studioPremiumInfo();return@setPremiumItems}
                 advancedToolJob("Upscaling image…"){
                     val edge=listOf(1280,2048,3840,7680)[i]
                     val source=decodeImageSafely(uri,edge,minOf(exportPixelBudget(),if(i>=2) 16_000_000L else 4_000_000L))
