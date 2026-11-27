@@ -514,7 +514,7 @@ class MainActivity : AppCompatActivity() {
                     lastPdf = uri
                     openPdf(uri)
                 }
-                else -> Toast.makeText(this, "File selected. Direct import currently supports images and PDF; this file type is not yet editable in DocNexa.", Toast.LENGTH_LONG).show()
+                else -> openDocumentViewer(uri)
             }
         }
     }
@@ -1720,6 +1720,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(toolCard("Image Studio", "Convert • Resize • Remove BG • Upscale", "▧", 0xFF6546C8.toInt()) { showImageStudio() })
         content.addView(gap(10))
         content.addView(toolCard("Bill / Invoice Maker", "Bills • GST invoices • Quotations • Receipts", "₹", 0xFFEA580C.toInt()) { showInvoiceStudio() })
+        content.addView(toolCard("All Document Viewer", "PDF • Word • Excel • PPT • Images • Files", "▤", 0xFF2563EB.toInt()) { showDocumentViewerHub() })
         content.addView(gap(10))
         addNativeAdCard(content)
 
@@ -1905,105 +1906,7 @@ class MainActivity : AppCompatActivity() {
                 } ?: error("Cannot identify document")
                 val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
                 require(ext in setOf("docx", "xlsx", "pptx")) { "Select DOCX, XLSX or PPTX" }
-                val parts = mutableMapOf<String, ByteArray>()
-                var total = 0L
-                var entries = 0
-                val pattern = Regex("word/document\\.xml|xl/(sharedStrings\\.xml|worksheets/sheet[0-9]+\\.xml)|ppt/slides/slide[0-9]+\\.xml")
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    java.util.zip.ZipInputStream(stream).use { zip ->
-                        while (true) {
-                            val entry = zip.nextEntry ?: break
-                            require(++entries <= 5000) { "Too many document sections" }
-                            val wanted = !entry.isDirectory && entry.name.matches(pattern)
-                            val output = ByteArrayOutputStream()
-                            val buffer = ByteArray(8192)
-                            var count = 0
-                            while (true) {
-                                val n = zip.read(buffer)
-                                if (n < 0) break
-                                count += n
-                                total += n
-                                require(total <= 96L * 1024 * 1024) { "Expanded document exceeds 96 MB" }
-                                if (wanted) {
-                                    require(count <= 8 * 1024 * 1024) { "Document section exceeds 8 MB" }
-                                    output.write(buffer, 0, n)
-                                }
-                            }
-                            if (wanted) parts[entry.name] = output.toByteArray()
-                            zip.closeEntry()
-                        }
-                    }
-                } ?: error("Cannot read document")
-                fun parse(bytes: ByteArray, event: (org.xmlpull.v1.XmlPullParser, Int) -> Unit) {
-                    val parser = android.util.Xml.newPullParser()
-                    parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
-                    parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
-                    parser.setInput(bytes.inputStream(), null)
-                    while (parser.eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-                        event(parser, parser.eventType)
-                        parser.nextToken()
-                    }
-                }
-                val start = org.xmlpull.v1.XmlPullParser.START_TAG
-                val end = org.xmlpull.v1.XmlPullParser.END_TAG
-                val txt = org.xmlpull.v1.XmlPullParser.TEXT
-                val shared = mutableListOf<String>()
-                parts["xl/sharedStrings.xml"]?.let { bytes ->
-                    var inText = false
-                    var value = StringBuilder()
-                    parse(bytes) { p, e ->
-                        if (e == start && p.name == "si") value = StringBuilder()
-                        if (e == start && p.name == "t") inText = true
-                        if (e == txt && inText) value.append(p.text)
-                        if (e == end && p.name == "t") inText = false
-                        if (e == end && p.name == "si") shared.add(value.toString())
-                    }
-                }
-                val content = StringBuilder()
-                val ordered = parts.keys.filter { it != "xl/sharedStrings.xml" }.sortedBy {
-                    Regex("[0-9]+").find(it)?.value?.toIntOrNull() ?: 0
-                }
-                ordered.forEachIndexed { index, key ->
-                    if (ext != "docx") content.append("\n").append(if (ext == "xlsx") "Worksheet " else "Slide ").append(index + 1).append("\n\n")
-                    var inText = false
-                    var cellType = ""
-                    var cell = StringBuilder()
-                    var inCell = false
-                    var firstCell = true
-                    parse(parts.getValue(key)) { p, e ->
-                        if (e == start) {
-                            when (p.name) {
-                                "c" -> if (ext == "xlsx") { inCell = true; cellType = p.getAttributeValue(null, "t") ?: ""; cell = StringBuilder() }
-                                "row" -> firstCell = true
-                                "t", "v" -> inText = true
-                                "tab" -> if (ext == "docx") content.append('\t')
-                                "br" -> if (ext != "xlsx") content.append('\n')
-                            }
-                        } else if ((e == txt || e == org.xmlpull.v1.XmlPullParser.CDSECT || e == org.xmlpull.v1.XmlPullParser.ENTITY_REF) && inText) {
-                            val value = p.text ?: ""
-                            if (ext == "xlsx") { if (inCell) cell.append(value) } else content.append(value)
-                        } else if (e == end) {
-                            when (p.name) {
-                                "t", "v" -> inText = false
-                                "c" -> if (ext == "xlsx") {
-                                    if (!firstCell) content.append(" | ")
-                                    firstCell = false
-                                    val raw = cell.toString()
-                                    content.append(when (cellType) {
-                                        "s" -> raw.toIntOrNull()?.let { shared.getOrNull(it) } ?: ""
-                                        "b" -> if (raw == "1") "TRUE" else "FALSE"
-                                        else -> raw
-                                    })
-                                    inCell = false
-                                }
-                                "p" -> if (ext != "xlsx") content.append('\n')
-                                "row", "tr" -> content.append('\n')
-                            }
-                        }
-                        require(content.length <= 500_000) { "Document text exceeds conversion limit" }
-                    }
-                }
-                require(content.isNotBlank() && ordered.isNotEmpty()) { "No readable Office content found" }
+                val content = readOfficeViewerText(uri,ext)
                 runOnUiThread {
                     appDialog().setTitle("Office to PDF • Offline")
                         .setMessage("Text, worksheet values and slide order are extracted locally. Complex formatting, images and charts are not reproduced. Continue?")
@@ -2014,6 +1917,111 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { Toast.makeText(this, e.message ?: "Could not convert Office file", Toast.LENGTH_LONG).show() }
             }
         }.start()
+    }
+
+    private fun readOfficeViewerText(uri:Uri,ext:String):String {
+        require(ext in setOf("docx","xlsx","pptx")){"Unsupported Office format"}
+        val parts = mutableMapOf<String, ByteArray>()
+        var total = 0L
+        var entries = 0
+        val pattern = Regex("word/document\\.xml|xl/(sharedStrings\\.xml|worksheets/sheet[0-9]+\\.xml)|ppt/slides/slide[0-9]+\\.xml")
+        contentResolver.openInputStream(uri)?.use { stream ->
+            java.util.zip.ZipInputStream(stream).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    require(++entries <= 5000) { "Too many document sections" }
+                    val wanted = !entry.isDirectory && entry.name.matches(pattern)
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var count = 0
+                    while (true) {
+                        val n = zip.read(buffer)
+                        if (n < 0) break
+                        count += n
+                        total += n
+                        require(total <= 96L * 1024 * 1024) { "Expanded document exceeds 96 MB" }
+                        if (wanted) {
+                            require(count <= 8 * 1024 * 1024) { "Document section exceeds 8 MB" }
+                            output.write(buffer, 0, n)
+                        }
+                    }
+                    if (wanted) parts[entry.name] = output.toByteArray()
+                    zip.closeEntry()
+                }
+            }
+        } ?: error("Cannot read document")
+        fun parse(bytes: ByteArray, event: (org.xmlpull.v1.XmlPullParser, Int) -> Unit) {
+            val parser = android.util.Xml.newPullParser()
+            parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+            parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            parser.setInput(bytes.inputStream(), null)
+            while (parser.eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                event(parser, parser.eventType)
+                parser.nextToken()
+            }
+        }
+        val start = org.xmlpull.v1.XmlPullParser.START_TAG
+        val end = org.xmlpull.v1.XmlPullParser.END_TAG
+        val txt = org.xmlpull.v1.XmlPullParser.TEXT
+        val shared = mutableListOf<String>()
+        parts["xl/sharedStrings.xml"]?.let { bytes ->
+            var inText = false
+            var value = StringBuilder()
+            parse(bytes) { p, e ->
+                if (e == start && p.name == "si") value = StringBuilder()
+                if (e == start && p.name == "t") inText = true
+                if (e == txt && inText) value.append(p.text)
+                if (e == end && p.name == "t") inText = false
+                if (e == end && p.name == "si") shared.add(value.toString())
+            }
+        }
+        val content = StringBuilder()
+        val ordered = parts.keys.filter { it != "xl/sharedStrings.xml" }.sortedBy {
+            Regex("[0-9]+").find(it)?.value?.toIntOrNull() ?: 0
+        }
+        ordered.forEachIndexed { index, key ->
+            if (ext != "docx") content.append("\n").append(if (ext == "xlsx") "Worksheet " else "Slide ").append(index + 1).append("\n\n")
+            var inText = false
+            var cellType = ""
+            var cell = StringBuilder()
+            var inCell = false
+            var firstCell = true
+            parse(parts.getValue(key)) { p, e ->
+                if (e == start) {
+                    when (p.name) {
+                        "c" -> if (ext == "xlsx") { inCell = true; cellType = p.getAttributeValue(null, "t") ?: ""; cell = StringBuilder() }
+                        "row" -> firstCell = true
+                        "t", "v" -> inText = true
+                        "tab" -> if (ext == "docx") content.append('\t')
+                        "br" -> if (ext != "xlsx") content.append('\n')
+                    }
+                } else if ((e == txt || e == org.xmlpull.v1.XmlPullParser.CDSECT || e == org.xmlpull.v1.XmlPullParser.ENTITY_REF) && inText) {
+                    val value = p.text ?: ""
+                    if (ext == "xlsx") { if (inCell) cell.append(value) } else content.append(value)
+                } else if (e == end) {
+                    when (p.name) {
+                        "t", "v" -> inText = false
+                        "c" -> if (ext == "xlsx") {
+                            if (!firstCell) content.append(" | ")
+                            firstCell = false
+                            val raw = cell.toString()
+                            content.append(when (cellType) {
+                                "s" -> raw.toIntOrNull()?.let { shared.getOrNull(it) } ?: ""
+                                "b" -> if (raw == "1") "TRUE" else "FALSE"
+                                else -> raw
+                            })
+                            inCell = false
+                        }
+                        "p" -> if (ext != "xlsx") content.append('\n')
+                        "row", "tr" -> content.append('\n')
+                    }
+                }
+                require(content.length <= 500_000) { "Document text exceeds conversion limit" }
+            }
+        }
+        require(content.isNotBlank() && ordered.isNotEmpty()) { "No readable Office content found" }
+
+        return content.toString()
     }
 
     private fun showEditCreateFileChoices() {
@@ -2184,6 +2192,8 @@ class MainActivity : AppCompatActivity() {
         premiumAdDisposers.toList().forEach { it() }
         exportResultDialog?.dismiss()
         invoiceReadyDialog?.dismiss()
+        activeDocumentViewer?.dismiss()
+        viewerReadExecutor.shutdownNow()
         pagePreviewExecutor.shutdownNow()
         closeQrCamera()
         cameraExecutor.shutdownNow()
@@ -2494,6 +2504,7 @@ class MainActivity : AppCompatActivity() {
         item("PDF","PDF Tools","Merge, split and convert"){showPdfTools()}
         item("▧","Image Studio","Resize, convert and enhance"){showImageStudio()}
         item("₹","Bill / Invoice Maker","Create professional billing PDFs"){showInvoiceStudio()}
+        item("▤","All Document Viewer","Read PDF, Office and image files"){showDocumentViewerHub()}
         item("✦","AI Document Assistant","Work with document content"){showAiAssistant()}
         item("▣","Edit/Create PDF","Create and edit documents"){showEditCreateFileChoices()}
         item("✍","Signature","Create your signature"){openSignatureEditor()}
@@ -11133,6 +11144,302 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             status.text = "Could not read selected image"
             Toast.makeText(this, e.localizedMessage ?: "Image error", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val documentViewerPicker=registerForActivityResult(ActivityResultContracts.OpenDocument()){uri->
+        if(uri!=null)openDocumentViewer(uri)
+    }
+    private var activeDocumentViewer:AlertDialog?=null
+    private val viewerReadExecutor=Executors.newSingleThreadExecutor()
+    private fun viewerName(uri:Uri):String=privateDocumentFile(uri)?.name ?: runCatching{
+        contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use{if(it.moveToFirst())it.getString(0)else null}
+    }.getOrNull()?.take(180) ?: "Document"
+    private fun viewerMime(uri:Uri,name:String):String {
+        val reported=runCatching{contentResolver.getType(uri)}.getOrNull().orEmpty()
+        return DocumentViewerPlan.mime(name) ?: reported.ifBlank{"application/octet-stream"}
+    }
+    private fun viewerLocalFiles():List<java.io.File>{
+        val trash=prefs.getStringSet("trash_uris",emptySet())?:emptySet()
+        return privateDocumentsDir().listFiles().orEmpty().filter{it.isFile && !it.name.endsWith(".pending") && !trash.contains(privateDocumentUri(it).toString())}.sortedByDescending{it.lastModified()}
+    }
+    private fun viewerRemember(uri:Uri){
+        val file=privateDocumentFile(uri)?:return
+        val key=accountPrefKey("viewer_recent")
+        val names=runCatching{org.json.JSONArray(prefs.getString(key,"[]"))}.getOrDefault(org.json.JSONArray())
+        val ordered=(listOf(file.name)+(0 until names.length()).map{names.optString(it)}).distinct().take(40)
+        prefs.edit().putString(key,org.json.JSONArray(ordered).toString()).apply()
+    }
+    private fun showDocumentViewerHub(){
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
+        popupHeader(panel,"DOCNEXA • DOCUMENT STUDIO","All Document Viewer","Read files offline or browse device and cloud storage.")
+        val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.76f)).setNegativeButton("Close",null).create()
+        addPopupOption(panel,"document","Browse all files","Choose a document from the system file picker.",true){dialog.dismiss();documentViewerPicker.launch(arrayOf("*/*"))}
+        val categories=listOf(
+            Triple("PDF","PDF",arrayOf("application/pdf")),
+            Triple("W","Word",arrayOf("application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            Triple("X","Excel",arrayOf("application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            Triple("P","PowerPoint",arrayOf("application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation")),
+            Triple("gallery","Images",arrayOf("image/*")),
+            Triple("TXT","Text / CSV",arrayOf("text/*","application/rtf")),
+            Triple("ZIP","Archives",arrayOf("application/zip","application/x-zip-compressed")),
+            Triple("ALL","All formats",arrayOf("*/*"))
+        )
+        categories.chunked(2).forEach{pair->
+            val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+            pair.forEach{(symbol,title,mimes)->
+                val tile=LinearLayout(this).apply{
+                    orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=dp(86)
+                    setPadding(dp(7),dp(10),dp(7),dp(10));background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x223478F6),rounded(0xFFF1F6FF.toInt(),14,0xFFDCE7F5.toInt()),null)
+                    isClickable=true;isFocusable=true;setOnClickListener{dialog.dismiss();documentViewerPicker.launch(mimes)}
+                }
+                tile.addView(label(if(symbol=="gallery")"▧" else symbol,19f,0xFF2563EB.toInt(),true).apply{gravity=Gravity.CENTER})
+                tile.addView(gap(5));tile.addView(label(title,13f,0xFF172B4D.toInt(),true).apply{gravity=Gravity.CENTER})
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(dp(3),dp(4),dp(3),dp(4))})
+            }
+            panel.addView(row)
+        }
+        panel.addView(gap(8))
+        addPopupOption(panel,"document","My files","Browse and search files saved in this DocNexa account."){dialog.dismiss();showViewerLibrary("All")}
+        addPopupOption(panel,"↻","Recently viewed","Previously opened files saved inside DocNexa."){dialog.dismiss();showViewerLibrary("Recent")}
+        addPopupOption(panel,"♡","Favourites","Your starred local documents."){dialog.dismiss();showViewerLibrary("Favourites")}
+        panel.addView(label("Office preview reads text and worksheet values, not the original visual layout. Legacy Office and other formats can open in a compatible installed app.",11f,0xFF52627A.toInt()))
+        dialog.show()
+    }
+
+    private fun showViewerLibrary(mode:String){
+        val files=viewerLocalFiles()
+        val key=accountPrefKey("viewer_recent")
+        val recent=runCatching{org.json.JSONArray(prefs.getString(key,"[]"))}.getOrDefault(org.json.JSONArray())
+        val order=(0 until recent.length()).map{recent.optString(it)}
+        val stars=prefs.getStringSet(accountPrefKey("viewer_favourites"),emptySet())?:emptySet()
+        val available=when(mode){
+            "Recent"->order.mapNotNull{name->files.firstOrNull{it.name==name}}
+            "Favourites"->files.filter{stars.contains(it.name)}
+            else->files
+        }
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
+        val search=EditText(this).apply{hint="Search file names";setSingleLine(true)}
+        panel.addView(search);panel.addView(gap(8))
+        val result=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+        panel.addView(result)
+        val dialog=appDialog().setTitle(mode+" files").setView(toolDialogScroll(panel,0.74f)).setNegativeButton("Close",null).create()
+        fun refresh(){
+            result.removeAllViews()
+            val filtered=available.filter{it.name.contains(search.text.toString(),ignoreCase=true)}
+            result.addView(label(filtered.size.toString()+" file(s)"+if(filtered.size>150)" • showing first 150" else "",12f,0xFF64748B.toInt()))
+            if(filtered.isEmpty())result.addView(label("No matching saved files.",14f,0xFF52627A.toInt()))
+            filtered.take(150).forEach{file->
+                addPopupOption(result,file.extension.uppercase(Locale.ROOT).take(4),file.name,formatFileSize(file.length())){dialog.dismiss();openDocumentViewer(privateDocumentUri(file))}
+            }
+        }
+        search.addTextChangedListener(object:android.text.TextWatcher{
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){refresh()}
+            override fun afterTextChanged(s:android.text.Editable?)=Unit
+        })
+        refresh();dialog.show()
+    }
+
+    private fun openViewerExternal(uri:Uri,mime:String){
+        try{
+            val view=Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .apply{clipData=android.content.ClipData.newRawUri("Document",uri)}
+            val chooser=Intent.createChooser(view,"Open document").apply{
+                putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS,arrayOf(android.content.ComponentName(this@MainActivity,MainActivity::class.java)))
+            }
+            startActivity(chooser)
+        }catch(_:Exception){Toast.makeText(this,"Install a compatible viewer for this format.",Toast.LENGTH_LONG).show()}
+    }
+    private fun shareViewerFile(uri:Uri,mime:String){
+        try{
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM,uri)
+                .apply{clipData=android.content.ClipData.newRawUri("Document",uri)}.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"Share document"))
+        }catch(_:Exception){Toast.makeText(this,"No compatible sharing app.",Toast.LENGTH_LONG).show()}
+    }
+
+    private fun readViewerText(uri:Uri):String {
+        val bytes=contentResolver.openInputStream(uri)?.use{input->
+            val out=ByteArrayOutputStream();val buffer=ByteArray(8192)
+            while(true){val n=input.read(buffer);if(n<0)break;require(out.size()+n<=2*1024*1024){"Text preview supports up to 2 MB"};out.write(buffer,0,n)}
+            out.toByteArray()
+        }?:error("Cannot open text")
+        return DocumentViewerPlan.decodeText(bytes).take(500_000)
+    }
+    private fun readViewerArchive(uri:Uri):String {
+        val temp=java.io.File.createTempFile("viewer_zip_",".tmp",cacheDir)
+        try{
+            contentResolver.openInputStream(uri)?.use{input->temp.outputStream().use{out->
+                val buffer=ByteArray(32768);var total=0L
+                while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=64L*1024*1024){"ZIP listing supports files up to 64 MB"};out.write(buffer,0,n)}
+            }}?:error("Cannot read ZIP")
+            return java.util.zip.ZipFile(temp).use{zip->
+                val result=StringBuilder();val entries=zip.entries();var count=0
+                while(entries.hasMoreElements()&&count<1000){val e=entries.nextElement();count++;result.append(if(e.isDirectory)"Folder  " else "File  ").append(e.name.take(240)).append('\n')}
+                if(entries.hasMoreElements())result.append("\nOnly the first 1,000 entries are shown.")
+                result.toString().ifBlank{"Empty archive"}
+            }
+        }finally{temp.delete()}
+    }
+    private fun openDocumentViewer(uri:Uri){
+        if(uri.scheme!="content" || (uri.authority=="$packageName.fileprovider" && privateDocumentFile(uri)==null)){
+            Toast.makeText(this,"This file is unavailable in the current account.",Toast.LENGTH_LONG).show();return
+        }
+        val owner=signedInUserId()
+        val name=viewerName(uri)
+        val mime=viewerMime(uri,name)
+        val kind=DocumentViewerPlan.kind(name,mime)
+        viewerRemember(uri)
+        activeDocumentViewer?.dismiss()
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
+        val detail=label(name,15f,0xFF172B4D.toInt(),true)
+        panel.addView(detail)
+        val state=label("Opening document…",12f,0xFF52627A.toInt())
+        panel.addView(state);panel.addView(gap(8))
+        val controls=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        val body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+        panel.addView(controls);panel.addView(body)
+        val actionRow=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        val more=nativeButton(this,ButtonRole.Secondary).apply{text="More actions"}
+        val share=nativeButton(this,ButtonRole.Primary).apply{text="Share"}
+        actionRow.addView(share,LinearLayout.LayoutParams(0,-2,1f));actionRow.addView(more,LinearLayout.LayoutParams(0,-2,1f))
+        panel.addView(gap(6));panel.addView(actionRow)
+        val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.79f)).setNegativeButton("Close",null).create()
+        activeDocumentViewer=dialog
+        var currentBitmap:Bitmap?=null
+        var generation=0
+        var textContent:String?=null
+        fun valid()=dialog.isShowing&&!isFinishing&&!isDestroyed&&owner==signedInUserId()
+        share.setOnClickListener{if(valid())shareViewerFile(uri,mime)}
+        more.setOnClickListener{
+            if(!valid())return@setOnClickListener
+            val actions=mutableListOf<Pair<String,()->Unit>>()
+            actions.add("Download a copy" to {saveResultAs(ExportResultItem(uri.toString(),name,mime))})
+            actions.add("Save to Google Drive" to {confirmDriveSave(ExportResultItem(uri.toString(),name,mime))})
+            if(kind==DocumentViewerPlan.Kind.PDF){actions.add("Print PDF" to {printPdfDocument(uri)});actions.add("Edit PDF" to {dialog.dismiss();showPdfEditor(uri)})}
+            if(kind==DocumentViewerPlan.Kind.IMAGE)actions.add("Create PDF from image" to {dialog.dismiss();showImageImportPreview(listOf(uri))})
+            if(textContent!=null && kind!=DocumentViewerPlan.Kind.ZIP)actions.add("Create text PDF" to {
+                if(requirePremiumTool("Document viewer text PDF")){val content=textContent.orEmpty();dialog.dismiss();createPdfFromText(content,name.substringBeforeLast('.').take(70))}
+            })
+            val local=privateDocumentFile(uri)
+            if(local!=null){
+                val key=accountPrefKey("viewer_favourites")
+                val stars=(prefs.getStringSet(key,emptySet())?:emptySet()).toMutableSet()
+                actions.add((if(stars.contains(local.name))"Remove from favourites" else "Add to favourites") to {
+                    if(!stars.add(local.name))stars.remove(local.name)
+                    prefs.edit().putStringSet(key,stars).apply()
+                    Toast.makeText(this,"Favourites updated",Toast.LENGTH_SHORT).show()
+                })
+            }
+            actions.add("Open in another app" to {openViewerExternal(uri,mime)})
+            appDialog().setTitle("Document actions").setPremiumItems(actions.map{it.first}.toTypedArray()){_,index->if(valid())actions[index].second()}.setNegativeButton("Cancel",null).show()
+        }
+        fun showText(value:String,notice:String){
+            textContent=value
+            state.text=notice
+            val search=EditText(this).apply{hint="Find in preview";setSingleLine(true)}
+            val result=label("",11f,0xFF52627A.toInt())
+            val text=label(value,14f,0xFF172B4D.toInt()).apply{setTextIsSelectable(true);setPadding(dp(10),dp(10),dp(10),dp(10))}
+            val textScroll=ScrollView(this).apply{addView(text);background=rounded(0xFFF5F8FF.toInt(),12,0xFFDCE7F5.toInt())}
+            val find=nativeButton(this,ButtonRole.Secondary).apply{text="Find next"}
+            var offset=0;var lastQuery=""
+            find.setOnClickListener{
+                val query=search.text.toString().trim()
+                if(query.isEmpty())return@setOnClickListener
+                if(lastQuery!=query){offset=0;lastQuery=query}
+                var at=value.indexOf(query,offset,ignoreCase=true)
+                if(at<0)at=value.indexOf(query,0,ignoreCase=true)
+                if(at<0){result.text="No match";return@setOnClickListener}
+                val span=android.text.SpannableString(value)
+                span.setSpan(android.text.style.BackgroundColorSpan(0xFFFFDB75.toInt()),at,at+query.length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text.text=span;offset=at+query.length;result.text="Match at character "+(at+1)
+                text.post{val layout=text.layout;if(layout!=null)textScroll.smoothScrollTo(0,layout.getLineTop(layout.getLineForOffset(at)))}
+            }
+            body.addView(search);body.addView(find);body.addView(result)
+            body.addView(textScroll,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.39f).toInt()))
+        }
+        dialog.setOnDismissListener{
+            generation++
+            currentBitmap?.recycle();currentBitmap=null
+            if(activeDocumentViewer===dialog)activeDocumentViewer=null
+        }
+        dialog.show()
+        if(kind==DocumentViewerPlan.Kind.PDF||kind==DocumentViewerPlan.Kind.IMAGE){
+            val image=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;adjustViewBounds=true;contentDescription="Document page preview"}
+            val vertical=ScrollView(this).apply{isFillViewport=false;addView(image,ViewGroup.LayoutParams(-1,-2))}
+            val horizontal=HorizontalScrollView(this).apply{addView(vertical,ViewGroup.LayoutParams(-2,-1));isFillViewport=true}
+            body.addView(horizontal,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.43f).toInt()))
+            var page=0;var count=1;var zoom=1f
+            val prev=nativeButton(this).apply{text="‹";isEnabled=false;contentDescription="Previous page"}
+            val next=nativeButton(this).apply{text="›";isEnabled=false;contentDescription="Next page"}
+            val minus=nativeButton(this).apply{text="−";contentDescription="Zoom out"}
+            val plus=nativeButton(this).apply{text="+";contentDescription="Zoom in"}
+            if(kind==DocumentViewerPlan.Kind.PDF){controls.addView(prev,LinearLayout.LayoutParams(0,-2,1f));controls.addView(next,LinearLayout.LayoutParams(0,-2,1f))}
+            controls.addView(minus,LinearLayout.LayoutParams(0,-2,1f));controls.addView(plus,LinearLayout.LayoutParams(0,-2,1f))
+            fun applyZoom(){
+                val width=(resources.displayMetrics.widthPixels*0.78f*zoom).toInt().coerceAtLeast(dp(120))
+                vertical.layoutParams=vertical.layoutParams.apply{this.width=width}
+                image.layoutParams=image.layoutParams.apply{this.width=width}
+            }
+            fun render(){
+                val request=++generation;val index=page
+                prev.isEnabled=false;next.isEnabled=false
+                state.text=if(kind==DocumentViewerPlan.Kind.PDF)"Rendering page…" else "Opening image…"
+                viewerReadExecutor.execute{
+                    var bitmap:Bitmap?=null
+                    try{
+                        var pages=1
+                        if(kind==DocumentViewerPlan.Kind.PDF){
+                            val fd=contentResolver.openFileDescriptor(uri,"r")?:error("Cannot open PDF")
+                            try{
+                                PdfRenderer(fd).use{renderer->
+                                    pages=renderer.pageCount
+                                    require(index in 0 until pages){"No PDF pages"}
+                                    renderer.openPage(index).use{p->
+                                        val scale=minOf(3f,2200f/maxOf(p.width,p.height).toFloat())
+                                        val target=Bitmap.createBitmap((p.width*scale).toInt().coerceAtLeast(1),(p.height*scale).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
+                                        bitmap=target;target.eraseColor(android.graphics.Color.WHITE)
+                                        p.render(target,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    }
+                                }
+                            }catch(e:Exception){runCatching{fd.close()};throw e}
+                        }else bitmap=decodeImageSafely(uri,3000,exportPixelBudget(8_000_000L,12L))
+                        val rendered=bitmap?:error("No preview")
+                        runOnUiThread{
+                            if(!valid()||request!=generation){rendered.recycle();return@runOnUiThread}
+                            image.setImageBitmap(null);currentBitmap?.recycle();currentBitmap=rendered;image.setImageBitmap(rendered)
+                            count=pages;state.text=if(kind==DocumentViewerPlan.Kind.PDF)"Page "+(index+1)+" of "+count else rendered.width.toString()+" × "+rendered.height+" preview"
+                            prev.isEnabled=index>0;next.isEnabled=index+1<count;applyZoom()
+                        }
+                    }catch(e:Exception){
+                        bitmap?.recycle();runOnUiThread{if(valid()&&request==generation)state.text="Preview unavailable. Use More actions to open in another app."}
+                    }catch(_:OutOfMemoryError){bitmap?.recycle();runOnUiThread{if(valid()&&request==generation)state.text="Not enough memory for preview. Close other documents."}}
+                }
+            }
+            prev.setOnClickListener{if(valid()&&page>0){page--;render()}}
+            next.setOnClickListener{if(valid()&&page+1<count){page++;render()}}
+            minus.setOnClickListener{zoom=(zoom-0.25f).coerceAtLeast(0.75f);applyZoom()}
+            plus.setOnClickListener{zoom=(zoom+0.25f).coerceAtMost(3f);applyZoom()}
+            applyZoom();render()
+        }else if(kind==DocumentViewerPlan.Kind.OFFICE||kind==DocumentViewerPlan.Kind.TEXT||kind==DocumentViewerPlan.Kind.ZIP){
+            viewerReadExecutor.execute{
+                try{
+                    val value=when(kind){
+                        DocumentViewerPlan.Kind.OFFICE->readOfficeViewerText(uri,DocumentViewerPlan.officeExtension(name,mime))
+                        DocumentViewerPlan.Kind.ZIP->readViewerArchive(uri)
+                        else->readViewerText(uri)
+                    }
+                    runOnUiThread{if(valid())showText(value,when(kind){
+                        DocumentViewerPlan.Kind.OFFICE->"Offline text preview • original formatting, charts and images not shown"
+                        DocumentViewerPlan.Kind.ZIP->"Archive contents only • no files extracted"
+                        else->"Read-only text preview • up to 500,000 characters"
+                    })}
+                }catch(_:Exception){runOnUiThread{if(valid())state.text="Preview unavailable or file exceeds preview limits. Open in another app."}}
+                catch(_:OutOfMemoryError){runOnUiThread{if(valid())state.text="Not enough memory to preview this file."}}
+            }
+        }else{
+            state.text="This format requires a compatible installed app for a full visual preview."
+            addPopupOption(body,"document","Open in another app","Open the original document without conversion.",true){if(valid())openViewerExternal(uri,mime)}
         }
     }
 
