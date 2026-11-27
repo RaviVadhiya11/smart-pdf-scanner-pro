@@ -73,4 +73,35 @@ class PrivateDocumentStoreTest {
         assertEquals("keep", renamed.readText())
         assertEquals(1, folder.listFiles()!!.size)
     }
+    @Test fun writerMayCloseStreamBeforeStoreSync() = inFolder { folder ->
+        val result = PrivateDocumentStore.save(folder, "Scan.pdf") { stream ->
+            stream.write("complete PDF".toByteArray())
+            stream.close()
+            stream.close()
+        }
+        assertEquals("complete PDF", result.readText())
+        assertTrue(folder.listFiles()!!.none { it.extension == "pending" })
+    }
+    @Test fun zipWriterClosesStreamAndArchiveRemainsReadable() = inFolder { folder ->
+        val result = PrivateDocumentStore.save(folder, "Images.zip") { stream ->
+            java.util.zip.ZipOutputStream(stream).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry("page.txt"))
+                zip.write("original".toByteArray())
+                zip.closeEntry()
+            }
+        }
+        java.util.zip.ZipFile(result).use { zip ->
+            assertEquals("original", zip.getInputStream(zip.getEntry("page.txt")).bufferedReader().use { it.readText() })
+        }
+    }
+    @Test fun closedWriterFailureStillPublishesNothing() = inFolder { folder ->
+        assertThrows(IOException::class.java) {
+            PrivateDocumentStore.save(folder, "Scan.pdf") { stream ->
+                stream.write(1)
+                stream.close()
+                throw IOException("writer failed")
+            }
+        }
+        assertEquals(0, folder.listFiles()!!.size)
+    }
 }

@@ -38,7 +38,15 @@ internal object PrivateDocumentStore {
         var published = false
         try {
             FileOutputStream(pending).use { output ->
-                writeContents(output)
+                // PDF and ZIP writers may close their supplied stream. The store owns
+                // the actual file descriptor until flush, fsync and atomic publication.
+                val shield = object : OutputStream() {
+                    override fun write(b: Int) = output.write(b)
+                    override fun write(b: ByteArray, off: Int, len: Int) = output.write(b, off, len)
+                    override fun flush() = output.flush()
+                    override fun close() = flush()
+                }
+                writeContents(shield)
                 output.flush()
                 output.fd.sync()
             }

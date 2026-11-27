@@ -381,58 +381,98 @@ class MainActivity : AppCompatActivity() {
     }
     private val qrCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) openLiveQrCamera() else Toast.makeText(this, "Camera permission is required for live QR scanning.", Toast.LENGTH_LONG).show() }
 
+    private val scanExportBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            val pages = scan?.pages
-            if (!pages.isNullOrEmpty()) {
-                status.text = "Creating print-ready A4 PDF…"
-                Thread {
-                    val pageUris = pages.map { it.imageUri }
-                    val savedImages = saveOriginalScannedImages(pageUris)
-                    val saved = createPrintReadyScanPdf(pageUris)
-                    runOnUiThread {
-                        if (!isFinishing && !isDestroyed) {
-                            if (saved != null) {
-                                lastPdf = saved
-                                notifyDocumentReady(saved)
-                                prefs.edit().putBoolean("has_completed_first_scan", true).apply()
-                                buildScreen()
-                                showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
-                                if (savedImages > 0) Toast.makeText(this, "$savedImages original high-quality scan image(s) also saved in DocNexa storage.", Toast.LENGTH_LONG).show()
-                            } else {
-                                status.text = "PDF save failed"
-                                Toast.makeText(this, "High-quality PDF could not be created. Please scan again.", Toast.LENGTH_LONG).show()
-                            }
+        if (result.resultCode != RESULT_OK) {
+            status.text = "Scan cancelled."
+            return@registerForActivityResult
+        }
+        val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+        val pageUris = scan?.pages.orEmpty().map { it.imageUri }
+        val scannerPdf = scan?.pdf
+        if(pageUris.isEmpty() && scannerPdf==null){
+            status.text="No scanned pages were returned."
+            return@registerForActivityResult
+        }
+        if(!scanExportBusy.compareAndSet(false,true))return@registerForActivityResult
+        val owner=signedInUserId()
+        val directory=privateDocumentsDir()
+        val folder=selectedFolder
+        val mode=prefs.getInt("scanner_filter_mode",0).coerceIn(0,3)
+        val progress=appDialog().setTitle("Preparing your scan")
+            .setMessage("Preserving original images…").setCancelable(false).create()
+        progress.show()
+        status.text="Creating high-quality PDF…"
+        fun update(message:String){runOnUiThread{if(!isFinishing&&!isDestroyed&&progress.isShowing)progress.setMessage(message)}}
+        Thread {
+            var originals=emptyList<Uri>()
+            var saved:Uri?=null
+            var quality="Print-ready A4"
+            val errors=mutableListOf<String>()
+            try {
+                val stamp=System.currentTimeMillis()
+                val stable=pageUris.mapIndexed{index,uri->
+                    try{
+                        val target=PrivateDocumentStore.save(directory,"DocNexa_Scan_${stamp}_Page_${index+1}.jpg"){stream->
+                            (contentResolver.openInputStream(uri)?:error("Cannot read scanned page")).use{input->require(input.copyTo(stream)>0){"Empty scan image"}}
                         }
+                        privateDocumentUri(target)
+                    }catch(e:Exception){errors.add("Image "+(index+1)+": "+e.javaClass.simpleName);null}
+                }
+                originals=stable.filterNotNull()
+                val sources=pageUris.mapIndexed{index,uri->stable[index]?:uri}
+                fun attempt(stage:String,block:()->Uri):Uri?=try{block()}catch(e:Exception){
+                    errors.add(stage+": "+e.javaClass.simpleName);android.util.Log.w("DocNexaScan",stage+" failed",e);null
+                }catch(e:OutOfMemoryError){
+                    errors.add(stage+": low memory");android.util.Log.w("DocNexaScan",stage+" memory limit");null
+                }
+                if(sources.isNotEmpty()){
+                    update("Creating A4 PDF • preserving page detail…")
+                    saved=attempt("High quality"){createPrintReadyScanPdf(sources,directory,mode,6000,16_000_000L,stamp)}
+                    if(saved==null && mode!=0){
+                        update("Retrying without the additional filter…")
+                        saved=attempt("Original images"){createPrintReadyScanPdf(sources,directory,0,6000,16_000_000L,stamp)}
+                        if(saved!=null)quality="Print-ready A4 • original colors"
                     }
-                }.start()
-            } else {
-                val pdf = scan?.pdf
-                if (pdf != null) {
-                    status.text = "Saving scanned PDF…"
-                    Thread {
-                        val saved = copyScannedPdf(pdf.uri)
-                        runOnUiThread {
-                            if (!isFinishing && !isDestroyed) {
-                                if (saved != null) {
-                                    lastPdf = saved
-                                    notifyDocumentReady(saved)
-                                    prefs.edit().putBoolean("has_completed_first_scan", true).apply()
-                                    buildScreen()
-                                    showExportSuccess(saved, saved.lastPathSegment ?: "Scanned_Document.pdf", "application/pdf")
-                                } else {
-                                    status.text = "PDF save failed"
-                                    Toast.makeText(this, "PDF could not be saved. Please try again.", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    }.start()
-                } else status.text = "No scanned pages were returned."
+                }
+                if(saved==null && scannerPdf!=null){
+                    update("Saving the scanner's original PDF…")
+                    saved=attempt("Scanner PDF"){copyScannedPdf(scannerPdf.uri,directory,scannerPdf.pageCount,stamp)}
+                    if(saved!=null)quality="Original scanner PDF • scanner page size"
+                }
+                if(saved==null && sources.isNotEmpty()){
+                    update("Retrying with memory-safe page resolution…")
+                    saved=attempt("Compatibility PDF"){createPrintReadyScanPdf(sources,directory,0,2400,4_000_000L,stamp)}
+                    if(saved!=null)quality="Compatibility PDF • reduced resolution"
+                }
+            }catch(e:Exception){errors.add(e.javaClass.simpleName);android.util.Log.w("DocNexaScan","Scan export failed",e)}
+            finally{
+                scanExportBusy.set(false)
+                val finalPdf=saved
+                val imageCount=originals.size
+                runOnUiThread{
+                    if(isFinishing||isDestroyed)return@runOnUiThread
+                    progress.dismiss()
+                    if(owner!=signedInUserId())return@runOnUiThread
+                    if(finalPdf!=null){
+                        lastPdf=finalPdf
+                        folderAssignments[finalPdf.toString()]=folder
+                        prefs.edit().putString(accountPrefKey("folder_assignments"),folderAssignmentSnapshot()).putBoolean("has_completed_first_scan",true).apply()
+                        notifyDocumentReady(finalPdf)
+                        buildScreen()
+                        showExportSuccess(finalPdf,finalPdf.lastPathSegment?:"Scanned_Document.pdf","application/pdf")
+                        Toast.makeText(this,quality+" • "+imageCount+" original image(s) saved",Toast.LENGTH_LONG).show()
+                    }else{
+                        status.text="PDF save failed"
+                        appDialog().setTitle("Scan export could not finish")
+                            .setMessage("Original images saved: "+imageCount+". If available, use Image to PDF to recover these pages without scanning again. Check free storage.\n\n"+errors.distinct().take(6).joinToString("\n"))
+                            .setPositiveButton("OK",null).show()
+                    }
+                }
             }
-        } else status.text = "Scan cancelled."
+        }.start()
     }
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -10100,104 +10140,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDocumentScan() {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(10))
-            background = rounded(0xFFF7F9FE.toInt(), 24)
+        if(scanExportBusy.get()){
+            Toast.makeText(this,"A scan is already being saved.",Toast.LENGTH_SHORT).show()
+            return
         }
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = gradient(0xFF092B63.toInt(), 0xFF126A91.toInt(), 20)
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
+        popupHeader(panel,"DOCNEXA • SMART SCAN","High-quality document scan","Capture, crop and preserve clear original pages.")
+        val dialog=appDialog().setTitle("Scan style").setView(toolDialogScroll(panel,0.74f)).setNegativeButton("Cancel",null).create()
+        addPopupOption(panel,"camera","Natural Color","Preserve colors and fine detail; best for photos and receipts.",true){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
         }
-        header.addView(label("✦  DOCNEXA SMART SCAN", 12f, 0xFFBDEBFF.toInt(), true))
-        header.addView(gap(8))
-        header.addView(label("Choose your scan style", 22f, android.graphics.Color.WHITE, true))
-        header.addView(gap(5))
-        header.addView(label("Select the finish that suits your document.", 13f, 0xFFDCEBFF.toInt()))
-        panel.addView(header, LinearLayout.LayoutParams(-1, -2))
-        panel.addView(gap(16))
-
-        fun optionCard(
-            icon: String,
-            title: String,
-            description: String,
-            tag: String,
-            accent: Int,
-            onChoose: () -> Unit
-        ): LinearLayout {
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(15), dp(16), dp(15))
-                background = rounded(0xFFFFFFFF.toInt(), 18, 0xFFDCE5F2.toInt())
-                isClickable = true
-                isFocusable = true
-                elevation = dp(2).toFloat()
-                setOnClickListener { onChoose() }
-            }
-            val top = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val symbol = TextView(this).apply {
-                text = icon
-                textSize = 25f
-                gravity = Gravity.CENTER
-                setTextColor(accent)
-                background = rounded(0xFFEAF2FF.toInt(), 13)
-                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
-            }
-            top.addView(symbol)
-            val titleColumn = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), 0, 0, 0)
-            }
-            titleColumn.addView(label(title, 16f, 0xFF142B4D.toInt(), true))
-            titleColumn.addView(gap(3))
-            titleColumn.addView(label(description, 12f, 0xFF61718A.toInt()))
-            top.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
-            val pill = TextView(this).apply {
-                text = tag
-                textSize = 10f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setTextColor(accent)
-                setPadding(dp(9), dp(6), dp(9), dp(6))
-                background = rounded(0xFFEAF2FF.toInt(), 20)
-            }
-            top.addView(pill)
-            card.addView(top)
-            card.addView(gap(10))
-            card.addView(label("Tap to continue  →", 12f, accent, true))
-            return card
+        addPopupOption(panel,"✦","Enhanced Document","Google scanner cleanup for printed documents and unwanted marks."){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
         }
-
-        panel.addView(optionCard(
-            "◉",
-            "Natural Color",
-            "Keeps the original look and colors.",
-            "RECOMMENDED",
-            0xFF087F9B.toInt()
-        ) {
-            launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
-        }, LinearLayout.LayoutParams(-1, -2))
-        panel.addView(gap(12))
-        panel.addView(optionCard(
-            "✧",
-            "Enhanced Document",
-            "Document cleanup and edge enhancement.",
-            "CLEANUP",
-            0xFF6546C8.toInt()
-        ) {
-            launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-        }, LinearLayout.LayoutParams(-1, -2))
-        panel.addView(gap(14))
-        panel.addView(label("Tip: Use Natural Color for photos, receipts and colored pages. Choose Enhanced for printed text documents.", 12f, 0xFF64748B.toInt()))
-
-        appDialog()
-            .setView(panel)
-            .setNegativeButton("Cancel", null)
-            .show()
+        addPopupOption(panel,"◐","Scan with Filters","Choose color, grayscale or other available scanner filters."){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
+        }
+        panel.addView(label("Original JPEG pages are saved separately. A4 PDF export fits the full page without cropping. Quality depends on the camera and source; use good light and review focus before saving.",12f,0xFF52627A.toInt()))
+        dialog.show()
     }
 
     private fun launchDocumentScan(scannerMode: Int) {
@@ -10870,30 +10830,6 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { null }
     }
 
-    /**
-     * Saves the scanner's original JPEG page files without resizing or recompressing them.
-     * This preserves the best image quality provided by the document scanner.
-     */
-    private fun saveOriginalScannedImages(pageUris: List<Uri>): Int {
-        var savedCount = 0
-        pageUris.forEachIndexed { index, uri ->
-            try {
-                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: error("Cannot read scanned page")
-                val name = "DocNexa_Scan_Page_${index + 1}_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
-                if (saveBytesPrivately(bytes, name) != null) savedCount++
-            } catch (_: Exception) {
-                // Keep processing remaining pages; PDF creation is independent.
-            }
-        }
-        return savedCount
-    }
-
-    /**
-     * Builds an A4-printable PDF from the scanner's original JPEG page files.
-     * Each page is decoded at up to 4800px on its longest edge, never JPEG-recompressed,
-     * fitted proportionally to an A4 page, and kept inside printer-safe margins.
-     */
     private fun showScannerFilterSettings() {
         val names = arrayOf("Original color", "Grayscale", "High contrast B&W", "Enhanced color")
         var selected = prefs.getInt("scanner_filter_mode", 0).coerceIn(0, names.lastIndex)
@@ -10996,40 +10932,51 @@ class MainActivity : AppCompatActivity() {
         return output
     }
 
-    private fun createPrintReadyScanPdf(pageUris: List<Uri>): Uri? {
-        return try {
-            require(pageUris.isNotEmpty() && pageUris.size <= 100) { "Select 1–100 scanned pages" }
-            val name = "DocNexa_High_Quality_${System.currentTimeMillis()}.pdf"
-            val mode = prefs.getInt("scanner_filter_mode", 0)
-            val target = PrivateDocumentStore.save(privateDocumentsDir(), name) { stream ->
-                PDDocument(MemoryUsageSetting.setupMixed(16L * 1024 * 1024)).use { doc ->
-                    pageUris.forEach { uri ->
-                        val image = qualityPdfImage(doc, uri, null, 6000, 16_000_000L, mode)
-                        val landscape = image.width > image.height
-                        addQualityImagePage(doc, image, if (landscape) 842 else 595,
-                            if (landscape) 595 else 842, 18f, false)
-                    }
-                    doc.save(stream)
+    private fun verifyScanPdf(file:java.io.File,expectedPages:Int):Uri {
+        try {
+            val fd=android.os.ParcelFileDescriptor.open(file,android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+            try {
+                PdfRenderer(fd).use{renderer->
+                    require(renderer.pageCount>0 && (expectedPages<=0 || renderer.pageCount==expectedPages)){"Incomplete scanned PDF"}
                 }
-            }
-            privateDocumentUri(target).also { assignPdf(it) }
-        } catch (e: Exception) {
-            runOnUiThread {
-                status.text = "High-quality PDF creation failed"
-                Toast.makeText(this, e.localizedMessage ?: "Could not create high-quality PDF", Toast.LENGTH_LONG).show()
-            }
-            null
-        }
+            }catch(e:Exception){runCatching{fd.close()};throw e}
+            return privateDocumentUri(file)
+        }catch(e:Exception){file.delete();throw e}
     }
 
-    private fun copyScannedPdf(source: Uri): Uri? {
-        return try {
-            val name = "Document_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.pdf"
-            val bytes = contentResolver.openInputStream(source)?.use { it.readBytes() } ?: error("Unable to read scanned PDF")
-            saveBytesPrivately(bytes, name)
-        } catch (e: Exception) {
-            null
+    private fun createPrintReadyScanPdf(pageUris:List<Uri>,directory:java.io.File,mode:Int,maxEdge:Int,maxPixels:Long,stamp:Long):Uri {
+        require(pageUris.isNotEmpty() && pageUris.size<=100){"Select 1–100 scanned pages"}
+        val name=if(maxEdge<=2400)"DocNexa_Compatible_"+stamp+".pdf" else "DocNexa_High_Quality_"+stamp+".pdf"
+        val target=PrivateDocumentStore.save(directory,name){stream->
+            PDDocument(MemoryUsageSetting.setupMixed(16L*1024*1024).setTempDir(cacheDir)).use{doc->
+                pageUris.forEach{uri->
+                    // Embed eligible original JPEG bytes directly. Decode only when orientation,
+                    // filters or size require it; cap decoded pixels to the current memory budget.
+                    val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
+                    contentResolver.openInputStream(uri)?.use{BitmapFactory.decodeStream(it,null,bounds)}
+                    val orientation=runCatching{contentResolver.openInputStream(uri)?.use{
+                        androidx.exifinterface.media.ExifInterface(it).getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,1)
+                    }?:1}.getOrDefault(0)
+                    val direct=mode==0 && orientation==1 && bounds.outMimeType=="image/jpeg" &&
+                        bounds.outWidth>0 && bounds.outHeight>0 && maxOf(bounds.outWidth,bounds.outHeight)<=maxEdge &&
+                        bounds.outWidth.toLong()*bounds.outHeight<=maxPixels
+                    val image=if(direct){
+                        contentResolver.openInputStream(uri)?.use{com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory.createFromStream(doc,it)}?:error("Cannot read scanned JPEG")
+                    }else qualityPdfImage(doc,uri,null,maxEdge,exportPixelBudget(maxPixels,if(mode==0)16L else 24L),mode)
+                    val landscape=image.width>image.height
+                    addQualityImagePage(doc,image,if(landscape)842 else 595,if(landscape)595 else 842,18f,false)
+                }
+                doc.save(stream)
+            }
         }
+        return verifyScanPdf(target,pageUris.size)
+    }
+
+    private fun copyScannedPdf(source:Uri,directory:java.io.File,expectedPages:Int,stamp:Long):Uri {
+        val file=PrivateDocumentStore.save(directory,"DocNexa_Original_"+stamp+".pdf"){stream->
+            (contentResolver.openInputStream(source)?:error("Cannot read scanned PDF")).use{input->require(input.copyTo(stream)>0){"Empty scanned PDF"}}
+        }
+        return verifyScanPdf(file,expectedPages)
     }
 
     private fun createSearchableOcrPdf(uri: Uri) {
