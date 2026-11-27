@@ -492,10 +492,10 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) printPdfDocument(uri)
     }
 
-    private fun printPdfDocument(uri: Uri) {
+    private fun printPdfDocument(uri: Uri, invoiceA4: Boolean = false) {
         try {
             val manager = getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
-            val displayName = "DocNexa PDF"
+            val displayName = if(invoiceA4) (privateDocumentFile(uri)?.name ?: "DocNexa Invoice.pdf") else "DocNexa PDF"
             val adapter = object : android.print.PrintDocumentAdapter() {
                 override fun onLayout(
                     oldAttributes: android.print.PrintAttributes?,
@@ -512,7 +512,7 @@ class MainActivity : AppCompatActivity() {
                         val descriptor = contentResolver.openFileDescriptor(uri, "r")
                             ?: throw java.io.IOException("Cannot open PDF")
                         val count = PdfRenderer(descriptor).use { it.pageCount }
-                        val info = android.print.PrintDocumentInfo.Builder("DocNexa_Document.pdf")
+                        val info = android.print.PrintDocumentInfo.Builder(if(invoiceA4) displayName else "DocNexa_Document.pdf")
                             .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
                             .setPageCount(count)
                             .build()
@@ -570,7 +570,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            manager.print(displayName, adapter, android.print.PrintAttributes.Builder().build())
+            val attributes=android.print.PrintAttributes.Builder()
+            if(invoiceA4) attributes.setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4).setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
+            manager.print(displayName, adapter, attributes.build())
         } catch (e: Exception) {
             Toast.makeText(this, e.localizedMessage ?: "Printing unavailable", Toast.LENGTH_LONG).show()
         }
@@ -715,6 +717,11 @@ class MainActivity : AppCompatActivity() {
         pendingDriveImportAccount = savedInstanceState?.getString("drive_import_account")
         directDriveAccount = savedInstanceState?.getString("direct_drive_account")
         directDriveResolutionPending = directDriveAccount != null
+        directDriveTarget = savedInstanceState?.getString("direct_drive_target")?.let{Uri.parse(it)}
+        savedInstanceState?.getBundle("invoice_ready")?.let{state->window.decorView.post{
+            val uri=state.getString("uri")?.let{Uri.parse(it)}
+            if(uri!=null)showInvoiceReady(uri,state.getString("kind").orEmpty(),state.getString("number").orEmpty(),state.getString("total").orEmpty(),state.getString("payment").orEmpty(),state.getInt("pages"),state.getString("owner").orEmpty())
+        }}
         val resultUris = savedInstanceState?.getStringArrayList("result_uris")
         val resultNames = savedInstanceState?.getStringArrayList("result_names")
         val resultMimes = savedInstanceState?.getStringArrayList("result_mimes")
@@ -1986,7 +1993,11 @@ class MainActivity : AppCompatActivity() {
         outState.putString("result_pending_name", pendingResultName)
         outState.putString("drive_backup_account", pendingDriveBackupAccount)
         outState.putString("drive_import_account", pendingDriveImportAccount)
-        if (directDriveResolutionPending) outState.putString("direct_drive_account", directDriveAccount)
+        if (directDriveResolutionPending) {
+            outState.putString("direct_drive_account", directDriveAccount)
+            outState.putString("direct_drive_target",directDriveTarget?.toString())
+        }
+        if(invoiceReadyDialog?.isShowing==true)outState.putBundle("invoice_ready",invoiceReadyState)
         if (exportResultDialog?.isShowing == true) {
             val files = exportResults.items
             outState.putStringArrayList("result_uris", ArrayList(files.map { it.uri }))
@@ -2003,6 +2014,7 @@ class MainActivity : AppCompatActivity() {
         playBillingClient?.endConnection()
         premiumAdDisposers.toList().forEach { it() }
         exportResultDialog?.dismiss()
+        invoiceReadyDialog?.dismiss()
         pagePreviewExecutor.shutdownNow()
         closeQrCamera()
         cameraExecutor.shutdownNow()
@@ -6105,7 +6117,7 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread{
                             if(!isFinishing&&!isDestroyed&&dialog.isShowing){
                                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true
-                                showInvoicePreview(draft,data,owner,pro)
+                                showInvoicePreview(draft,data,owner,pro) { dialog.dismiss() }
                             }
                         }
                     }catch(e:Exception){runOnUiThread{if(dialog.isShowing){dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true;Toast.makeText(this,e.message?:"PDF creation failed",Toast.LENGTH_LONG).show()}}}
@@ -6114,7 +6126,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showInvoicePreview(draft:InvoiceDocument.Draft,data:ByteArray,owner:String,pro:Boolean){
+    private fun showInvoicePreview(draft:InvoiceDocument.Draft,data:ByteArray,owner:String,pro:Boolean,onSaved:()->Unit){
         if(owner!=signedInUserId())return
         val temp=java.io.File.createTempFile("invoice_preview_",".pdf",cacheDir)
         try{temp.writeBytes(data)}catch(e:Exception){temp.delete();Toast.makeText(this,"Could not preview invoice",Toast.LENGTH_LONG).show();return}
@@ -6149,10 +6161,100 @@ class MainActivity : AppCompatActivity() {
             if(owner!=signedInUserId()){dialog.dismiss();return@setOnClickListener}
             if(pro&&!requirePremiumTool("Premium invoice export"))return@setOnClickListener
             val prefix="Billing_"+draft.kind.replace(" ","_")+"_"+draft.number.replace(Regex("[^A-Za-z0-9_-]"),"_").take(24)
-            val saved=savePdfBytes(data,prefix)
-            if(saved!=null){recordBillingExport(draft,saved);dialog.dismiss();Toast.makeText(this,"Invoice saved. Share or print from the result screen.",Toast.LENGTH_LONG).show()}
-            else Toast.makeText(this,"Could not save PDF",Toast.LENGTH_LONG).show()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
+            val stamp=SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(Date())
+            val saved=saveBytesPrivately(data,prefix+"_"+stamp+".pdf")
+            if(saved!=null){
+                val pageCount=renderer.pageCount
+                val reportSaved=runCatching{recordBillingExport(draft,saved)}.isSuccess
+                dialog.dismiss();onSaved()
+                showInvoiceReady(saved,draft.kind,draft.number,InvoiceDocument.format(amounts.total),
+                    if(InvoiceDocument.paymentTracked(draft.kind)) InvoiceDocument.paymentStatus(amounts.total,draft.paid) else "",
+                    pageCount,owner)
+                if(!reportSaved)Toast.makeText(this,"PDF saved, but billing report record could not be updated.",Toast.LENGTH_LONG).show()
+            } else {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true
+                Toast.makeText(this,"Could not save PDF",Toast.LENGTH_LONG).show()
+            }
         }
+    }
+
+    private var invoiceReadyDialog: AlertDialog? = null
+    private var invoiceReadyStatus: TextView? = null
+    private var invoiceReadyState: Bundle? = null
+
+    private fun showInvoiceReady(uri:Uri,kind:String,number:String,total:String,payment:String,pages:Int,owner:String) {
+        val file=privateDocumentFile(uri) ?: return
+        if(owner!=signedInUserId() || isFinishing || isDestroyed)return
+        invoiceReadyDialog?.dismiss()
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(12))}
+        val hero=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(16),dp(16),dp(16))
+            background=gradient(0xFF073B91.toInt(),0xFF06245F.toInt(),18)
+        }
+        hero.addView(label("✓  PDF SAVED SUCCESSFULLY",11f,0xFFB7F2CE.toInt(),true))
+        hero.addView(gap(6));hero.addView(label(kind+" ready",23f,0xFFFFFFFF.toInt(),true))
+        hero.addView(label("No. "+number,12f,0xFFDCE8FF.toInt()))
+        hero.addView(gap(8));hero.addView(label("INR "+total,24f,0xFFFFFFFF.toInt(),true))
+        if(payment.isNotBlank())hero.addView(label(payment,12f,0xFFB7F2CE.toInt(),true))
+        panel.addView(hero);panel.addView(gap(12))
+        val fileCard=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),dp(12),dp(12),dp(12))
+            background=rounded(0xFFF4F8FF.toInt(),14,0xFFDCE7F5.toInt())
+        }
+        fileCard.addView(label("PDF",15f,0xFF2563EB.toInt(),true).apply{gravity=Gravity.CENTER;background=rounded(0xFFE4EEFF.toInt(),12)},LinearLayout.LayoutParams(dp(48),dp(52)))
+        val details=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,0,0)}
+        details.addView(label(file.name,12f,0xFF172B4D.toInt(),true))
+        details.addView(label("A4 • "+pages+" page(s) • "+formatFileSize(file.length()),12f,0xFF52627A.toInt()))
+        details.addView(label("Original PDF • Print ready",11f,0xFF128268.toInt(),true))
+        fileCard.addView(details,LinearLayout.LayoutParams(0,-2,1f));panel.addView(fileCard);panel.addView(gap(12))
+        val info=label("Saved inside DocNexa. Download a copy or share the original PDF.",12f,0xFF52627A.toInt()).apply{accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE}
+        val item=ExportResultItem(uri.toString(),file.name,"application/pdf")
+        fun available():Boolean {
+            if(owner==signedInUserId() && privateDocumentFile(uri)!=null)return true
+            Toast.makeText(this,"File unavailable or account changed.",Toast.LENGTH_LONG).show()
+            return false
+        }
+        fun action(symbol:String,title:String,description:String,primary:Boolean=false,drive:Boolean=false,click:()->Unit){
+            val row=LinearLayout(this).apply{
+                orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(62)
+                setPadding(dp(12),dp(10),dp(12),dp(10));isClickable=true;isFocusable=true
+                background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(if(primary)0x33FFFFFF else 0x223478F6),
+                    if(primary)gradient(0xFF3478F6.toInt(),0xFF1556BE.toInt(),14) else rounded(0xFFF4F8FF.toInt(),14,0xFFDCE7F5.toInt()),null)
+                setOnClickListener{if(available())click()}
+            }
+            val tile=FrameLayout(this).apply{
+                background=rounded(if(primary)0x33FFFFFF else 0xFFE4EEFF.toInt(),10)
+                if(drive)addView(driveBrandIcon(),FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER))
+                else addView(label(symbol,19f,if(primary)0xFFFFFFFF.toInt() else 0xFF2563EB.toInt(),true).apply{gravity=Gravity.CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},FrameLayout.LayoutParams(-1,-1))
+            }
+            row.addView(tile,LinearLayout.LayoutParams(dp(42),dp(42)))
+            val copy=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,dp(6),0)}
+            copy.addView(label(title,15f,if(primary)0xFFFFFFFF.toInt() else 0xFF172B4D.toInt(),true))
+            copy.addView(label(description,11f,if(primary)0xFFE1EDFF.toInt() else 0xFF64748B.toInt()))
+            row.addView(copy,LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(label("›",22f,if(primary)0xFFFFFFFF.toInt() else 0xFF3478F6.toInt()))
+            panel.addView(row);panel.addView(gap(7))
+        }
+        action("↓","Download PDF","Save an original-quality copy to your device",true){saveResultAs(item)}
+        action("↗","Share PDF","Send using WhatsApp, email or another app"){sharePdf(uri)}
+        action("","Google Drive","Upload or choose a Drive folder",drive=true){
+            appDialog().setTitle("Save invoice to Google Drive")
+                .setItems(arrayOf("Direct Google Drive upload","Choose Drive folder / storage")){_,index->
+                    if(available()){
+                        if(index==0)authorizeDirectDrive(uri) else confirmDriveSave(item)
+                    }
+                }.setNegativeButton("Cancel",null).show()
+        }
+        action("▤","Print PDF","A4 • Original PDF, no screenshot conversion"){printPdfDocument(uri,true)}
+        action("▣","Open PDF","View the complete saved document"){openPdf(uri)}
+        panel.addView(gap(3));panel.addView(info)
+        val dialog=appDialog().setTitle("Invoice complete").setView(toolDialogScroll(panel,0.72f))
+            .setNegativeButton("Done",null).create()
+        invoiceReadyDialog=dialog;invoiceReadyStatus=info
+        invoiceReadyState=Bundle().apply{putString("uri",uri.toString());putString("kind",kind);putString("number",number);putString("total",total);putString("payment",payment);putInt("pages",pages);putString("owner",owner)}
+        dialog.setOnDismissListener{if(invoiceReadyDialog===dialog){invoiceReadyDialog=null;invoiceReadyStatus=null;invoiceReadyState=null}}
+        dialog.show()
     }
 
     private fun showCreatePdfHub() {
@@ -7592,6 +7694,7 @@ class MainActivity : AppCompatActivity() {
     private fun sharePdf(uri: Uri) {
         val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
             .putExtra(Intent.EXTRA_STREAM, uri)
+            .apply { clipData=android.content.ClipData.newRawUri("DocNexa PDF",uri) }
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
             startActivity(Intent.createChooser(send, "Share PDF"))
@@ -7880,6 +7983,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var directDriveAccount: String? = null
+    private var directDriveTarget: Uri? = null
     private var directDriveCheckBusy = false
     private var directDriveResolutionPending = false
     private val directDriveBusy = AtomicBoolean(false)
@@ -7924,6 +8028,8 @@ class MainActivity : AppCompatActivity() {
     }.getOrDefault("Unavailable")
 
     private fun showDriveAuthorizationHelp(reason: String) {
+        val retryTarget=directDriveTarget
+        directDriveTarget=null
         if (isFinishing || isDestroyed) return
         val certificate = installedDriveCertificate()
         val guidance = if (reason.contains("Google status 8 (")) {
@@ -7934,18 +8040,19 @@ class MainActivity : AppCompatActivity() {
         val details = guidance + "\n\nTechnical details: " + reason + "\nPackage: " + packageName + "\nInstalled APK SHA-1:\n" + certificate
         appDialog().setTitle("Google Drive connection")
             .setMessage(details)
-            .setPositiveButton("Retry") { _, _ -> authorizeDirectDrive() }
-            .setNeutralButton("Manual backup") { _, _ -> chooseDriveBackupFile() }
+            .setPositiveButton("Retry") { _, _ -> authorizeDirectDrive(retryTarget) }
+            .setNeutralButton("Manual backup") { _, _ -> if(retryTarget!=null && privateDocumentFile(retryTarget)!=null)sharePdfToGoogleDrive(retryTarget) else chooseDriveBackupFile() }
             .setNegativeButton("Close", null).show()
     }
 
-    private fun authorizeDirectDrive() {
+    private fun authorizeDirectDrive(target: Uri? = null) {
         if (directDriveCheckBusy || directDriveAccount != null || directDriveBusy.get()) {
             Toast.makeText(this, "Finish the current Drive operation first.", Toast.LENGTH_SHORT).show()
             return
         }
         if (!requireInternet("Google Drive")) return
         directDriveAccount = signedInUserId()
+        directDriveTarget = target
         val request = com.google.android.gms.auth.api.identity.AuthorizationRequest.builder()
             .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(directDriveScope))).build()
         com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this).authorize(request)
@@ -7972,6 +8079,8 @@ class MainActivity : AppCompatActivity() {
     private fun finishDirectDriveAuthorization(result: com.google.android.gms.auth.api.identity.AuthorizationResult) {
         val account = directDriveAccount
         directDriveAccount = null
+        val target = directDriveTarget
+        directDriveTarget = null
         val token = result.accessToken
         if (account == null || account != signedInUserId() || token.isNullOrBlank() ||
             !result.grantedScopes.contains(directDriveScope)) {
@@ -7990,7 +8099,15 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
                         rememberDriveAuthorization(email)
                         status.text = "Google Drive connected"
-                        showDirectDriveActions(token, email, account)
+                        if(target==null)showDirectDriveActions(token, email, account)
+                        else {
+                            val file=privateDocumentFile(target)
+                            if(file!=null)appDialog().setTitle("Upload invoice PDF?")
+                                .setMessage(file.name+"\n\nGoogle account: "+email+"\n\nUpload the original PDF to this account?")
+                                .setPositiveButton("Upload"){_,_->if(account==signedInUserId())uploadDirectDriveFiles(token,account,listOf(file),false)}
+                                .setNegativeButton("Cancel",null).show()
+                            else Toast.makeText(this,"Invoice is no longer available.",Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             } finally { directDriveBusy.set(false) }
@@ -8126,6 +8243,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
                         status.text = "Drive upload: " + complete + " saved"
+                        if(invoiceReadyDialog?.isShowing==true)invoiceReadyStatus?.text=if(complete>0)"Original PDF uploaded to Google Drive." else "Google Drive upload not completed. Your local PDF is safe."
                         appDialog().setTitle("Google Drive backup")
                             .setMessage("Uploaded: " + complete + "\nFailed: " + failed + "\nNot attempted: " + (files.size - complete - failed) + "\nOriginal local files retained.")
                             .setPositiveButton("Done", null).show()
@@ -8751,7 +8869,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateResultStatus(message: String) {
-        if (exportResultDialog?.isShowing == true) exportStatusView?.text = message
+        if (invoiceReadyDialog?.isShowing==true) invoiceReadyStatus?.text=message
+        else if (exportResultDialog?.isShowing == true) exportStatusView?.text = message
         else if (!isFinishing && !isDestroyed) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
