@@ -7737,6 +7737,8 @@ class MainActivity : AppCompatActivity() {
             row.addView(label(detail, 12f, 0xFF64748B.toInt()))
             panel.addView(row); panel.addView(gap(8))
         }
+        var checkedToken: String? = null
+        var checkedEmail: String? = null
         val actionTitle = label("Connect Google Drive", 15f, 0xFFFFFFFF.toInt(), true).apply { gravity = Gravity.CENTER }
         val connectButton = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -7746,7 +7748,18 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(10), dp(12), dp(10))
             isClickable = true; isFocusable = true
             addView(actionTitle, LinearLayout.LayoutParams(-1, -2))
-            setOnClickListener { dialog.dismiss(); authorizeDirectDrive() }
+            setOnClickListener {
+                if (owner != signedInUserId()) { dialog.dismiss(); return@setOnClickListener }
+                val token = checkedToken
+                val email = checkedEmail
+                if (directDriveCheckBusy || directDriveBusy.get() || directDriveAccount != null) {
+                    Toast.makeText(this@MainActivity, "Google Drive is checking access. Please try again when it finishes.", Toast.LENGTH_SHORT).show()
+                } else {
+                    dialog.dismiss()
+                    if (token != null && email != null) showDirectDriveActions(token, email, owner)
+                    else authorizeDirectDrive()
+                }
+            }
         }
         panel.addView(connectButton); panel.addView(gap(10))
         option("Import / restore a file", "Choose an existing PDF, image or supported export from Drive or another provider.") { launchDriveImport() }
@@ -7758,8 +7771,8 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(label("Manual copies use your selected storage provider. Automatic backup and continuous sync are not yet available.", 11f, 0xFF64748B.toInt()))
         dialog.show()
-        // Recheck an existing authorization without opening a consent screen automatically.
-        // Only a successful Drive API response is presented as Connected.
+        // Serialize silent checks with user-initiated authorization. Reuse the
+        // verified token for this dialog only; never persist a bearer token.
         if (lastEmail.isNotBlank()) {
             fun showState(connected: Boolean, detail: String) {
                 if (!dialog.isShowing || owner != signedInUserId() || isFinishing || isDestroyed) return
@@ -7767,29 +7780,50 @@ class MainActivity : AppCompatActivity() {
                 state.setTextColor(if (connected) 0xFF128268.toInt() else 0xFF64748B.toInt())
                 accountLabel.text = detail
                 actionTitle.text = if (connected) "Manage Google Drive" else "Connect Google Drive"
+                connectButton.isEnabled = true
+                connectButton.alpha = 1f
             }
             if (!isInternetAvailable()) {
                 showState(false, "Offline • Last authorized: " + lastEmail)
+            } else if (directDriveCheckBusy || directDriveBusy.get() || directDriveAccount != null) {
+                showState(false, "A Drive operation is already running. Reopen this panel to check.")
             } else {
-                val request = com.google.android.gms.auth.api.identity.AuthorizationRequest.builder()
-                    .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(directDriveScope))).build()
-                com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this).authorize(request)
-                    .addOnSuccessListener { authorization ->
-                        val token = authorization.accessToken
-                        if (authorization.hasResolution() || token.isNullOrBlank() || !authorization.grantedScopes.contains(directDriveScope)) {
-                            showState(false, "Google permission needs to be renewed.")
-                        } else {
-                            Thread {
-                                val email = runCatching { DirectDriveApi.accountEmail(token) }.getOrNull()
-                                runOnUiThread {
-                                    if (email != null && owner == signedInUserId() && dialog.isShowing) {
-                                        rememberDriveAuthorization(email)
-                                        showState(true, email)
-                                    } else showState(false, "Could not verify Google Drive access. Tap Connect to retry.")
-                                }
-                            }.start()
-                        }
-                    }.addOnFailureListener { showState(false, "Could not verify Google Drive access. Tap Connect to retry.") }
+                directDriveCheckBusy = true
+                connectButton.isEnabled = false
+                connectButton.alpha = 0.6f
+                actionTitle.text = "Checking connection…"
+                fun failed(detail: String) {
+                    directDriveCheckBusy = false
+                    showState(false, detail)
+                }
+                try {
+                    val request = com.google.android.gms.auth.api.identity.AuthorizationRequest.builder()
+                        .setAccount(android.accounts.Account(lastEmail, "com.google"))
+                        .setRequestedScopes(listOf(com.google.android.gms.common.api.Scope(directDriveScope))).build()
+                    com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this).authorize(request)
+                        .addOnSuccessListener { authorization ->
+                            val token = authorization.accessToken
+                            if (authorization.hasResolution() || token.isNullOrBlank() ||
+                                !authorization.grantedScopes.contains(directDriveScope)) {
+                                failed("Google permission needs to be renewed.")
+                            } else {
+                                Thread {
+                                    val email = runCatching { DirectDriveApi.accountEmail(token) }.getOrNull()
+                                    runOnUiThread {
+                                        directDriveCheckBusy = false
+                                        if (email != null && email.equals(lastEmail, ignoreCase = true) &&
+                                            owner == signedInUserId() && dialog.isShowing && !isDestroyed && !isFinishing) {
+                                            checkedToken = token
+                                            checkedEmail = email
+                                            showState(true, email)
+                                        } else showState(false, "Could not verify the saved Google account. Tap Connect to retry.")
+                                    }
+                                }.start()
+                            }
+                        }.addOnFailureListener { failed("Could not verify Google Drive access. Tap Connect to retry.") }
+                } catch (_: Exception) {
+                    failed("Google authorization unavailable. Tap Connect to retry.")
+                }
             }
         }
     }
@@ -7799,6 +7833,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var directDriveAccount: String? = null
+    private var directDriveCheckBusy = false
     private var directDriveResolutionPending = false
     private val directDriveBusy = AtomicBoolean(false)
     private val directDriveScope = "https://www.googleapis.com/auth/drive.file"
@@ -7844,8 +7879,12 @@ class MainActivity : AppCompatActivity() {
     private fun showDriveAuthorizationHelp(reason: String) {
         if (isFinishing || isDestroyed) return
         val certificate = installedDriveCertificate()
-        val details = reason + "\n\nPackage: " + packageName + "\nInstalled APK SHA-1:\n" + certificate +
-            "\n\nCheck that this exact certificate is registered for the Android OAuth client in your DocNexa Google Cloud project. Use an updated Google Play services installation, then select your account and approve Drive access. If you intentionally cancelled, you can close this message."
+        val guidance = if (reason.contains("Google status 8 (")) {
+            "Google could not finish authorization. Retry using a stable internet connection. If this repeats, update Google Play services or review DocNexa access in your Google Account. Manual backup remains available."
+        } else {
+            "Check that the installed signing certificate is registered for the Android OAuth client. Select your Google account and approve Drive access."
+        }
+        val details = guidance + "\n\nTechnical details: " + reason + "\nPackage: " + packageName + "\nInstalled APK SHA-1:\n" + certificate
         appDialog().setTitle("Google Drive connection")
             .setMessage(details)
             .setPositiveButton("Retry") { _, _ -> authorizeDirectDrive() }
@@ -7854,7 +7893,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun authorizeDirectDrive() {
-        if (directDriveAccount != null || directDriveBusy.get()) {
+        if (directDriveCheckBusy || directDriveAccount != null || directDriveBusy.get()) {
             Toast.makeText(this, "Finish the current Drive operation first.", Toast.LENGTH_SHORT).show()
             return
         }
