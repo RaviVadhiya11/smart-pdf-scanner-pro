@@ -11377,7 +11377,7 @@ class MainActivity : AppCompatActivity() {
             val result=label("",11f,0xFF52627A.toInt())
             val text=label(value,14f,0xFF172B4D.toInt()).apply{setTextIsSelectable(true);setPadding(dp(10),dp(10),dp(10),dp(10))}
             val textScroll=ScrollView(this).apply{addView(text);background=rounded(0xFFF5F8FF.toInt(),12,0xFFDCE7F5.toInt())}
-            val find=nativeButton(this,ButtonRole.Secondary).apply{text="Find next"}
+            val find=nativeButton(this,ButtonRole.Secondary).apply{this.text="Find next"}
             var offset=0;var lastQuery=""
             find.setOnClickListener{
                 val query=search.text.toString().trim()
