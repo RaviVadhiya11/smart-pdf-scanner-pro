@@ -7943,21 +7943,30 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val direct = file != null && file.length() in 1L..DirectDriveApi.MAX_BYTES && backupMime(file.name) != null
-        val dialog = appDialog().setTitle("Save to Google Drive")
-            .setMessage(item.fileName + "\n\nUpload the original file to your Google account without compression. Your existing DocNexa copy stays safe. No phone storage destination will be used.")
-            .setNegativeButton("Cancel", null)
-        if (direct) {
-            dialog.setPositiveButton("Upload to My Drive") { _, _ ->
-                if (account == signedInUserId() && privateDocumentFile(source) != null) authorizeDirectDrive(source)
-                else updateResultStatus("File unavailable or DocNexa account changed.")
-            }.setNeutralButton("Choose folder in Drive") { _, _ ->
-                if (account == signedInUserId()) openDriveUploadApp(item)
-            }
-        } else {
-            dialog.setPositiveButton("Open Google Drive") { _, _ ->
-                if (account == signedInUserId()) openDriveUploadApp(item)
-            }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(8), dp(14), dp(8))
         }
+        popupHeader(panel, "DOCNEXA • CLOUD EXPORT", "Save to Google Drive", "Original quality • Secure account access")
+        panel.addView(label(item.fileName, 14f, 0xFF172B4D.toInt(), true))
+        panel.addView(gap(6))
+        panel.addView(label("Your existing DocNexa file stays safe. This action never opens phone storage.", 12f, 0xFF52627A.toInt()))
+        panel.addView(gap(12))
+        val dialog = appDialog().setTitle("Cloud destination").setView(toolDialogScroll(panel, 0.72f))
+            .setNegativeButton("Cancel", null).create()
+        if (direct) addPopupOption(panel, "drive", "Upload to My Drive", "Connect your Google account and confirm the cloud upload.", true) {
+            dialog.dismiss()
+            if (account == signedInUserId() && privateDocumentFile(source) != null) {
+                updateResultStatus("Google Drive authorization required. Original file is safe.")
+                authorizeDirectDrive(source)
+            } else updateResultStatus("File unavailable or DocNexa account changed.")
+        }
+        addPopupOption(panel, "drive", "Choose folder in Google Drive", "Open the official Drive app, select an account and folder, then tap Save.", !direct) {
+            dialog.dismiss()
+            if (account == signedInUserId()) openDriveUploadApp(item)
+            else updateResultStatus("DocNexa account changed. Select the file again.")
+        }
+        panel.addView(label("Direct upload: up to 128 MB for supported saved files. Other files can use the Drive app.", 11f, 0xFF52627A.toInt()))
         dialog.show()
     }
 
@@ -7977,7 +7986,7 @@ class MainActivity : AppCompatActivity() {
                 clipData = android.content.ClipData.newRawUri(item.fileName, source)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             })
-            updateResultStatus("Sent to Google Drive. Choose your account and folder, tap Save, and check Drive for upload completion.")
+            updateResultStatus("Google Drive opened. Choose your account and folder, then tap Save. Upload not yet verified.")
         } catch (_: Exception) {
             appDialog().setTitle("Google Drive unavailable")
                 .setMessage("Install or enable the official Google Drive app to choose a cloud folder. Your original file remains safe; no local export was made.")
@@ -9094,19 +9103,9 @@ class MainActivity : AppCompatActivity() {
             }
             val panel = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(20), dp(12), dp(20), dp(10))
+                setPadding(dp(14), dp(8), dp(14), dp(12))
             }
-            val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            header.addView(label("✓", 26f, 0xFF128268.toInt(), true).apply {
-                gravity = Gravity.CENTER
-                background = rounded(0xFFE3F5EF.toInt(), 16)
-            }, LinearLayout.LayoutParams(dp(50), dp(50)))
-            val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
-            heading.addView(label("File ready", 21f, 0xFF172B4D.toInt(), true))
-            heading.addView(label("Created successfully", 12f, 0xFF128268.toInt()))
-            header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
-            panel.addView(header)
-            panel.addView(gap(16))
+            popupHeader(panel, "DOCNEXA • EXPORT STUDIO", "File ready to export", "Saved successfully • Preview, share or back up your original file")
             val fileCount = label("", 12f, 0xFF52627A.toInt(), true)
             val selector = android.widget.Spinner(this)
             panel.addView(fileCount)
@@ -9122,7 +9121,7 @@ class MainActivity : AppCompatActivity() {
             val fileIcon = label("PDF", 17f, 0xFF2563EB.toInt(), true).apply { gravity = Gravity.CENTER }
             frame.addView(preview, FrameLayout.LayoutParams(-1, -1))
             frame.addView(fileIcon, FrameLayout.LayoutParams(-1, -1))
-            card.addView(frame, LinearLayout.LayoutParams(dp(72), dp(96)))
+            card.addView(frame, LinearLayout.LayoutParams(dp(84), dp(108)))
             val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
             val name = label("", 14f, 0xFF172B4D.toInt(), true).apply { setTextIsSelectable(true) }
             val fileTypeLabel = label("", 11f, 0xFF52627A.toInt())
@@ -9134,18 +9133,22 @@ class MainActivity : AppCompatActivity() {
             val resultAdHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             panel.addView(resultAdHost)
             panel.addView(gap(14))
-            val statusText = label("Use Save As to choose a folder on your device.", 12f, 0xFF52627A.toInt()).apply {
+            val statusText = label("Original file ready. Choose an export destination.", 12f, 0xFF52627A.toInt()).apply {
                 accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFDCE7F5.toInt())
             }
             exportStatusView = statusText
             panel.addView(statusText)
             panel.addView(gap(12))
             fun resultButton(title: String, primary: Boolean, action: () -> Unit): com.google.android.material.button.MaterialButton =
                 com.google.android.material.button.MaterialButton(this).apply {
-                    text = title; isAllCaps = false; textSize = 12.5f
+                    text = title; isAllCaps = false; textSize = 13f; typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                     maxLines = 2
                     setPadding(dp(5), dp(5), dp(5), dp(5))
-                    cornerRadius = dp(12)
+                    cornerRadius = dp(14)
+                    insetTop = 0; insetBottom = 0
+                    minimumHeight = dp(48)
                     setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFF2563EB.toInt())
                     backgroundTintList = android.content.res.ColorStateList.valueOf(if (primary) 0xFF2563EB.toInt() else 0xFFEAF2FF.toInt())
                     setOnClickListener { action() }
@@ -9158,10 +9161,14 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Exception) { updateResultStatus("No compatible app found. You can Save As or Share this file.") }
                 }
             }
-            panel.addView(openButton, LinearLayout.LayoutParams(-1, dp(54)))
+            panel.addView(openButton, LinearLayout.LayoutParams(-1, dp(52)))
+            panel.addView(gap(8))
+            addPopupOption(panel, "drive", "Save to Google Drive", "Cloud backup • Original quality • Choose your Google account", true) {
+                exportResults.selected?.let { confirmDriveSave(it) }
+            }
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            actions.addView(resultButton("Save As", false) { exportResults.selected?.let { saveResultAs(it) } },
-                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(5) })
+            actions.addView(resultButton("Save a copy", false) { exportResults.selected?.let { saveResultAs(it) } },
+                LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
             actions.addView(resultButton("Share", false) {
                 exportResults.selected?.let { item ->
                     try {
@@ -9204,7 +9211,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
             panel.addView(fileUtilities)
             panel.addView(gap(12))
-            panel.addView(label("SAVE FILE TO", 12f, 0xFF52627A.toInt(), true))
+            panel.addView(label("OTHER EXPORT DESTINATIONS", 12f, 0xFF52627A.toInt(), true))
             panel.addView(gap(8))
             // The original export remains in DocNexa private documents until the user
             // explicitly chooses an external destination. No cloud upload is implied.
@@ -9227,8 +9234,11 @@ class MainActivity : AppCompatActivity() {
                 }
             )
             destinationRow(
-                "☁ Google Drive", {
-                    exportResults.selected?.let { item -> confirmDriveSave(item) }
+                "▤ Print PDF", {
+                    exportResults.selected?.let { item ->
+                        if (item.mime == "application/pdf") printPdfDocument(Uri.parse(item.uri), true)
+                        else updateResultStatus("Printing from this shortcut is available for PDF files.")
+                    }
                 },
                 "✉ Email", {
                     exportResults.selected?.let { item ->
@@ -9265,8 +9275,8 @@ class MainActivity : AppCompatActivity() {
                     passwordDialog(Uri.parse(item.uri), false)
                 } else updateResultStatus("Password protection is available for PDF files.")
             }
-            advancedPdfRow.addView(compressResult, LinearLayout.LayoutParams(0, dp(64), 1f).apply { rightMargin = dp(5) })
-            advancedPdfRow.addView(passwordResult, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(5) })
+            advancedPdfRow.addView(compressResult, LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(5) })
+            advancedPdfRow.addView(passwordResult, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(5) })
             panel.addView(advancedPdfRow)
             panel.addView(gap(8))
             val inspectPdfButton = resultButton("✓ Check PDF integrity & page count", false) {
@@ -9491,7 +9501,7 @@ class MainActivity : AppCompatActivity() {
                 else updateResultStatus("Gallery saving is only available for image files.")
             } }
             panel.addView(gallery, LinearLayout.LayoutParams(-1, dp(48)))
-            val dialog = appDialog().setTitle("DocNexa • Save & Export").setView(toolDialogScroll(panel, 0.83f)).setNegativeButton("Done", null).create()
+            val dialog = appDialog().setTitle("Save & Export").setView(toolDialogScroll(panel, 0.80f)).setNegativeButton("Done", null).create()
             exportResultDialog = dialog
             var displayedUri: String? = null
             var selectorEntries = emptyList<String>()
@@ -9533,7 +9543,7 @@ class MainActivity : AppCompatActivity() {
                     else -> "FILE"
                 }
                 metadata.text = "Reading file details…"
-                statusText.text = "Use Save As to choose a folder on your device."
+                statusText.text = "Original file ready. Choose local storage or Google Drive."
                 if (pagePreviewExecutor.isShutdown) return
                 pagePreviewExecutor.execute {
                     if (resultPreviewGeneration.get() != token || isDestroyed) return@execute
@@ -9553,7 +9563,7 @@ class MainActivity : AppCompatActivity() {
                                 PdfRenderer(fd).use { renderer ->
                                     pages = renderer.pageCount
                                     if (renderer.pageCount > 0) renderer.openPage(0).use { page ->
-                                        val scale = minOf(180f / page.width, 240f / page.height)
+                                        val scale = minOf(360f / page.width, 480f / page.height)
                                         thumbnail = Bitmap.createBitmap(maxOf(1, (page.width * scale).toInt()), maxOf(1, (page.height * scale).toInt()), Bitmap.Config.ARGB_8888).also { bitmap ->
                                             Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
                                             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
