@@ -863,6 +863,42 @@ class MainActivity : AppCompatActivity() {
                     listOf(3f to 3f,15f to 3f,3f to 15f).forEach{(x,y)->canvas.drawRect(x,y,x+6f,y+6f,ink);canvas.drawPoint(x+3f,y+3f,ink)}
                     canvas.drawLine(15f,15f,21f,15f,ink);canvas.drawLine(15f,15f,15f,21f,ink);canvas.drawLine(18f,18f,21f,21f,ink)
                 }
+                "trash" -> {
+                    canvas.drawRoundRect(6f,8f,18f,22f,2f,2f,ink)
+                    canvas.drawLine(3f,6f,21f,6f,ink);canvas.drawRoundRect(9f,2f,15f,6f,1f,1f,ink)
+                    canvas.drawLine(10f,11f,10f,18f,ink);canvas.drawLine(14f,11f,14f,18f,ink)
+                }
+                "shield" -> {
+                    val path=android.graphics.Path().apply{moveTo(12f,2f);lineTo(21f,6f);lineTo(20f,14f);quadTo(18f,19f,12f,22f);quadTo(6f,19f,4f,14f);lineTo(3f,6f);close()}
+                    canvas.drawPath(path,ink);canvas.drawLine(8f,12f,11f,15f,ink);canvas.drawLine(11f,15f,16f,9f,ink)
+                }
+                "download","upload" -> {
+                    val direction=if(symbol=="download")1f else -1f
+                    val tip=12f+direction*5f
+                    canvas.drawLine(12f,12f-direction*9f,12f,tip,ink)
+                    canvas.drawLine(7f,tip-direction*5f,12f,tip,ink);canvas.drawLine(17f,tip-direction*5f,12f,tip,ink)
+                    canvas.drawLine(4f,20f,20f,20f,ink)
+                }
+                "print" -> {
+                    canvas.drawRoundRect(3f,8f,21f,17f,2f,2f,ink)
+                    canvas.drawRect(7f,2f,17f,8f,ink);canvas.drawRect(7f,14f,17f,22f,ink)
+                    canvas.drawPoint(17f,11f,ink)
+                }
+                "search" -> {
+                    canvas.drawCircle(10f,10f,7f,ink);canvas.drawLine(15f,15f,22f,22f,ink)
+                }
+                "share" -> {
+                    canvas.drawCircle(5f,12f,3f,ink);canvas.drawCircle(19f,4f,3f,ink);canvas.drawCircle(19f,20f,3f,ink)
+                    canvas.drawLine(8f,10f,16f,5f,ink);canvas.drawLine(8f,14f,16f,19f,ink)
+                }
+                "edit" -> {
+                    val path=android.graphics.Path().apply{moveTo(4f,16f);lineTo(16f,4f);lineTo(20f,8f);lineTo(8f,20f);lineTo(3f,21f);close()}
+                    canvas.drawPath(path,ink);canvas.drawLine(13f,7f,17f,11f,ink)
+                }
+                "folder" -> {
+                    val path=android.graphics.Path().apply{moveTo(2f,5f);lineTo(9f,5f);lineTo(12f,8f);lineTo(22f,8f);lineTo(22f,21f);lineTo(2f,21f);close()}
+                    canvas.drawPath(path,ink)
+                }
                 else -> {
                     canvas.drawRoundRect(4f,2f,20f,22f,2f,2f,ink)
                     for(y in listOf(8f,12f,16f))canvas.drawLine(8f,y,16f,y,ink)
@@ -876,8 +912,8 @@ class MainActivity : AppCompatActivity() {
         val premium=title.contains("• PRO") || title.contains("Premium locked",true)
         val danger=title.startsWith("Delete",true)||title.startsWith("Remove permanently",true)
         val accent=if(primary)0xFFFFFFFF.toInt() else if(danger)0xFFB42336.toInt() else if(premium)0xFF5936AA.toInt() else 0xFF2563EB.toInt()
-        val surface=if(primary)gradient(0xFF1764DE.toInt(),0xFF0B3F99.toInt(),16)
-            else rounded(if(danger)0xFFFFF5F6.toInt() else if(premium)0xFFF7F3FF.toInt() else 0xFFF8FAFF.toInt(),16,0xFFDCE7F5.toInt())
+        val surface=if(primary)gradient(0xFF1764DE.toInt(),0xFF0B3F99.toInt(),18)
+            else rounded(if(danger)0xFFFFF5F6.toInt() else if(premium)0xFFF7F3FF.toInt() else 0xFFF8FAFF.toInt(),18,if(danger)0xFFF1D0D5.toInt() else 0xFFDCE7F5.toInt())
         val row=LinearLayout(this).apply{
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
             minimumHeight=dp(64);setPadding(dp(12),dp(10),dp(12),dp(10))
@@ -889,7 +925,7 @@ class MainActivity : AppCompatActivity() {
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
             when(symbol){
                 "drive" -> addView(driveBrandIcon(),FrameLayout.LayoutParams(dp(28),dp(28),Gravity.CENTER))
-                "camera","gallery","qr","document" -> addView(popupGlyph(symbol,accent),FrameLayout.LayoutParams(-1,-1))
+                "camera","gallery","qr","document","trash","shield","download","upload","print","search","share","edit","folder" -> addView(popupGlyph(symbol,accent),FrameLayout.LayoutParams(-1,-1))
                 else -> addView(label(symbol,if(symbol.length>2)12f else 20f,accent,true).apply{gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,-1))
             }
         }
@@ -923,12 +959,21 @@ class MainActivity : AppCompatActivity() {
             override fun getView(position:Int,convertView:View?,parent:ViewGroup):View {
                 val value=getItem(position)?.toString().orEmpty()
                 val symbol=when{
+                    value.startsWith("Delete",true)||value.contains("permanently",true)->"trash"
                     value.contains("Google Drive",true)->"drive"
-                    value.contains("gallery",true)->"gallery"
-                    value.contains("camera",true)->"camera"
-                    value.startsWith("Delete",true)->"×"
+                    value.contains("gallery",true)||value.contains("image",true)->"gallery"
+                    value.contains("camera",true)||value.startsWith("Scan",true)->"camera"
+                    value.contains("Premium",true)||value.contains("• PRO")->"♛"
+                    value.contains("QR",true)->"qr"
+                    value.startsWith("Print",true)->"print"
+                    value.startsWith("Share",true)->"share"
+                    value.startsWith("Upload",true)->"upload"
+                    value.startsWith("Save",true)||value.startsWith("Download",true)||value.startsWith("Export",true)->"download"
+                    value.contains("password",true)||value.startsWith("Protect",true)->"shield"
+                    value.startsWith("Search",true)||value.startsWith("Find",true)->"search"
+                    value.startsWith("Edit",true)||value.startsWith("Rename",true)->"edit"
+                    value.contains("folder",true)->"folder"
                     value.contains("PDF",true)->"PDF"
-                    value.contains("Premium",true)->"♛"
                     else->"document"
                 }
                 return LinearLayout(this@MainActivity).apply{
@@ -949,10 +994,23 @@ class MainActivity : AppCompatActivity() {
                     view.post {
                         if (!dialog.isShowing) return@post
                         dialog.window?.apply {
-                            setLayout(minOf(dp(560), (resources.displayMetrics.widthPixels - dp(28)).coerceAtLeast(dp(1))), attributes.height)
-                            setDimAmount(0.46f)
+                            setLayout(minOf(dp(560), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(1))), attributes.height)
+                            setDimAmount(0.52f)
                             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                            setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 22, 0xFFD9E5F5.toInt()))
+                            setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 26, 0xFFD9E5F5.toInt()))
+                        }
+                        // Decorate the existing native title rather than replacing it. This preserves
+                        // accessibility, custom titles, dynamic titles, native list and form callbacks.
+                        view.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.let { heading ->
+                            if (heading.visibility == View.VISIBLE && heading.text.isNotBlank()) {
+                                heading.setTextColor(0xFFFFFFFF.toInt())
+                                heading.textSize = 18f
+                                heading.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                                heading.setPadding(dp(14),dp(12),dp(14),dp(12))
+                                heading.background = gradient(0xFF174B9C.toInt(),0xFF0B245A.toInt(),16)
+                                heading.maxLines = Int.MAX_VALUE
+                                if (Build.VERSION.SDK_INT >= 28) heading.isAccessibilityHeading = true
+                            }
                         }
                         fun styleDialogTree(node: View) {
                             if (node is NativeAdView) return
@@ -960,7 +1018,7 @@ class MainActivity : AppCompatActivity() {
                                 android.R.id.message -> if (node is TextView) {
                                     node.setTextColor(0xFF53657E.toInt())
                                     node.textSize = 14f
-                                    node.setLineSpacing(dp(3).toFloat(), 1.08f)
+                                    node.setLineSpacing(dp(3).toFloat(), 1.12f)
                                 }
                                 android.R.id.text1 -> if (node is TextView) {
                                     node.setTextColor(0xFF243B5A.toInt())
@@ -975,7 +1033,11 @@ class MainActivity : AppCompatActivity() {
                                 // Preserve explicit editor text sizes; native font scaling remains enabled.
                                 node.setPadding(dp(14), dp(12), dp(14), dp(12))
                                 node.minimumHeight = dp(48)
-                                node.background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFD4E2F4.toInt())
+                                val inputSurface = android.graphics.drawable.StateListDrawable().apply {
+                                    addState(intArrayOf(android.R.attr.state_focused),rounded(0xFFFFFFFF.toInt(),14,0xFF3478F6.toInt()))
+                                    addState(intArrayOf(),rounded(0xFFF3F7FF.toInt(),14,0xFFD4E2F4.toInt()))
+                                }
+                                node.background = inputSurface
                                 (node.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
                                     it.topMargin = dp(8); it.bottomMargin = dp(8)
                                 }
@@ -987,15 +1049,19 @@ class MainActivity : AppCompatActivity() {
                                     intArrayOf(0xFF2563EB.toInt(), 0xFF64748B.toInt())
                                 )
                             }
+                            if (node is android.widget.ProgressBar && node !is android.widget.SeekBar) {
+                                node.indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF2563EB.toInt())
+                                node.progressTintList = android.content.res.ColorStateList.valueOf(0xFF2563EB.toInt())
+                            }
                             if (node is ViewGroup) for (i in 0 until node.childCount) styleDialogTree(node.getChildAt(i))
                         }
                         styleDialogTree(view)
                         dialog.listView?.apply {
                             divider = android.graphics.drawable.ColorDrawable(0x00000000)
-                            dividerHeight = dp(3)
-                            selector = rounded(0x223478F6,12)
+                            dividerHeight = dp(5)
+                            selector = rounded(0x223478F6,14)
                             setDrawSelectorOnTop(true)
-                            setPadding(dp(8), dp(4), dp(8), dp(4))
+                            setPadding(dp(8), dp(6), dp(8), dp(6))
                             clipToPadding = false
                         }
                         fun styleAction(which: Int, primary: Boolean) {
@@ -1006,18 +1072,23 @@ class MainActivity : AppCompatActivity() {
                                 minHeight = dp(48)
                                 minimumHeight = dp(48)
                                 setPadding(dp(12), dp(8), dp(12), dp(8))
-                                val destructive = primary && text.toString().trim().lowercase(Locale.ROOT).let{it=="delete"||it=="delete permanently"||it=="sign out"||it=="remove"||it=="discard"}
+                                val actionText=text.toString().trim().lowercase(Locale.ROOT)
+                                val destructive=actionText=="delete"||actionText.startsWith("delete ")||actionText=="sign out"||actionText=="remove"||actionText=="discard"||actionText=="empty trash"
                                 val disabled = intArrayOf(-android.R.attr.state_enabled)
+                                val foreground=if(primary)0xFFFFFFFF.toInt() else if(destructive)0xFFB42336.toInt() else 0xFF174C94.toInt()
                                 setTextColor(android.content.res.ColorStateList(
-                                    arrayOf(disabled, intArrayOf()), intArrayOf(0xFF66758A.toInt(), if (primary) 0xFFFFFFFF.toInt() else 0xFF174C94.toInt())))
+                                    arrayOf(disabled, intArrayOf()), intArrayOf(0xFF66758A.toInt(), foreground)))
                                 val surface = android.graphics.drawable.StateListDrawable().apply {
-                                    addState(disabled, rounded(0xFFE8EDF5.toInt(), 12))
-                                    addState(intArrayOf(), if (destructive) gradient(0xFFC93649.toInt(),0xFF9F2034.toInt(),12) else if (primary) gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 12)
-                                        else rounded(0xFFF0F5FC.toInt(), 12, 0xFFDCE7F5.toInt()))
+                                    addState(disabled, rounded(0xFFE8EDF5.toInt(), 14))
+                                    addState(intArrayOf(), if (destructive && primary) gradient(0xFFC93649.toInt(),0xFF9F2034.toInt(),14) else if (primary) gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 14)
+                                        else if(destructive)rounded(0xFFFFF1F2.toInt(),14,0xFFF2CDD3.toInt())
+                                        else rounded(0xFFF0F5FC.toInt(), 14, 0xFFDCE7F5.toInt()))
                                 }
                                 backgroundTintList = null
                                 background = android.graphics.drawable.RippleDrawable(
                                     android.content.res.ColorStateList.valueOf(if (primary) 0x33FFFFFF else 0x223478F6), surface, null)
+                                stateListAnimator=null
+                                elevation=0f
                             }
                         }
                         styleAction(AlertDialog.BUTTON_POSITIVE, true)
