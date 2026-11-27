@@ -986,7 +986,7 @@ class MainActivity : AppCompatActivity() {
         return setAdapter(adapter,listener)
     }
 
-    private fun appDialog(): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
+    private fun appDialog(fullScreen: Boolean = false): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
         override fun create(): AlertDialog {
             val dialog = super.create()
             dialog.window?.decorView?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -994,10 +994,16 @@ class MainActivity : AppCompatActivity() {
                     view.post {
                         if (!dialog.isShowing) return@post
                         dialog.window?.apply {
-                            setLayout(minOf(dp(560), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(1))), attributes.height)
-                            setDimAmount(0.52f)
+                            if (fullScreen) {
+                                setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                                setDimAmount(0f)
+                            } else {
+                                setLayout(minOf(dp(560), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(1))), attributes.height)
+                                setDimAmount(0.52f)
+                            }
                             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                            setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 26, 0xFFD9E5F5.toInt()))
+                            setBackgroundDrawable(if (fullScreen) android.graphics.drawable.ColorDrawable(0xFFFFFFFF.toInt())
+                                else rounded(0xFFFFFFFF.toInt(), 26, 0xFFD9E5F5.toInt()))
                         }
                         // Decorate the existing native title rather than replacing it. This preserves
                         // accessibility, custom titles, dynamic titles, native list and form callbacks.
@@ -11543,7 +11549,7 @@ class MainActivity : AppCompatActivity() {
             while(true){val n=input.read(buffer);if(n<0)break;require(out.size()+n<=2*1024*1024){"Text preview supports up to 2 MB"};out.write(buffer,0,n)}
             out.toByteArray()
         }?:error("Cannot open text")
-        return DocumentViewerPlan.decodeText(bytes).take(500_000)
+        return DocumentViewerPlan.decodeText(bytes)
     }
     private fun readViewerArchive(uri:Uri):String {
         val temp=java.io.File.createTempFile("viewer_zip_",".tmp",cacheDir)
@@ -11571,19 +11577,19 @@ class MainActivity : AppCompatActivity() {
         viewerRemember(uri)
         activeDocumentViewer?.dismiss()
         val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(8),dp(14),dp(8))}
-        val detail=label(name,15f,0xFF172B4D.toInt(),true)
+        val detail=label(name,15f,0xFF172B4D.toInt(),true).apply{maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.MIDDLE}
         panel.addView(detail)
         val state=label("Opening document…",12f,0xFF52627A.toInt())
         panel.addView(state);panel.addView(gap(8))
         val controls=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
         val body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        panel.addView(controls);panel.addView(body)
+        panel.addView(controls);panel.addView(body,LinearLayout.LayoutParams(-1,0,1f))
         val actionRow=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
         val more=nativeButton(this,ButtonRole.Secondary).apply{text="More actions"}
         val share=nativeButton(this,ButtonRole.Primary).apply{text="Share"}
         actionRow.addView(share,LinearLayout.LayoutParams(0,-2,1f));actionRow.addView(more,LinearLayout.LayoutParams(0,-2,1f))
         panel.addView(gap(6));panel.addView(actionRow)
-        val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.79f)).setNegativeButton("Close",null).create()
+        val dialog=appDialog(fullScreen=true).setTitle("Original Document Viewer").setView(panel).setNegativeButton("Close",null).create()
         activeDocumentViewer=dialog
         var currentBitmap:Bitmap?=null
         var previewImage:ImageView?=null
@@ -11618,26 +11624,92 @@ class MainActivity : AppCompatActivity() {
         fun showText(value:String,notice:String){
             textContent=value
             state.text=notice
-            val search=EditText(this).apply{hint="Find in preview";setSingleLine(true)}
-            val result=label("",11f,0xFF52627A.toInt())
-            val text=label(value,14f,0xFF172B4D.toInt()).apply{setTextIsSelectable(true);setPadding(dp(10),dp(10),dp(10),dp(10))}
-            val textScroll=ScrollView(this).apply{addView(text);background=rounded(0xFFF5F8FF.toInt(),12,0xFFDCE7F5.toInt())}
-            val find=nativeButton(this,ButtonRole.Secondary).apply{this.text="Find next"}
-            var offset=0;var lastQuery=""
+            controls.removeAllViews()
+            body.removeAllViews()
+            val search=EditText(this).apply{
+                hint="Find in document";setSingleLine(true);setTextSize(13f);minimumHeight=dp(48)
+                background=rounded(0xFFF3F7FF.toInt(),12,0xFFD4E2F4.toInt())
+                setPadding(dp(10),dp(8),dp(10),dp(8))
+            }
+            val find=nativeButton(this,ButtonRole.Secondary).apply{this.text="Find"}
+            val searchRow=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
+            searchRow.addView(search,LinearLayout.LayoutParams(0,-2,1f));searchRow.addView(find,LinearLayout.LayoutParams(dp(72),-2))
+            body.addView(searchRow)
+            val result=label("",11f,0xFF52627A.toInt()).apply{accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE}
+            body.addView(result)
+            val readerText=label("",14f,0xFF172B4D.toInt()).apply{
+                typeface=android.graphics.Typeface.MONOSPACE
+                setTextIsSelectable(true)
+                setPadding(dp(12),dp(12),dp(12),dp(12))
+            }
+            val textScroll=ScrollView(this).apply{
+                isFillViewport=true
+                background=rounded(0xFFFFFFFF.toInt(),12,0xFFDCE7F5.toInt())
+                addView(readerText,ViewGroup.LayoutParams(-1,-2))
+            }
+            body.addView(textScroll,LinearLayout.LayoutParams(-1,0,1f))
+            val offsets=mutableListOf(0)
+            var cursor=0
+            while(cursor<value.length){
+                var boundary=minOf(value.length,cursor+24000)
+                if(boundary<value.length){
+                    val newline=value.lastIndexOf('\n',boundary-1)
+                    if(newline>=cursor+12000)boundary=newline+1
+                    else if(boundary>cursor&&Character.isHighSurrogate(value[boundary-1]))boundary--
+                }
+                cursor=boundary
+                offsets.add(cursor)
+            }
+            if(offsets.size==1)offsets.add(0)
+            var section=0
+            var font=14f
+            var offset=0
+            var lastQuery=""
+            val previous=nativeButton(this).apply{this.text="‹";contentDescription="Previous text section"}
+            val nextSection=nativeButton(this).apply{this.text="›";contentDescription="Next text section"}
+            val smaller=nativeButton(this).apply{this.text="A−";contentDescription="Smaller text"}
+            val larger=nativeButton(this).apply{this.text="A+";contentDescription="Larger text"}
+            val sectionLabel=label("",11f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER}
+            controls.addView(smaller,LinearLayout.LayoutParams(0,-2,1f));controls.addView(larger,LinearLayout.LayoutParams(0,-2,1f))
+            if(offsets.size>2){
+                controls.addView(previous,LinearLayout.LayoutParams(0,-2,1f))
+                controls.addView(sectionLabel,LinearLayout.LayoutParams(0,-1,1.5f))
+                controls.addView(nextSection,LinearLayout.LayoutParams(0,-2,1f))
+            }
+            fun renderSection(match:Int=-1,length:Int=0){
+                val begin=offsets[section]
+                val end=offsets[section+1]
+                val fragment=value.substring(begin,end)
+                if(match>=begin&&match<end){
+                    val span=android.text.SpannableString(fragment)
+                    span.setSpan(android.text.style.BackgroundColorSpan(0xFFFFDB75.toInt()),match-begin,minOf(end,match+length)-begin,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    readerText.text=span
+                    readerText.post{val layout=readerText.layout;if(layout!=null)textScroll.scrollTo(0,layout.getLineTop(layout.getLineForOffset(match-begin)))}
+                }else{
+                    readerText.text=fragment
+                    textScroll.scrollTo(0,0)
+                }
+                sectionLabel.text=(section+1).toString()+"/"+(offsets.size-1)
+                previous.isEnabled=section>0;nextSection.isEnabled=section+2<offsets.size
+            }
+            previous.setOnClickListener{if(section>0){section--;renderSection()}}
+            nextSection.setOnClickListener{if(section+2<offsets.size){section++;renderSection()}}
+            smaller.setOnClickListener{font=(font-1f).coerceAtLeast(10f);readerText.textSize=font}
+            larger.setOnClickListener{font=(font+1f).coerceAtMost(28f);readerText.textSize=font}
             find.setOnClickListener{
-                val query=search.text.toString().trim()
+                val query=search.text.toString()
                 if(query.isEmpty())return@setOnClickListener
                 if(lastQuery!=query){offset=0;lastQuery=query}
                 var at=value.indexOf(query,offset,ignoreCase=true)
                 if(at<0)at=value.indexOf(query,0,ignoreCase=true)
                 if(at<0){result.text="No match";return@setOnClickListener}
-                val span=android.text.SpannableString(value)
-                span.setSpan(android.text.style.BackgroundColorSpan(0xFFFFDB75.toInt()),at,at+query.length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                text.text=span;offset=at+query.length;result.text="Match at character "+(at+1)
-                text.post{val layout=text.layout;if(layout!=null)textScroll.smoothScrollTo(0,layout.getLineTop(layout.getLineForOffset(at)))}
+                section=(offsets.binarySearch(at).let{if(it>=0)it else -it-2}).coerceIn(0,offsets.size-2)
+                offset=at+query.length
+                result.text="Match at character "+(at+1)
+                renderSection(at,query.length)
+                (getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.hideSoftInputFromWindow(search.windowToken,0)
             }
-            body.addView(search);body.addView(find);body.addView(result)
-            body.addView(textScroll,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.39f).toInt()))
+            renderSection()
         }
         dialog.setOnDismissListener{
             generation++
@@ -11651,7 +11723,7 @@ class MainActivity : AppCompatActivity() {
             previewImage=image
             val vertical=ScrollView(this).apply{isFillViewport=false;addView(image,ViewGroup.LayoutParams(-1,-2))}
             val horizontal=HorizontalScrollView(this).apply{addView(vertical,ViewGroup.LayoutParams(-2,-1));isFillViewport=true}
-            body.addView(horizontal,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.43f).toInt()))
+            body.addView(horizontal,LinearLayout.LayoutParams(-1,0,1f))
             var page=0;var count=1;var zoom=1f
             val prev=nativeButton(this).apply{text="‹";isEnabled=false;contentDescription="Previous page"}
             val next=nativeButton(this).apply{text="›";isEnabled=false;contentDescription="Next page"}
@@ -11660,7 +11732,8 @@ class MainActivity : AppCompatActivity() {
             if(kind==DocumentViewerPlan.Kind.PDF){controls.addView(prev,LinearLayout.LayoutParams(0,-2,1f));controls.addView(next,LinearLayout.LayoutParams(0,-2,1f))}
             controls.addView(minus,LinearLayout.LayoutParams(0,-2,1f));controls.addView(plus,LinearLayout.LayoutParams(0,-2,1f))
             fun applyZoom(){
-                val width=(resources.displayMetrics.widthPixels*0.78f*zoom).toInt().coerceAtLeast(dp(120))
+                val available=if(horizontal.width>0)horizontal.width else resources.displayMetrics.widthPixels-dp(48)
+                val width=(available*zoom).toInt().coerceAtLeast(dp(120))
                 vertical.layoutParams=vertical.layoutParams.apply{this.width=width}
                 image.layoutParams=image.layoutParams.apply{this.width=width}
             }
@@ -11679,7 +11752,7 @@ class MainActivity : AppCompatActivity() {
                                     pages=renderer.pageCount
                                     require(index in 0 until pages){"No PDF pages"}
                                     renderer.openPage(index).use{p->
-                                        val scale=minOf(3f,2200f/maxOf(p.width,p.height).toFloat())
+                                        val scale=minOf(4f,3000f/maxOf(p.width,p.height).toFloat())
                                         val target=Bitmap.createBitmap((p.width*scale).toInt().coerceAtLeast(1),(p.height*scale).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
                                         bitmap=target;target.eraseColor(android.graphics.Color.WHITE)
                                         p.render(target,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -11703,19 +11776,39 @@ class MainActivity : AppCompatActivity() {
             next.setOnClickListener{if(valid()&&page+1<count){page++;render()}}
             minus.setOnClickListener{zoom=(zoom-0.25f).coerceAtLeast(0.75f);applyZoom()}
             plus.setOnClickListener{zoom=(zoom+0.25f).coerceAtMost(3f);applyZoom()}
-            applyZoom();render()
-        }else if(kind==DocumentViewerPlan.Kind.OFFICE||kind==DocumentViewerPlan.Kind.TEXT||kind==DocumentViewerPlan.Kind.ZIP){
+            horizontal.post{if(valid())applyZoom()};render()
+        }else if(kind==DocumentViewerPlan.Kind.OFFICE||kind==DocumentViewerPlan.Kind.EXTERNAL){
+            state.text="Original format • No file conversion"
+            val options=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+            val scroll=ScrollView(this).apply{addView(options)}
+            body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+            popupHeader(options,"DOCNEXA • ORIGINAL FILE","Open original document","Use a compatible installed app to preserve the document layout.")
+            addPopupOption(options,"document","Open original file","Choose an installed viewer for this file type.",true){if(valid())openViewerExternal(uri,mime)}
+            if(kind==DocumentViewerPlan.Kind.OFFICE){
+                addPopupOption(options,"document","Offline text only","Optional text extraction; not the original Office layout."){
+                    if(valid()){
+                        state.text="Reading offline text…"
+                        viewerReadExecutor.execute{
+                            try{
+                                val value=readOfficeViewerText(uri,DocumentViewerPlan.officeExtension(name,mime))
+                                runOnUiThread{if(valid())showText(value,"Offline text only • Office layout and images not shown")}
+                            }catch(_:Exception){runOnUiThread{if(valid())state.text="Text extraction unavailable. Open the original file instead."}}
+                            catch(_:OutOfMemoryError){runOnUiThread{if(valid())state.text="Not enough memory for text extraction."}}
+                        }
+                    }
+                }
+            }
+            options.addView(label("The original file is unchanged. A compatible app is required for this format; DocNexa does not include a full Office layout engine.",12f,0xFF52627A.toInt()))
+        }else if(kind==DocumentViewerPlan.Kind.TEXT||kind==DocumentViewerPlan.Kind.ZIP){
             viewerReadExecutor.execute{
                 try{
                     val value=when(kind){
-                        DocumentViewerPlan.Kind.OFFICE->readOfficeViewerText(uri,DocumentViewerPlan.officeExtension(name,mime))
                         DocumentViewerPlan.Kind.ZIP->readViewerArchive(uri)
                         else->readViewerText(uri)
                     }
                     runOnUiThread{if(valid())showText(value,when(kind){
-                        DocumentViewerPlan.Kind.OFFICE->"Offline text preview • original formatting, charts and images not shown"
                         DocumentViewerPlan.Kind.ZIP->"Archive contents only • no files extracted"
-                        else->"Read-only text preview • up to 500,000 characters"
+                        else->"Original text • Read-only • "+value.length+" characters"
                     })}
                 }catch(_:Exception){runOnUiThread{if(valid())state.text="Preview unavailable or file exceeds preview limits. Open in another app."}}
                 catch(_:OutOfMemoryError){runOnUiThread{if(valid())state.text="Not enough memory to preview this file."}}
