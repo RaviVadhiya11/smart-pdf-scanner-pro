@@ -2213,239 +2213,206 @@ class MainActivity : AppCompatActivity() {
     private fun showAppDrawer() {
         val drawer = android.app.Dialog(this)
         val screenWidth = resources.displayMetrics.widthPixels
+        val drawerWidth = minOf(dp(400), (screenWidth * 0.90f).toInt())
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFFFFFFF.toInt())
+            background = rounded(0xFFF5F8FF.toInt(), 20)
+            clipToOutline = true
         }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            isVerticalScrollBarEnabled = true
+            isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
-            setPadding(0, 0, 0, dp(8))
         }
         val menu = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, dp(20))
+            setPadding(dp(12), dp(12), dp(12), dp(18))
         }
-        val account = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(28), dp(16), dp(24))
-            setBackgroundColor(0xFF1D3B4A.toInt())
+        val signedIn = cloudToken().isNotBlank() && signedInUserId() != "guest"
+        val signedInEmail = if (signedIn) prefs.getString("cloud_email", "").orEmpty() else ""
+        val premium = hasVerifiedPremium()
+        val online = isInternetAvailable()
+        val driveEmail = prefs.getString(accountPrefKey("drive_last_email"), "").orEmpty()
+        fun ripple(surface: android.graphics.drawable.Drawable, light: Boolean = false) =
+            android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(if(light)0x33FFFFFF else 0x223478F6),surface,null)
+        fun addCard(view: View, bottom: Int = 10) {
+            menu.addView(view, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(bottom) })
         }
-        val accountAvatar = FrameLayout(this).apply {
-            background = rounded(0xFF3478F6.toInt(), 22, 0xFF75B8FF.toInt())
-            elevation = dp(3).toFloat()
-            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
-        }
-        accountAvatar.addView(ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_myplaces)
-            setColorFilter(0xFFFFFFFF.toInt())
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "DocNexa account profile"
-            layoutParams = FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER)
-        })
-        account.addView(accountAvatar)
-        val accountText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
-        accountText.addView(label("Sign In (Cloud)", 18f, 0xFFFFFFFF.toInt(), true))
-        accountText.addView(gap(5))
-        accountText.addView(label("Sign in to sync documents", 13f, 0xFFE5EDF3.toInt()))
-        accountText.removeAllViews()
-        val signedInEmail = prefs.getString("cloud_email", null)
-        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign In (Cloud)" else signedInEmail, 18f, 0xFFFFFFFF.toInt(), true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
-        accountText.addView(gap(5))
-        accountText.addView(label(if (signedInEmail.isNullOrBlank()) "Sign in to sync documents" else "Cloud account connected", 13f, 0xFFE5EDF3.toInt()))
-        account.isClickable = true
-        account.isFocusable = true
-        account.setOnClickListener { drawer.dismiss(); if(cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu() }
-        account.addView(accountText, LinearLayout.LayoutParams(0, -2, 1f))
-        menu.addView(account)
-        val onlineState = isInternetAvailable()
-        menu.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(22), dp(10), dp(16), dp(10))
-            setBackgroundColor(0xFFF4F7FC.toInt())
-            addView(TextView(this@MainActivity).apply {
-                text = if (onlineState) "●" else "●"
-                textSize = 15f
-                setTextColor(if (onlineState) 0xFF159B68.toInt() else 0xFFD65A5A.toInt())
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = if (onlineState) "ONLINE MODE  •  Internet connected" else "OFFLINE MODE  •  No internet"
-                textSize = 11f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setTextColor(0xFF34445E.toInt())
-                setPadding(dp(8), 0, 0, 0)
-            })
-        })
-
-        // Clearly visible Login and Signup actions in the drawer header area.
-        val authActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(16), dp(12), dp(16), dp(16))
-            setBackgroundColor(0xFF1D3B4A.toInt())
-        }
-        val loginButton = TextView(this).apply {
-            text = if (signedInEmail.isNullOrBlank()) "LOGIN" else "ACCOUNT"
-            textSize = 13f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            background = rounded(0xFF3478F6.toInt(), 10)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                drawer.dismiss()
-                if (cloudToken().isBlank()) showCloudLoginDialog() else cloudAccountMenu()
+        fun iconTile(symbol: String, tint: Int = 0xFF2563EB.toInt(), fill: Int = 0xFFEAF2FF.toInt(), drive: Boolean = false): FrameLayout =
+            FrameLayout(this).apply {
+                background=rounded(fill,12)
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                if(drive) addView(driveBrandIcon(),FrameLayout.LayoutParams(dp(25),dp(25),Gravity.CENTER))
+                else addView(label(symbol,20f,tint,true).apply{gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,-1))
             }
+        fun accountAction() { drawer.dismiss(); if(signedIn)cloudAccountMenu() else showCloudLoginDialog() }
+        val hero=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(14),dp(14),dp(14),dp(14))
+            background=gradient(0xFF103F91.toInt(),0xFF071E50.toInt(),18)
         }
-        val signupButton = TextView(this).apply {
-            text = if (signedInEmail.isNullOrBlank()) "SIGN UP" else "SIGN OUT"
-            textSize = 13f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(if (signedInEmail.isNullOrBlank()) 0xFF17324D.toInt() else 0xFFFFFFFF.toInt())
-            background = rounded(if (signedInEmail.isNullOrBlank()) 0xFFFFFFFF.toInt() else 0xFFD94B55.toInt(), 10)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                drawer.dismiss()
-                if (cloudToken().isBlank()) showCloudLoginDialog(startWithSignup = true) else confirmCloudSignOut()
+        val top=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL }
+        top.addView(label("DOCNEXA  •  WORKSPACE",10f,0xFFC1D7FF.toInt(),true),LinearLayout.LayoutParams(0,-2,1f))
+        val close=FrameLayout(this).apply {
+            background=ripple(rounded(0x33FFFFFF,12),true)
+            contentDescription="Close navigation menu"
+            isClickable=true;isFocusable=true
+            addView(label("×",23f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,-1))
+            setOnClickListener{drawer.dismiss()}
+        }
+        top.addView(close,LinearLayout.LayoutParams(dp(48),dp(48)))
+        hero.addView(top);hero.addView(gap(8))
+        val account=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+            isClickable=true;isFocusable=true
+            background=ripple(rounded(0x12FFFFFF,14),true)
+            setPadding(dp(8),dp(10),dp(8),dp(10))
+            setOnClickListener{accountAction()}
+        }
+        val avatar=FrameLayout(this).apply {
+            background=rounded(0xFF3478F6.toInt(),18,0xFF79B5FF.toInt())
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        if(signedInEmail.isNotBlank()) avatar.addView(label(signedInEmail.take(1).uppercase(Locale.ROOT),25f,0xFFFFFFFF.toInt(),true).apply{gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,-1))
+        else avatar.addView(ImageView(this).apply{setImageResource(android.R.drawable.ic_menu_myplaces);setColorFilter(0xFFFFFFFF.toInt())},FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER))
+        account.addView(avatar,LinearLayout.LayoutParams(dp(52),dp(52)))
+        val accountText=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,0,0)}
+        accountText.addView(label(if(signedIn)"Your account" else "Welcome to DocNexa",16f,0xFFFFFFFF.toInt(),true))
+        accountText.addView(label(if(signedIn)signedInEmail.ifBlank{"Signed-in account"} else "Sign in to access cloud features",12f,0xFFDCE8FF.toInt()).apply{maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END})
+        account.addView(accountText,LinearLayout.LayoutParams(0,-2,1f));hero.addView(account)
+        hero.addView(gap(10))
+        val statuses=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
+        fun chip(text:String,fg:Int,bg:Int):TextView=label(text,11f,fg,true).apply{
+            gravity=Gravity.CENTER;setPadding(dp(7),dp(7),dp(7),dp(7));background=rounded(bg,10)
+        }
+        statuses.addView(chip(if(online)"● Online" else "● Offline",if(online)0xFFB7F2CE.toInt() else 0xFFFFD4BE.toInt(),0x26FFFFFF),LinearLayout.LayoutParams(0,-2,1f).apply{rightMargin=dp(4)})
+        statuses.addView(chip(if(premium)"Premium active" else "Free plan",if(premium)0xFFFFD66B.toInt() else 0xFFDCE8FF.toInt(),0x26FFFFFF),LinearLayout.LayoutParams(0,-2,1f).apply{leftMargin=dp(4)})
+        hero.addView(statuses);hero.addView(gap(10))
+        val authActions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        authActions.addView(nativeButton(this,ButtonRole.Primary).apply{
+            text=if(signedIn)"Account" else "Sign in"
+            setOnClickListener{accountAction()}
+        },LinearLayout.LayoutParams(0,-2,1f))
+        authActions.addView(nativeButton(this,if(signedIn)ButtonRole.Danger else ButtonRole.Secondary).apply{
+            text=if(signedIn)"Sign out" else "Sign up"
+            setOnClickListener{drawer.dismiss();if(signedIn)confirmCloudSignOut() else showCloudLoginDialog(startWithSignup=true)}
+        },LinearLayout.LayoutParams(0,-2,1f))
+        hero.addView(authActions);addCard(hero)
+        val membership=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(12),dp(14),dp(12),dp(14));minimumHeight=dp(82)
+            background=ripple(gradient(0xFF173578.toInt(),0xFF633CB2.toInt(),16),true)
+            isClickable=true;isFocusable=true
+            setOnClickListener{drawer.dismiss();studioPremiumInfo()}
+        }
+        membership.addView(FrameLayout(this).apply{
+            background=rounded(0x33FFFFFF,12)
+            addView(homeHeaderGlyph("crown"),FrameLayout.LayoutParams(-1,-1))
+        },LinearLayout.LayoutParams(dp(44),dp(48)))
+        val membershipCopy=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,dp(4),0)}
+        membershipCopy.addView(label(if(premium)"Premium membership" else "Upgrade to Premium",16f,0xFFFFFFFF.toInt(),true))
+        membershipCopy.addView(label(if(premium)"Manage your subscription" else "Ad-free • Advanced PDF • Pro tools",11f,0xFFE6DCFF.toInt()))
+        membership.addView(membershipCopy,LinearLayout.LayoutParams(0,-2,1f))
+        membership.addView(label("›",24f,0xFFFFD66B.toInt(),true));addCard(membership)
+        var activeSection:LinearLayout=menu
+        fun section(title:String,initiallyExpanded:Boolean=false) {
+            val card=LinearLayout(this).apply{
+                orientation=LinearLayout.VERTICAL
+                background=rounded(0xFFFFFFFF.toInt(),16,0xFFDCE7F5.toInt())
+                setPadding(dp(6),dp(4),dp(6),dp(4))
             }
-        }
-        authActions.addView(loginButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(6) })
-        authActions.addView(signupButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(6) })
-        menu.addView(authActions)
-
-        // Reference-style full-width membership banner, below the account area.
-        val membership = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = gradient(0xFF087C56.toInt(), 0xFF087E70.toInt(), 0)
-            isClickable = true; isFocusable = true
-            contentDescription = if(hasVerifiedPremium()) "Premium active, manage subscription" else "Upgrade to Premium, compare plans"
-            setOnClickListener { drawer.dismiss(); studioPremiumInfo() }
-        }
-        fun goldRule() = View(this).apply { setBackgroundColor(0xFFE7B94F.toInt()) }
-        membership.addView(goldRule(), LinearLayout.LayoutParams(-1, dp(2)))
-        val membershipRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(15), dp(13), dp(14), dp(13))
-        }
-        val crown = label("♛", 28f, 0xFFFFD66B.toInt(), true).apply {
-            gravity = Gravity.CENTER
-            background = rounded(0xFF075E49.toInt(), 14)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        membershipRow.addView(crown, LinearLayout.LayoutParams(dp(42), dp(46)))
-        val membershipCopy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(5), 0) }
-        membershipCopy.addView(label(if(hasVerifiedPremium()) "Premium Active" else "Upgrade to Premium", 17f, 0xFFFFFFFF.toInt(), true))
-        membershipCopy.addView(gap(4))
-        membershipCopy.addView(label(if(hasVerifiedPremium()) "Ad-free access • Manage membership" else "Unlock advanced tools and go ads free!", 12f, 0xFFFFFFFF.toInt()))
-        membershipRow.addView(membershipCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        membershipRow.addView(label("›", 30f, 0xFFFFD66B.toInt(), true))
-        membership.addView(membershipRow)
-        membership.addView(goldRule(), LinearLayout.LayoutParams(-1, dp(2)))
-        menu.addView(membership)
-
-        var activeSection: LinearLayout = menu
-        fun section(title: String, initiallyExpanded: Boolean = false) {
-            val heading = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(58); setPadding(dp(20), dp(15), dp(18), dp(15))
-                isClickable = true; isFocusable = true
-                setBackgroundResource(android.R.drawable.list_selector_background)
+            val heading=LinearLayout(this).apply{
+                orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+                minimumHeight=dp(48);setPadding(dp(10),dp(8),dp(10),dp(8))
+                isClickable=true;isFocusable=true;background=ripple(rounded(0xFFFFFFFF.toInt(),12))
             }
-            val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            val stateKey = "drawer_section_" + title.lowercase(Locale.ROOT).replace(" ", "_")
-            val expanded = prefs.getBoolean(stateKey, initiallyExpanded)
-            group.visibility = if(expanded) View.VISIBLE else View.GONE
-            heading.addView(label(title, 16f, 0xFF172B4D.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
-            val arrow = label(if(expanded) "⌃" else "⌄", 21f, 0xFF718096.toInt(), true)
+            val group=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+            val stateKey="drawer_section_"+title.lowercase(Locale.ROOT).replace(" ","_")
+            val expanded=prefs.getBoolean(stateKey,initiallyExpanded)
+            group.visibility=if(expanded)View.VISIBLE else View.GONE
+            heading.addView(label(title,14f,0xFF172B4D.toInt(),true),LinearLayout.LayoutParams(0,-2,1f))
+            val arrow=label(if(expanded)"⌃" else "⌄",18f,0xFF64748B.toInt(),true)
             heading.addView(arrow)
-            heading.contentDescription = title + if(expanded) ", expanded" else ", collapsed"
-            heading.setOnClickListener {
-                val open = group.visibility != View.VISIBLE
-                group.visibility = if(open) View.VISIBLE else View.GONE
-                arrow.text = if(open) "⌃" else "⌄"
-                heading.contentDescription = title + if(open) ", expanded" else ", collapsed"
-                prefs.edit().putBoolean(stateKey, open).apply()
+            heading.contentDescription=title+if(expanded)", expanded" else ", collapsed"
+            heading.setOnClickListener{
+                val open=group.visibility!=View.VISIBLE
+                group.visibility=if(open)View.VISIBLE else View.GONE
+                arrow.text=if(open)"⌃" else "⌄"
+                heading.contentDescription=title+if(open)", expanded" else ", collapsed"
+                prefs.edit().putBoolean(stateKey,open).apply()
             }
-            menu.addView(heading)
-            menu.addView(group)
-            activeSection = group
+            card.addView(heading);card.addView(group);addCard(card);activeSection=group
         }
-        fun item(icon: String, title: String, action: () -> Unit) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(28), dp(12), dp(16), dp(12)); minimumHeight = dp(54)
-                isClickable = true; isFocusable = true
-                setBackgroundResource(android.R.drawable.list_selector_background)
-                setOnClickListener { drawer.dismiss(); action() }
+        fun item(symbol:String,title:String,subtitle:String,drive:Boolean=false,action:()->Unit) {
+            val row=LinearLayout(this).apply {
+                orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+                setPadding(dp(8),dp(7),dp(8),dp(7));minimumHeight=dp(62)
+                isClickable=true;isFocusable=true
+                background=ripple(rounded(0xFFF8FAFF.toInt(),12))
+                setOnClickListener{drawer.dismiss();action()}
             }
-            row.addView(TextView(this).apply {
-                text = icon; textSize = 19f; gravity = Gravity.CENTER
-                setTextColor(0xFF168BC5.toInt()); background = rounded(0xFFEAF2FF.toInt(), 24)
-            }, LinearLayout.LayoutParams(dp(38), dp(38)))
-            row.addView(label(title, 15f, 0xFF161616.toInt(), true).apply { setPadding(dp(22), 0, 0, 0) })
-            activeSection.addView(row)
+            row.addView(iconTile(symbol,drive=drive),LinearLayout.LayoutParams(dp(40),dp(40)))
+            val copy=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,dp(5),0)}
+            copy.addView(label(title,14f,0xFF172B4D.toInt(),true))
+            copy.addView(label(subtitle,11f,0xFF64748B.toInt()))
+            row.addView(copy,LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(label("›",21f,0xFF7186A6.toInt()))
+            activeSection.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(4)})
         }
-        fun separator() { menu.addView(View(this).apply { setBackgroundColor(0xFFE6E6E6.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) }) }
-
-        section("General", true)
-        item("♡", "Favourite") { showFavouriteDocs() }
-        item("◇", "Manage tags") { manageTagsDialog() }
-        item("▤", "Trash") { showTrashScreen() }
-        item("☁", "Google Drive & Backup") { showDriveBackupHub() }
-        item("⚙", "Settings") { showSettingsDialog() }
-        separator()
+        section("General",true)
+        item("♡","Favourite","Your starred documents"){showFavouriteDocs()}
+        item("◇","Manage tags","Organize your files"){manageTagsDialog()}
+        item("▤","Trash","Restore or remove deleted files"){showTrashScreen()}
+        section("Backup & Cloud",true)
+        item("","Google Drive & Backup",if(driveEmail.isNotBlank())"Previously authorized • Check access" else "Connect, upload and restore",drive=true){showDriveBackupHub()}
+        section("Preferences",true)
+        item("⚙","Settings","App preferences and defaults"){showSettingsDialog()}
         section("Tools")
-        item("⚒", "PDF Tools") { showPdfTools() }
-        item("▧", "Image Studio") { showImageStudio() }
-        item("₹", "Bill / Invoice Maker") { showInvoiceStudio() }
-        item("✦", "AI Document Assistant") { showAiAssistant() }
-        item("▣", "Edit/Create PDF") { showEditCreateFileChoices() }
-        item("✍", "Signature") { openSignatureEditor() }
-        item("▦", "QR Scanner") { showQrScanner() }
-        item("▦", "QR Generator") { showQrGenerator() }
-        separator()
+        item("PDF","PDF Tools","Merge, split and convert"){showPdfTools()}
+        item("▧","Image Studio","Resize, convert and enhance"){showImageStudio()}
+        item("₹","Bill / Invoice Maker","Create professional billing PDFs"){showInvoiceStudio()}
+        item("✦","AI Document Assistant","Work with document content"){showAiAssistant()}
+        item("▣","Edit/Create PDF","Create and edit documents"){showEditCreateFileChoices()}
+        item("✍","Signature","Create your signature"){openSignatureEditor()}
+        item("▦","QR Scanner","Scan QR codes"){showQrScanner()}
+        item("▦","QR Generator","Create QR codes"){showQrGenerator()}
         section("Membership")
-        item("♛", "Compare plans") { studioPremiumInfo() }
-        item("↻", "Restore purchase") { if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true) }
-        item("⚙", "Manage subscription") { managePlaySubscription() }
-        separator()
+        item("♛","Compare plans","Explore Free and Premium"){studioPremiumInfo()}
+        item("↻","Restore purchase","Recover eligible membership"){if(cloudToken().isBlank())showCloudLoginDialog() else refreshPlayPurchases(true)}
+        item("⚙","Manage subscription","Open Google Play billing"){managePlaySubscription()}
         section("Other")
-        item("?", "Help and FAQ") { showHelpAndFaq() }
-        item("✉", "Contact us") { openFeedbackEmail(false) }
-        item("★", "Send feedback") { openFeedbackEmail(false, true) }
-        item("⚑", "Report a bug") { openFeedbackEmail(true) }
-        item("ⓘ", "About us") { showAboutDocNexa() }
-        separator()
+        item("?","Help and FAQ","Answers and guidance"){showHelpAndFaq()}
+        item("✉","Contact us","Get in touch with support"){openFeedbackEmail(false)}
+        item("★","Send feedback","Share your suggestions"){openFeedbackEmail(false,true)}
+        item("⚑","Report a bug","Report an issue"){openFeedbackEmail(true)}
+        item("ⓘ","About us","Learn about DocNexa"){showAboutDocNexa()}
         section("Privacy & Legal")
-        item("▣", "Privacy Policy") { showPrivacyPolicy() }
-        item("§", "Terms of Use") { showTermsOfUse() }
-        item("⌑", "Data and account help") { showDataHelp() }
+        item("▣","Privacy Policy","How data is handled"){showPrivacyPolicy()}
+        item("§","Terms of Use","Service terms"){showTermsOfUse()}
+        item("⌑","Data and account help","Account and data controls"){showDataHelp()}
         section("More")
-        item("↗", "Share with friends") { shareApp() }
-        item("★", "Rate us") { openRateUs() }
-
-        scroll.addView(menu)
-        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        item("↗","Share with friends","Share DocNexa"){shareApp()}
+        item("★","Rate us","Open the store listing"){openRateUs()}
+        @Suppress("DEPRECATION")
+        val version=runCatching{packageManager.getPackageInfo(packageName,0).versionName}.getOrNull().orEmpty()
+        val footer=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;setPadding(dp(8),dp(10),dp(8),dp(8))}
+        footer.addView(label("DocNexa"+if(version.isNotBlank())" • v"+version else "",12f,0xFF172B4D.toInt(),true))
+        footer.addView(label("PDF Scanner & Editor",11f,0xFF64748B.toInt()))
+        menu.addView(footer)
+        scroll.addView(menu);panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         drawer.setContentView(panel)
-        drawer.window?.apply {
+        drawer.setCanceledOnTouchOutside(true)
+        drawer.window?.apply{
             setBackgroundDrawableResource(android.R.color.transparent)
-            setDimAmount(0.45f)
+            setDimAmount(0.48f)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setLayout((screenWidth * 0.86f).toInt(), -1)
+            setLayout(drawerWidth,-1)
             setGravity(Gravity.START)
-            navigationBarColor = 0xFFFFFFFF.toInt()
+            navigationBarColor=0xFFF5F8FF.toInt()
         }
         drawer.show()
-        drawer.window?.setLayout((screenWidth * 0.86f).toInt(), -1)
+        drawer.window?.setLayout(drawerWidth,-1)
     }
 
     private fun showHelpAndFaq() {
