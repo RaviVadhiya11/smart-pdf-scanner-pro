@@ -798,6 +798,108 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun popupGlyph(symbol:String, color:Int): View = object : View(this) {
+        private val ink=Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color=color;strokeWidth=1.8f;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND;style=Paint.Style.STROKE
+        }
+        override fun onDraw(canvas:Canvas) {
+            super.onDraw(canvas)
+            val size=minOf(width,height,dp(28)).toFloat()
+            if(size<=0f)return
+            canvas.save();canvas.translate((width-size)/2f,(height-size)/2f);canvas.scale(size/24f,size/24f)
+            when(symbol){
+                "camera" -> {
+                    canvas.drawRoundRect(2f,6f,22f,21f,3f,3f,ink)
+                    canvas.drawLine(7f,6f,9f,3f,ink);canvas.drawLine(9f,3f,15f,3f,ink);canvas.drawLine(15f,3f,17f,6f,ink)
+                    canvas.drawCircle(12f,13.5f,4f,ink)
+                }
+                "gallery" -> {
+                    canvas.drawRoundRect(2f,3f,22f,21f,3f,3f,ink);canvas.drawCircle(8f,8f,1.8f,ink)
+                    val path=android.graphics.Path().apply{moveTo(3f,17f);lineTo(9f,11f);lineTo(13f,15f);lineTo(17f,10f);lineTo(22f,16f)}
+                    canvas.drawPath(path,ink)
+                }
+                "qr" -> {
+                    listOf(3f to 3f,15f to 3f,3f to 15f).forEach{(x,y)->canvas.drawRect(x,y,x+6f,y+6f,ink);canvas.drawPoint(x+3f,y+3f,ink)}
+                    canvas.drawLine(15f,15f,21f,15f,ink);canvas.drawLine(15f,15f,15f,21f,ink);canvas.drawLine(18f,18f,21f,21f,ink)
+                }
+                else -> {
+                    canvas.drawRoundRect(4f,2f,20f,22f,2f,2f,ink)
+                    for(y in listOf(8f,12f,16f))canvas.drawLine(8f,y,16f,y,ink)
+                }
+            }
+            canvas.restore()
+        }
+    }.apply{importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
+
+    private fun popupOptionCard(symbol:String,title:String,subtitle:String="",primary:Boolean=false,action:(()->Unit)?=null):LinearLayout {
+        val premium=title.contains("• PRO") || title.contains("Premium locked",true)
+        val danger=title.startsWith("Delete",true)||title.startsWith("Remove permanently",true)
+        val accent=if(primary)0xFFFFFFFF.toInt() else if(danger)0xFFB42336.toInt() else if(premium)0xFF5936AA.toInt() else 0xFF2563EB.toInt()
+        val surface=if(primary)gradient(0xFF1764DE.toInt(),0xFF0B3F99.toInt(),16)
+            else rounded(if(danger)0xFFFFF5F6.toInt() else if(premium)0xFFF7F3FF.toInt() else 0xFFF8FAFF.toInt(),16,0xFFDCE7F5.toInt())
+        val row=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
+            minimumHeight=dp(64);setPadding(dp(12),dp(10),dp(12),dp(10))
+            background=if(action!=null)android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(if(primary)0x33FFFFFF else 0x223478F6),surface,null)else surface
+            if(action!=null){isClickable=true;isFocusable=true;setOnClickListener{action()}}
+        }
+        val tile=FrameLayout(this).apply{
+            background=rounded(if(primary)0x26FFFFFF else if(premium)0xFFEDE5FF.toInt() else if(danger)0xFFFFE7EB.toInt() else 0xFFE4EEFF.toInt(),12)
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            when(symbol){
+                "drive" -> addView(driveBrandIcon(),FrameLayout.LayoutParams(dp(28),dp(28),Gravity.CENTER))
+                "camera","gallery","qr","document" -> addView(popupGlyph(symbol,accent),FrameLayout.LayoutParams(-1,-1))
+                else -> addView(label(symbol,if(symbol.length>2)12f else 20f,accent,true).apply{gravity=Gravity.CENTER},FrameLayout.LayoutParams(-1,-1))
+            }
+        }
+        row.addView(tile,LinearLayout.LayoutParams(dp(44),dp(44)))
+        val copy=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(11),0,dp(6),0)}
+        copy.addView(label(title,14f,if(primary)0xFFFFFFFF.toInt() else 0xFF172B4D.toInt(),true))
+        if(subtitle.isNotBlank()){copy.addView(gap(3));copy.addView(label(subtitle,12f,if(primary)0xFFDCE8FF.toInt() else 0xFF52627A.toInt()))}
+        row.addView(copy,LinearLayout.LayoutParams(0,-2,1f))
+        row.addView(label("›",22f,if(primary)0xFFFFFFFF.toInt() else 0xFF7186A6.toInt()).apply{importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO})
+        return row
+    }
+
+    private fun addPopupOption(panel:LinearLayout,symbol:String,title:String,subtitle:String,primary:Boolean=false,action:()->Unit){
+        panel.addView(popupOptionCard(symbol,title,subtitle,primary,action),LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(9)})
+    }
+
+    private fun popupHeader(panel:LinearLayout,kicker:String,title:String,subtitle:String){
+        val hero=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(14));background=gradient(0xFF103F91.toInt(),0xFF071E50.toInt(),16)
+        }
+        hero.addView(label(kicker,10f,0xFFC1D7FF.toInt(),true))
+        hero.addView(gap(5));hero.addView(label(title,18f,0xFFFFFFFF.toInt(),true))
+        hero.addView(gap(4));hero.addView(label(subtitle,12f,0xFFDCE8FF.toInt()))
+        panel.addView(hero,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(12)})
+    }
+
+    // Single-choice action menus keep the native ListView click dispatch and original indices.
+    // Radio/multi-choice dialogs retain their original adapters and selection widgets.
+    private fun AlertDialog.Builder.setPremiumItems(items:Array<out CharSequence>,listener:android.content.DialogInterface.OnClickListener):AlertDialog.Builder {
+        val adapter=object:android.widget.ArrayAdapter<CharSequence>(this@MainActivity,android.R.layout.simple_list_item_1,items.toList()){
+            override fun getView(position:Int,convertView:View?,parent:ViewGroup):View {
+                val value=getItem(position)?.toString().orEmpty()
+                val symbol=when{
+                    value.contains("Google Drive",true)->"drive"
+                    value.contains("gallery",true)->"gallery"
+                    value.contains("camera",true)->"camera"
+                    value.startsWith("Delete",true)->"×"
+                    value.contains("PDF",true)->"PDF"
+                    value.contains("Premium",true)->"♛"
+                    else->"document"
+                }
+                return LinearLayout(this@MainActivity).apply{
+                    orientation=LinearLayout.VERTICAL
+                    setPadding(dp(4),dp(3),dp(4),dp(3))
+                    addView(popupOptionCard(symbol,value),LinearLayout.LayoutParams(-1,-2))
+                }
+            }
+        }
+        return setAdapter(adapter,listener)
+    }
+
     private fun appDialog(): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
         override fun create(): AlertDialog {
             val dialog = super.create()
@@ -829,7 +931,7 @@ class MainActivity : AppCompatActivity() {
                             if (node is EditText) {
                                 node.setTextColor(0xFF172B4D.toInt())
                                 node.setHintTextColor(0xFF64748B.toInt())
-                                node.textSize = maxOf(node.textSize / resources.displayMetrics.scaledDensity, 14f)
+                                // Preserve explicit editor text sizes; native font scaling remains enabled.
                                 node.setPadding(dp(14), dp(12), dp(14), dp(12))
                                 node.minimumHeight = dp(48)
                                 node.background = rounded(0xFFF3F7FF.toInt(), 12, 0xFFD4E2F4.toInt())
@@ -848,8 +950,10 @@ class MainActivity : AppCompatActivity() {
                         }
                         styleDialogTree(view)
                         dialog.listView?.apply {
-                            divider = android.graphics.drawable.ColorDrawable(0xFFE7EDF6.toInt())
-                            dividerHeight = dp(1)
+                            divider = android.graphics.drawable.ColorDrawable(0x00000000)
+                            dividerHeight = dp(3)
+                            selector = rounded(0x223478F6,12)
+                            setDrawSelectorOnTop(true)
                             setPadding(dp(8), dp(4), dp(8), dp(4))
                             clipToPadding = false
                         }
@@ -861,12 +965,13 @@ class MainActivity : AppCompatActivity() {
                                 minHeight = dp(48)
                                 minimumHeight = dp(48)
                                 setPadding(dp(12), dp(8), dp(12), dp(8))
+                                val destructive = primary && text.toString().trim().lowercase(Locale.ROOT).let{it=="delete"||it=="delete permanently"||it=="sign out"||it=="remove"||it=="discard"}
                                 val disabled = intArrayOf(-android.R.attr.state_enabled)
                                 setTextColor(android.content.res.ColorStateList(
                                     arrayOf(disabled, intArrayOf()), intArrayOf(0xFF66758A.toInt(), if (primary) 0xFFFFFFFF.toInt() else 0xFF174C94.toInt())))
                                 val surface = android.graphics.drawable.StateListDrawable().apply {
                                     addState(disabled, rounded(0xFFE8EDF5.toInt(), 12))
-                                    addState(intArrayOf(), if (primary) gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 12)
+                                    addState(intArrayOf(), if (destructive) gradient(0xFFC93649.toInt(),0xFF9F2034.toInt(),12) else if (primary) gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 12)
                                         else rounded(0xFFF0F5FC.toInt(), 12, 0xFFDCE7F5.toInt()))
                                 }
                                 backgroundTintList = null
@@ -1739,7 +1844,7 @@ class MainActivity : AppCompatActivity() {
                 else if (matches.isEmpty()) appDialog().setTitle("No documents found")
                     .setMessage("No saved PDF matches: " + query).setPositiveButton("OK", null).show()
                 else appDialog().setTitle("Search results • " + matches.size)
-                    .setItems(matches.map { it.first }.toTypedArray()) { _, index -> openPdf(matches[index].second) }
+                    .setPremiumItems(matches.map { it.first }.toTypedArray()) { _, index -> openPdf(matches[index].second) }
                     .setNegativeButton("Close", null).show()
             }.setNegativeButton("Cancel", null).show()
     }
@@ -1893,21 +1998,14 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         val dialog = appDialog().setTitle("Edit or Create PDF")
-            .setView(android.widget.ScrollView(this).apply { addView(container) })
+            .setView(toolDialogScroll(container,0.72f))
             .setNegativeButton("Close", null)
             .create()
+        popupHeader(container,"DOCNEXA • PDF WORKSPACE","Create or edit documents","Choose a tool to get started.")
+        val icons=listOf("document","PDF","gallery","⇄","✎","W")
         options.forEachIndexed { index, title ->
-            val item = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(12), dp(16), dp(12))
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(if (index % 2 == 0) 0xFFF0F5FC.toInt() else 0xFFFFFFFF.toInt())
-                    cornerRadius = dp(14).toFloat()
-                }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    dialog.dismiss()
+            addPopupOption(container,icons[index],title.substringAfter("  "),descriptions[index]){
+                dialog.dismiss()
                     when (index) {
                         0 -> allFilesPicker.launch(arrayOf("*/*"))
                         1 -> pdfEditorPicker.launch(arrayOf("application/pdf"))
@@ -1916,23 +2014,7 @@ class MainActivity : AppCompatActivity() {
                         4 -> showPdfTools()
                         else -> officeDocumentPicker.launch(arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation"))
                     }
-                }
             }
-            item.addView(android.widget.TextView(this).apply {
-                text = title
-                textSize = 17f
-                setTextColor(0xFF132D50.toInt())
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            })
-            item.addView(android.widget.TextView(this).apply {
-                text = descriptions[index]
-                textSize = 12f
-                setTextColor(0xFF526579.toInt())
-                setPadding(0, dp(4), 0, 0)
-            })
-            container.addView(item, LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(8)
-            })
         }
         dialog.show()
     }
@@ -1945,7 +2027,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add("PDF / JPG").setOnMenuItemClickListener {
             appDialog()
                 .setTitle("PDF / JPG")
-                .setItems(arrayOf("Create PDF from images", "Open PDF file")) { _, which ->
+                .setPremiumItems(arrayOf("Create PDF from images", "Open PDF file")) { _, which ->
                     if (which == 0) imagePicker.launch(arrayOf("image/*"))
                     else pdfPicker.launch(arrayOf("application/pdf"))
                 }.show()
@@ -1961,7 +2043,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add("PDF Tools").setOnMenuItemClickListener { showPdfTools(); true }
         popup.menu.add("Sort By").setOnMenuItemClickListener {
             appDialog().setTitle("Sort documents")
-                .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
+                .setPremiumItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
                     prefs.edit().putInt("document_sort_order", which).apply()
                     buildScreen()
                 }.show()
@@ -2173,7 +2255,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(10), dp(8), dp(4), dp(8))
                 setOnClickListener {
                     appDialog().setTitle(name)
-                        .setItems(arrayOf("Restore document", "Delete permanently")) { _, action ->
+                        .setPremiumItems(arrayOf("Restore document", "Delete permanently")) { _, action ->
                             val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
                             if (action == 0) {
                                 set.remove(target.toString())
@@ -3033,7 +3115,7 @@ class MainActivity : AppCompatActivity() {
         if (!requireInternet("DocNexa Cloud account")) return
         appDialog().setTitle("DocNexa Cloud")
             .setMessage("Connected: ${prefs.getString("cloud_email", "")}")
-            .setItems(arrayOf("Sync now", "Sign out")) { _, which ->
+            .setPremiumItems(arrayOf("Sync now", "Sign out")) { _, which ->
                 if (which == 0) syncCloudNow() else confirmCloudSignOut()
             }.setNegativeButton("Close", null).show()
     }
@@ -3408,7 +3490,7 @@ class MainActivity : AppCompatActivity() {
         }
         menu.menu.add("Sort documents").setOnMenuItemClickListener {
             appDialog().setTitle("Sort documents")
-                .setItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
+                .setPremiumItems(arrayOf("Name (A–Z)", "Name (Z–A)", "Newest first", "Oldest first")) { _, which ->
                     prefs.edit().putInt("document_sort_order", which).apply()
                     showDocsScreen()
                 }.show()
@@ -3628,7 +3710,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(0xFF777777.toInt())
             setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
-                appDialog().setItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
+                appDialog().setPremiumItems(arrayOf("Open", "Rename", "Delete")) { _, which ->
                     when (which) {
                         0 -> showFolderContents(name)
                         1 -> renameFolder(name)
@@ -3741,7 +3823,7 @@ class MainActivity : AppCompatActivity() {
         action("Copy PDF", "Create another copy inside DocNexa", "▣") { copyPdfDocument(uri) }
         action("Tags and notes", "Add searchable labels or a date note", "⌑") {
             appDialog().setTitle("Document details")
-                .setItems(arrayOf("Edit tags", "Add date / time note")) { _, which ->
+                .setPremiumItems(arrayOf("Edit tags", "Add date / time note")) { _, which ->
                     if (which == 0) documentTagDialog(uri) else documentDateTimeDialog(uri)
                 }.show()
         }
@@ -3770,7 +3852,7 @@ class MainActivity : AppCompatActivity() {
             "Copy PDF", "Split PDF", "Rename", "Tags",
             "Date and Time setting", "Open with Google Docs", "Page Collage"
         )
-        appDialog().setTitle("More • $name").setItems(more) { _, which ->
+        appDialog().setTitle("More • $name").setPremiumItems(more) { _, which ->
             when (which) {
                 0 -> toggleFavourite(uri)
                 1 -> {
@@ -4013,7 +4095,7 @@ class MainActivity : AppCompatActivity() {
     private fun movePdfToFolder(uri: Uri) {
         if (homeFolders.isEmpty()) loadFolders()
         val folders = homeFolders.toTypedArray()
-        appDialog().setTitle("Move to Folder").setItems(folders) { _, which ->
+        appDialog().setTitle("Move to Folder").setPremiumItems(folders) { _, which ->
             folderAssignments[uri.toString()] = folders[which]
             prefs.edit().putString(accountPrefKey("folder_assignments"), folderAssignmentSnapshot()).apply()
             Toast.makeText(this, "Moved to ${folders[which]}", Toast.LENGTH_SHORT).show()
@@ -4161,7 +4243,7 @@ class MainActivity : AppCompatActivity() {
             appDialog().setTitle(folder).setMessage("This folder is empty. New PDFs created while this folder is selected will be saved here.").setPositiveButton("OK", null).show()
             return
         }
-        appDialog().setTitle(folder).setItems(names) { _, which -> openPdf(items[which].second) }
+        appDialog().setTitle(folder).setPremiumItems(names) { _, which -> openPdf(items[which].second) }
             .setPositiveButton("Close", null).show()
     }
 
@@ -4618,7 +4700,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDocumentEnhancer(uri: Uri) {
         val options = arrayOf("Natural contrast", "Clean grayscale", "High contrast text")
-        appDialog().setTitle("Image Quality Enhancer").setItems(options) { _, choice ->
+        appDialog().setTitle("Image Quality Enhancer").setPremiumItems(options) { _, choice ->
             advancedToolJob("Enhancing image…") {
                 val source = decodeImageSafely(uri, 2400)
                 val result = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
@@ -4650,7 +4732,7 @@ class MainActivity : AppCompatActivity() {
         if (!requirePremiumTool("Batch Document Studio")) return
         if (files.size > 20) { Toast.makeText(this, "Select up to 20 PDFs", Toast.LENGTH_LONG).show(); return }
         appDialog().setTitle("Batch Document Studio")
-            .setItems(arrayOf("Merge into one PDF", "Export ZIP archive")) { _, operation ->
+            .setPremiumItems(arrayOf("Merge into one PDF", "Export ZIP archive")) { _, operation ->
                 advancedToolJob("Processing batch…") {
                     val bytes = ByteArrayOutputStream()
                     if (operation == 0) {
@@ -4860,7 +4942,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (!isFinishing && !isDestroyed) {
                     appDialog().setTitle("PDF Redaction • Select page")
-                        .setItems(Array(count) { "Page " + (it + 1) }) { _, index -> showRedactionPreview(uri, index) }
+                        .setPremiumItems(Array(count) { "Page " + (it + 1) }) { _, index -> showRedactionPreview(uri, index) }
                         .setNegativeButton("Cancel", null).show()
                 }
             }
@@ -5576,7 +5658,7 @@ class MainActivity : AppCompatActivity() {
         if(files.size>10){Toast.makeText(this,"Select up to 10 images",Toast.LENGTH_LONG).show();return}
         val formats=arrayOf("jpg","png","webp","bmp")
         appDialog().setTitle(if(files.size==1)"Image Format Converter" else "Batch Image Converter")
-            .setItems(arrayOf("JPEG • white background","PNG • lossless","WebP • compact","BMP • uncompressed")){_,choice->
+            .setPremiumItems(arrayOf("JPEG • white background","PNG • lossless","WebP • compact","BMP • uncompressed")){_,choice->
                 val format=formats[choice]
                 advancedToolJob("Converting images…"){
                     if(files.size==1) {
@@ -5611,7 +5693,7 @@ class MainActivity : AppCompatActivity() {
     private fun studioResizeDialog(uri:Uri,social:Boolean){
         if(social){
             val sizes=listOf(1080 to 1080,1080 to 1920,1280 to 720,1200 to 630)
-            appDialog().setTitle("Social Media Resize").setItems(arrayOf("Square • 1080 × 1080","Story • 1080 × 1920","Thumbnail • 1280 × 720","Landscape • 1200 × 630")){_,i->
+            appDialog().setTitle("Social Media Resize").setPremiumItems(arrayOf("Square • 1080 × 1080","Story • 1080 × 1920","Thumbnail • 1280 × 720","Landscape • 1200 × 630")){_,i->
                 studioResize(uri,sizes[i].first,sizes[i].second,true)
             }.setNegativeButton("Cancel",null).show()
             return
@@ -5650,7 +5732,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun studioUpscaleDialog(uri:Uri){
         appDialog().setTitle("Image Upscaler • Resolution")
-            .setItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px",if(hasVerifiedPremium())"4K • 3840 px" else "4K • Premium locked",if(hasVerifiedPremium())"8K • 7680 px" else "8K • Premium locked")){_,i->
+            .setPremiumItems(arrayOf("HD • up to 1280 px","2K • up to 2048 px",if(hasVerifiedPremium())"4K • 3840 px" else "4K • Premium locked",if(hasVerifiedPremium())"8K • 7680 px" else "8K • Premium locked")){_,i->
                 if(i>=2 && !hasVerifiedPremium()){studioPremiumInfo();return@setItems}
                 advancedToolJob("Upscaling image…"){
                     val edge=listOf(1280,2048,3840,7680)[i]
@@ -5687,7 +5769,7 @@ class MainActivity : AppCompatActivity() {
                 }finally{client.close();source.recycle()}
             }
         }
-        if(change)appDialog().setTitle("Choose background").setItems(arrayOf("White","Light gray","Sky blue","Navy")){_,i->process(colors[i])}.setNegativeButton("Cancel",null).show()
+        if(change)appDialog().setTitle("Choose background").setPremiumItems(arrayOf("White","Light gray","Sky blue","Navy")){_,i->process(colors[i])}.setNegativeButton("Cancel",null).show()
         else process(null)
     }
 
@@ -5912,9 +5994,9 @@ class MainActivity : AppCompatActivity() {
     private fun showInvoiceHistory(){
         val records=getSavedPdfs().filter{it.first.startsWith("Billing_")}
         if(records.isEmpty()){appDialog().setTitle("Invoice History").setMessage("Your exported bills will appear here.").setPositiveButton("OK",null).show();return}
-        appDialog().setTitle("Invoice History").setItems(records.map{it.first}.toTypedArray()){_,i->
+        appDialog().setTitle("Invoice History").setPremiumItems(records.map{it.first}.toTypedArray()){_,i->
             val item=records[i]
-            appDialog().setTitle(item.first).setItems(arrayOf("Open PDF","Share PDF","Print PDF","Save a copy")){_,action->
+            appDialog().setTitle(item.first).setPremiumItems(arrayOf("Open PDF","Share PDF","Print PDF","Save a copy")){_,action->
                 when(action){0->openPdf(item.second);1->sharePdf(item.second);2->printPdfDocument(item.second);3->showExportSuccess(item.second,item.first,"application/pdf")}
             }.show()
         }.setNegativeButton("Close",null).show()
@@ -5924,9 +6006,9 @@ class MainActivity : AppCompatActivity() {
         val drafts=invoiceRecords("Drafts")
         val entries=(0 until drafts.length()).mapNotNull{drafts.optJSONObject(it)}
         if(entries.isEmpty()){appDialog().setTitle("Saved drafts").setMessage("Use Save draft in any bill editor to continue later.").setPositiveButton("OK",null).show();return}
-        appDialog().setTitle("Saved drafts").setItems(entries.map{it.optString("kind")+" • "+it.optString("number")+" • "+it.optString("customer").ifBlank{"Unnamed customer"}}.toTypedArray()){_,i->
+        appDialog().setTitle("Saved drafts").setPremiumItems(entries.map{it.optString("kind")+" • "+it.optString("number")+" • "+it.optString("customer").ifBlank{"Unnamed customer"}}.toTypedArray()){_,i->
             val item=entries[i]
-            appDialog().setTitle("Draft options").setItems(arrayOf("Continue editing","Delete draft")){_,action->
+            appDialog().setTitle("Draft options").setPremiumItems(arrayOf("Continue editing","Delete draft")){_,action->
                 if(action==0)showInvoiceEditor(item.optString("kind","Invoice"),item)
                 else appDialog().setTitle("Delete this draft?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
                     val latest=invoiceRecords("Drafts");val updated=org.json.JSONArray()
@@ -5977,7 +6059,7 @@ class MainActivity : AppCompatActivity() {
             if(requirePremiumTool("Customer manager")){
                 val records=invoiceRecords("Customers")
                 if(records.length()==0){Toast.makeText(this@MainActivity,"Save a customer in Customers first",Toast.LENGTH_LONG).show();return@setOnClickListener}
-                appDialog().setTitle("Select customer").setItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
+                appDialog().setTitle("Select customer").setPremiumItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
                     val obj=records.getJSONObject(i);customer.setText(obj.optString("name"));customerAddress.setText(obj.optString("detail"));customerGstin.setText(obj.optString("extra"))
                 }.show()
             }
@@ -6009,7 +6091,7 @@ class MainActivity : AppCompatActivity() {
             val q=itemField("Quantity",saved?.optString("qty","1")?:"1",10,true)
             val p=itemField("Unit rate (INR)",saved?.optString("rate").orEmpty(),13,true)
             val t=itemField("GST rate (%)",saved?.optString("tax","0")?:"0",6,true)
-            box.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose GST rate";isAllCaps=false;setOnClickListener{val rates=arrayOf("0","5","12","18","28");appDialog().setTitle("Common GST rates").setItems(rates.map{it+"%"}.toTypedArray()){_,i->t.setText(rates[i])}.setNegativeButton("Custom / Close",null).show()}})
+            box.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose GST rate";isAllCaps=false;setOnClickListener{val rates=arrayOf("0","5","12","18","28");appDialog().setTitle("Common GST rates").setPremiumItems(rates.map{it+"%"}.toTypedArray()){_,i->t.setText(rates[i])}.setNegativeButton("Custom / Close",null).show()}})
             val entry=Entry(box,n,h,q,p,t);entries.add(entry)
             val lineTotal=label("Item subtotal: INR 0.00",12f,0xFF2563EB.toInt(),true)
             box.addView(lineTotal)
@@ -6020,7 +6102,7 @@ class MainActivity : AppCompatActivity() {
                 if(requirePremiumTool("Product manager")){
                     val records=invoiceRecords("Products")
                     if(records.length()==0){Toast.makeText(this@MainActivity,"Save a product first",Toast.LENGTH_LONG).show();return@setOnClickListener}
-                    appDialog().setTitle("Select product").setItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
+                    appDialog().setTitle("Select product").setPremiumItems(Array(records.length()){records.getJSONObject(it).optString("name")}){_,i->
                         val obj=records.getJSONObject(i);n.setText(obj.optString("name"));h.setText(obj.optString("detail"));p.setText(obj.optString("extra"))
                     }.show()
                 }
@@ -6043,7 +6125,7 @@ class MainActivity : AppCompatActivity() {
         val paid=if(tracked)field("Amount received (INR)",initial("paid","0"),16,true)else EditText(this).apply{setText("0")}
         val method=if(tracked)field("Payment method (Cash / UPI / Bank / Card)",initial("method"),60)else EditText(this)
         val reference=if(tracked)field("Payment reference (optional)",initial("reference"),80)else EditText(this)
-        if(tracked)panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose payment method";isAllCaps=false;setOnClickListener{val methods=arrayOf("Cash","UPI","Bank transfer","Card","Cheque","Other");appDialog().setTitle("Payment method").setItems(methods){_,i->method.setText(methods[i])}.setNegativeButton("Cancel",null).show()}})
+        if(tracked)panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose payment method";isAllCaps=false;setOnClickListener{val methods=arrayOf("Cash","UPI","Bank transfer","Card","Cheque","Other");appDialog().setTitle("Payment method").setPremiumItems(methods){_,i->method.setText(methods[i])}.setNegativeButton("Cancel",null).show()}})
         val summary=label("",14f,0xFF172B4D.toInt(),true).apply{setPadding(dp(12),dp(14),dp(12),dp(14));background=rounded(0xFFEAF2FF.toInt(),14)}
         panel.addView(gap(8));panel.addView(summary)
         updateTotals={
@@ -6254,7 +6336,7 @@ class MainActivity : AppCompatActivity() {
         action("↗","Share PDF","Send using WhatsApp, email or another app"){sharePdf(uri)}
         action("","Google Drive","Upload or choose a Drive folder",drive=true){
             appDialog().setTitle("Save invoice to Google Drive")
-                .setItems(arrayOf("Direct Google Drive upload","Choose Drive folder / storage")){_,index->
+                .setPremiumItems(arrayOf("Direct Google Drive upload","Choose Drive folder / storage")){_,index->
                     if(available()){
                         if(index==0)authorizeDirectDrive(uri) else confirmDriveSave(item)
                     }
@@ -6276,27 +6358,12 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(4))
         }
-        fun option(title: String, subtitle: String, icon: String, action: () -> Unit) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(12), dp(10), dp(12))
-                background = rounded(0xFFF5F8FF.toInt(), 14, 0xFFE0E9F7.toInt())
-                isClickable = true
-                isFocusable = true
-                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
-                setOnClickListener { action() }
-            }
-            row.addView(label(icon, 22f, 0xFF2563EB.toInt(), true), LinearLayout.LayoutParams(dp(42), -2))
-            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            copy.addView(label(title, 13f, 0xFF172B4D.toInt(), true))
-            copy.addView(gap(3))
-            copy.addView(label(subtitle, 10.5f, 0xFF718096.toInt()))
-            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(label("›", 22f, 0xFF718096.toInt()))
-            panel.addView(row)
+        popupHeader(panel,"DOCNEXA • PDF STUDIO","Create a PDF","Choose the source and document style.")
+        val dialog=appDialog().setTitle("Create PDF").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Close",null).create()
+        fun option(title:String,subtitle:String,icon:String,action:()->Unit){
+            addPopupOption(panel,icon,title,subtitle){dialog.dismiss();action()}
         }
-        option("Images to PDF", "Select, preview and arrange photos", "▧") {
+        option("Images to PDF", "Select, preview and arrange photos", "gallery") {
             imagePicker.launch(arrayOf("image/*"))
         }
         option("Text to PDF", "Write notes and choose page formatting", "T") {
@@ -6308,9 +6375,7 @@ class MainActivity : AppCompatActivity() {
         option("Advanced PDF Design", "Create a formatted document with header and footer", "✎") {
             showAdvancedPdfDesignDialog()
         }
-        showPremiumDialog(appDialog().setTitle("Create PDF • DocNexa")
-            .setMessage("Choose how you want to create your PDF.")
-            .setView(panel).setNegativeButton("Close", null))
+        dialog.show()
     }
 
     private fun showBlankPdfDialog() {
@@ -7888,18 +7953,9 @@ class MainActivity : AppCompatActivity() {
         panel.addView(gap(10))
         val dialog = appDialog().setTitle("Backup & Restore").setView(toolDialogScroll(panel, 0.72f))
             .setNegativeButton("Close", null).create()
-        fun option(title: String, detail: String, action: () -> Unit) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                background = rounded(0xFFF1F6FF.toInt(), 14, 0xFFDCE7FA.toInt())
-                isClickable = true; isFocusable = true
-                minimumHeight = dp(60)
-                setOnClickListener { dialog.dismiss(); action() }
-            }
-            row.addView(label(title, 15f, 0xFF172B4D.toInt(), true))
-            row.addView(label(detail, 12f, 0xFF64748B.toInt()))
-            panel.addView(row); panel.addView(gap(8))
+        fun option(title:String,detail:String,action:()->Unit){
+            val symbol=when{title.startsWith("Open")->"drive";title.startsWith("Manual")->"↑";else->"↓"}
+            addPopupOption(panel,symbol,title,detail){dialog.dismiss();action()}
         }
         var checkedToken: String? = null
         var checkedEmail: String? = null
@@ -8225,7 +8281,7 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("Upload") { _, _ -> uploadDirectDriveFiles(token, account, chosen, batch) }
                 .setNegativeButton("Cancel", null).show()
         }
-        if (!batch) appDialog().setTitle("Select file • " + email).setItems(labels) { _, index -> confirm(listOf(files[index])) }
+        if (!batch) appDialog().setTitle("Select file • " + email).setPremiumItems(labels) { _, index -> confirm(listOf(files[index])) }
             .setNegativeButton("Cancel", null).show()
         else {
             val checked = BooleanArray(files.size)
@@ -8277,7 +8333,7 @@ class MainActivity : AppCompatActivity() {
                         status.text = "Drive backup list ready"
                         if (backups.isEmpty()) Toast.makeText(this, "No direct backups found for this account.", Toast.LENGTH_LONG).show()
                         else appDialog().setTitle("Latest Drive backups • " + email)
-                            .setItems(backups.map { it.name }.toTypedArray()) { _, index ->
+                            .setPremiumItems(backups.map { it.name }.toTypedArray()) { _, index ->
                                 val item = backups[index]
                                 appDialog().setTitle("Restore file?")
                                     .setMessage("Save an unchanged local copy of " + item.name + "?")
@@ -8322,7 +8378,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         appDialog().setTitle("Choose a file to back up")
-            .setItems(files.map { it.name + "  •  " + formatFileSize(it.length()) }.toTypedArray()) { _, index ->
+            .setPremiumItems(files.map { it.name + "  •  " + formatFileSize(it.length()) }.toTypedArray()) { _, index ->
                 val file = files[index]
                 if (account != signedInUserId() || !file.isFile) {
                     Toast.makeText(this, "File unavailable. Select again.", Toast.LENGTH_LONG).show()
@@ -8417,7 +8473,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addShapeDialog(uri: Uri) {
         appDialog().setTitle("Line and Shapes")
-            .setItems(arrayOf("Add rectangle", "Add line", "Add circle")) { _, which -> addShapeToPdf(uri, which) }.show()
+            .setPremiumItems(arrayOf("Add rectangle", "Add line", "Add circle")) { _, which -> addShapeToPdf(uri, which) }.show()
     }
 
     private fun addShapeToPdf(uri: Uri, shape: Int) {
@@ -8525,6 +8581,7 @@ class MainActivity : AppCompatActivity() {
                     panel.addView(label("COMPRESSION PRESETS", 10f, 0xFF64748B.toInt(), true))
                     panel.addView(gap(7))
                     val presetRows = mutableListOf<LinearLayout>()
+                    val presetIndicators = mutableListOf<TextView>()
                     compressionPresets.forEachIndexed { index, preset ->
                         val row = LinearLayout(this).apply {
                             orientation = LinearLayout.HORIZONTAL
@@ -8532,9 +8589,11 @@ class MainActivity : AppCompatActivity() {
                             setPadding(dp(12), dp(10), dp(12), dp(10))
                             background = rounded(if (index == selected) 0xFFEAF2FF.toInt() else 0xFFFFFFFF.toInt(), 13,
                                 if (index == selected) 0xFF3478F6.toInt() else 0xFFE2EAF5.toInt())
-                            layoutParams = LinearLayout.LayoutParams(-1, dp(62)).apply { bottomMargin = dp(7) }
+                            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
+                            minimumHeight=dp(66);isClickable=true;isFocusable=true
                             setOnClickListener {
                                 selected = index
+                                presetIndicators.forEachIndexed{indicatorIndex,indicator->indicator.text=if(indicatorIndex==selected)"●" else "○"}
                                 presetRows.forEachIndexed { rowIndex, item ->
                                     item.background = rounded(if (rowIndex == selected) 0xFFEAF2FF.toInt() else 0xFFFFFFFF.toInt(), 13,
                                         if (rowIndex == selected) 0xFF3478F6.toInt() else 0xFFE2EAF5.toInt())
@@ -8546,7 +8605,8 @@ class MainActivity : AppCompatActivity() {
                         info.addView(gap(3))
                         info.addView(label(preset.detail, 10f, 0xFF718096.toInt()))
                         row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-                        row.addView(label(if (index == selected) "●" else "○", 18f, 0xFF3478F6.toInt(), true))
+                        val indicator=label(if(index==selected)"●" else "○",18f,0xFF3478F6.toInt(),true)
+                        presetIndicators.add(indicator);row.addView(indicator)
                         presetRows.add(row)
                         panel.addView(row)
                     }
@@ -9602,39 +9662,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showQrScanner() {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(4))
-            background = rounded(0xFFF5F8FF.toInt(), 18)
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
+        popupHeader(panel,"DOCNEXA • QR TOOLS","Scan a QR code","Use your camera or select an existing image.")
+        val dialog=appDialog().setTitle("QR Scanner").setView(toolDialogScroll(panel,0.68f)).setNegativeButton("Close",null).create()
+        addPopupOption(panel,"camera","Live camera scanner","Scan a QR code using your camera",true){
+            dialog.dismiss()
+            if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)openLiveQrCamera() else qrCameraPermission.launch(Manifest.permission.CAMERA)
         }
-        val choices = listOf(
-            Triple("▣", "Live camera scanner", "Scan a QR code using your camera"),
-            Triple("▧", "Scan from gallery", "Choose an image containing a QR code")
-        )
-        choices.forEachIndexed { index, item ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE2EAF5.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(70)).apply { bottomMargin = dp(9) }
-                setOnClickListener {
-                    when(index) {
-                        0 -> if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) openLiveQrCamera() else qrCameraPermission.launch(Manifest.permission.CAMERA)
-                        1 -> qrImagePicker.launch("image/*")
-                    }
-                }
-            }
-            row.addView(label(item.first, 24f, 0xFF168BC5.toInt(), true), LinearLayout.LayoutParams(dp(44), -2))
-            val textBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            textBox.addView(label(item.second, 14f, 0xFF172B4D.toInt(), true))
-            textBox.addView(gap(3))
-            textBox.addView(label(item.third, 10.5f, 0xFF718096.toInt()))
-            row.addView(textBox, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(label("›", 23f, 0xFF718096.toInt()))
-            panel.addView(row)
+        addPopupOption(panel,"gallery","Scan from gallery","Choose an image containing a QR code"){
+            dialog.dismiss();qrImagePicker.launch("image/*")
         }
-        showPremiumDialog(appDialog().setTitle("QR Scanner").setView(panel).setNegativeButton("Close", null))
+        dialog.show()
     }
 
     private fun openLiveQrCamera() {
@@ -9740,7 +9778,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         appDialog().setTitle("Favourite documents")
-            .setItems(docs.map { it.first }.toTypedArray()) { _, index -> openPdf(docs[index].second) }
+            .setPremiumItems(docs.map { it.first }.toTypedArray()) { _, index -> openPdf(docs[index].second) }
             .setNegativeButton("Close", null).show()
     }
 
@@ -11157,39 +11195,11 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(10), dp(18), dp(4))
             background = rounded(0xFFF5F8FF.toInt(), 18)
         }
-        panel.addView(label("Choose what you want to bring into DocNexa. Your selected source file is not modified.", 12f, 0xFF64748B.toInt()))
-        panel.addView(gap(12))
-        fun option(title: String, detail: String, symbol: String, action: () -> Unit) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(11), dp(12), dp(11))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE0E8F5.toInt())
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { action() }
-            }
-            row.addView(label(symbol, 20f, 0xFF2674D9.toInt(), true).apply {
-                gravity = Gravity.CENTER
-                background = rounded(0xFFEAF2FF.toInt(), 12)
-                layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
-            })
-            val texts = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), 0, 0, 0)
-            }
-            texts.addView(label(title, 14f, 0xFF1D3557.toInt(), true))
-            texts.addView(gap(2))
-            texts.addView(label(detail, 10.5f, 0xFF718096.toInt()))
-            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(label("›", 23f, 0xFF718096.toInt()))
-            panel.addView(row)
-            panel.addView(gap(8))
+        popupHeader(panel,"DOCNEXA • IMPORT","Import documents","Choose a source. Your original file is not modified.")
+        val dialog=appDialog().setTitle("Import File").setView(toolDialogScroll(panel,0.74f)).setNegativeButton("Close",null).create()
+        fun option(title:String,detail:String,symbol:String,action:()->Unit){
+            addPopupOption(panel,if(symbol=="☁")"drive" else symbol,title,detail, title=="Browse all files",action)
         }
-        val dialog = showPremiumDialog(appDialog()
-            .setTitle("Import File • DocNexa")
-            .setView(panel)
-            .setNegativeButton("Close", null))
         option("Browse all files", "Show images, PDFs, documents, downloads and other file types", "ALL") {
             dialog.dismiss()
             allFilesPicker.launch(arrayOf("*/*"))
@@ -11223,6 +11233,7 @@ class MainActivity : AppCompatActivity() {
             splitPicker.launch(arrayOf("application/pdf"))
         }
         addNativeAdCard(panel)
+        dialog.show()
     }
 
     private fun openPdf(uri: Uri) {
