@@ -752,9 +752,10 @@ class MainActivity : AppCompatActivity() {
                     view.post {
                         if (!dialog.isShowing) return@post
                         dialog.window?.apply {
-                            setLayout(minOf(dp(560), resources.displayMetrics.widthPixels - dp(32)), -2)
+                            setLayout(minOf(dp(560), (resources.displayMetrics.widthPixels - dp(28)).coerceAtLeast(dp(1))), attributes.height)
+                            setDimAmount(0.46f)
                             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                            setBackgroundDrawable(rounded(0xFFF8FAFF.toInt(), 26, 0xFFE0E8F4.toInt()))
+                            setBackgroundDrawable(rounded(0xFFFFFFFF.toInt(), 22, 0xFFD9E5F5.toInt()))
                         }
                         fun styleDialogTree(node: View) {
                             if (node is NativeAdView) return
@@ -762,12 +763,13 @@ class MainActivity : AppCompatActivity() {
                                 android.R.id.message -> if (node is TextView) {
                                     node.setTextColor(0xFF53657E.toInt())
                                     node.textSize = 14f
-                                    node.setLineSpacing(dp(2).toFloat(), 1.04f)
+                                    node.setLineSpacing(dp(3).toFloat(), 1.08f)
                                 }
                                 android.R.id.text1 -> if (node is TextView) {
                                     node.setTextColor(0xFF243B5A.toInt())
                                     node.textSize = 15f
-                                    node.setPadding(dp(8), dp(13), dp(8), dp(13))
+                                    node.minimumHeight = dp(52)
+                                    node.setPadding(dp(12), dp(12), dp(12), dp(12))
                                 }
                             }
                             if (node is EditText) {
@@ -791,27 +793,36 @@ class MainActivity : AppCompatActivity() {
                             if (node is ViewGroup) for (i in 0 until node.childCount) styleDialogTree(node.getChildAt(i))
                         }
                         styleDialogTree(view)
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
-                            isAllCaps = false
-                            textSize = 14f
-                            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
-                            setTextColor(android.graphics.Color.WHITE)
-                            background = gradient(0xFF1557B0.toInt(), 0xFF087F9B.toInt(), 14)
-                            minHeight = dp(46)
-                            setPadding(dp(16), dp(8), dp(16), dp(8))
+                        dialog.listView?.apply {
+                            divider = android.graphics.drawable.ColorDrawable(0xFFE7EDF6.toInt())
+                            dividerHeight = dp(1)
+                            setPadding(dp(8), dp(4), dp(8), dp(4))
+                            clipToPadding = false
                         }
-                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
-                            isAllCaps = false
-                            textSize = 14f
-                            setTextColor(0xFF31547F.toInt())
-                            background = rounded(0xFFEAF1FA.toInt(), 14)
-                            minHeight = dp(46)
+                        fun styleAction(which: Int, primary: Boolean) {
+                            dialog.getButton(which)?.apply {
+                                isAllCaps = false
+                                textSize = 13f
+                                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                                minHeight = dp(48)
+                                minimumHeight = dp(48)
+                                setPadding(dp(12), dp(8), dp(12), dp(8))
+                                val disabled = intArrayOf(-android.R.attr.state_enabled)
+                                setTextColor(android.content.res.ColorStateList(
+                                    arrayOf(disabled, intArrayOf()), intArrayOf(0xFF66758A.toInt(), if (primary) 0xFFFFFFFF.toInt() else 0xFF174C94.toInt())))
+                                val surface = android.graphics.drawable.StateListDrawable().apply {
+                                    addState(disabled, rounded(0xFFE8EDF5.toInt(), 12))
+                                    addState(intArrayOf(), if (primary) gradient(0xFF3478F6.toInt(), 0xFF1556BE.toInt(), 12)
+                                        else rounded(0xFFF0F5FC.toInt(), 12, 0xFFDCE7F5.toInt()))
+                                }
+                                backgroundTintList = null
+                                background = android.graphics.drawable.RippleDrawable(
+                                    android.content.res.ColorStateList.valueOf(if (primary) 0x33FFFFFF else 0x223478F6), surface, null)
+                            }
                         }
-                        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
-                            isAllCaps = false
-                            textSize = 14f
-                            setTextColor(0xFF087F9B.toInt())
-                        }
+                        styleAction(AlertDialog.BUTTON_POSITIVE, true)
+                        styleAction(AlertDialog.BUTTON_NEGATIVE, false)
+                        styleAction(AlertDialog.BUTTON_NEUTRAL, false)
                     }
                 }
                 override fun onViewDetachedFromWindow(view: View) = Unit
@@ -5323,7 +5334,7 @@ class MainActivity : AppCompatActivity() {
     private fun studioPremiumInfo(feature: String = "") {
         premiumDialog?.dismiss()
         val panel = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(14),dp(8),dp(14),dp(14)) }
-        val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(16)); background=gradient(0xFF10254C.toInt(),0xFF6546C8.toInt(),20) }
+        val hero = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(16)); background=gradient(0xFF073B91.toInt(),0xFF4036A0.toInt(),18) }
         hero.addView(label("♛ DOCNEXA PREMIUM",12f,0xFFFFD66B.toInt(),true))
         hero.addView(gap(5))
         hero.addView(label(if(hasVerifiedPremium()) "Premium membership active" else "Unlock your full workspace",22f,android.graphics.Color.WHITE,true))
@@ -7902,24 +7913,80 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDirectDriveActions(token: String, email: String, account: String) {
         if (account != signedInUserId()) return
-        val options = mutableListOf("Upload a saved file", "Restore a DocNexa backup", "Manage Google access")
-        if (hasVerifiedPremium()) options.add(1, "Batch upload (Premium)")
-        appDialog().setTitle("Google Drive • Connected")
-            .setItems(options.toTypedArray()) { _, index ->
-                when (options[index]) {
-                    "Upload a saved file" -> chooseDirectDriveUpload(token, email, account, false)
-                    "Batch upload (Premium)" -> chooseDirectDriveUpload(token, email, account, true)
-                    "Restore a DocNexa backup" -> listDirectDriveBackups(token, email, account)
-                    else -> {
-                        appDialog().setTitle("Manage Google access")
-                            .setMessage("Authorized Google account: " + email + "\n\nManage or remove DocNexa access on your Google Account. Existing Drive backups are not deleted.")
-                            .setPositiveButton("Open Google Account") { _, _ ->
-                                if (account == signedInUserId()) prefs.edit().remove(accountPrefKey("drive_last_email")).apply()
-                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/connections"))) }
-                            }.setNegativeButton("Cancel", null).show()
-                    }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(12))
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = gradient(0xFF073B91.toInt(), 0xFF06245F.toInt(), 16)
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+        }
+        val logo = FrameLayout(this).apply {
+            background = rounded(0xFFFFFFFF.toInt(), 12)
+            addView(driveBrandIcon(), FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+        }
+        hero.addView(logo, LinearLayout.LayoutParams(dp(50), dp(50)))
+        val details = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        details.addView(label("● Connected", 14f, 0xFF9BE9BE.toInt(), true))
+        details.addView(label(email, 13f, 0xFFFFFFFF.toInt()).apply { setTextIsSelectable(true) })
+        details.addView(label("Google Drive • Secure file access", 11f, 0xFFDCE8FF.toInt()))
+        hero.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(hero); panel.addView(gap(14))
+        val dialog = appDialog().setTitle("Google Drive").setView(toolDialogScroll(panel, 0.70f))
+            .setNegativeButton("Close", null).create()
+        fun action(symbol: String, title: String, subtitle: String, onClick: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(72)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(0x223478F6),
+                    rounded(0xFFF5F8FF.toInt(), 14, 0xFFDCE7F5.toInt()), null)
+                isClickable = true; isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    if (account == signedInUserId()) onClick()
                 }
-            }.setNegativeButton("Close", null).show()
+            }
+            row.addView(label(symbol, 23f, 0xFF1769E8.toInt(), true).apply {
+                gravity = Gravity.CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                background = rounded(0xFFE5EEFF.toInt(), 12)
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val copy = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, dp(6), 0)
+            }
+            copy.addView(label(title, 15f, 0xFF172B4D.toInt(), true))
+            copy.addView(label(subtitle, 12f, 0xFF64748B.toInt()))
+            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label("›", 23f, 0xFF3478F6.toInt()))
+            panel.addView(row); panel.addView(gap(8))
+        }
+        action("↑", "Upload a saved file", "Back up a document at original quality.") {
+            chooseDirectDriveUpload(token, email, account, false)
+        }
+        if (hasVerifiedPremium()) action("▤", "Batch upload • Premium", "Back up to 10 selected files.") {
+            chooseDirectDriveUpload(token, email, account, true)
+        }
+        action("↓", "Restore a DocNexa backup", "Find and restore previously backed-up files.") {
+            listDirectDriveBackups(token, email, account)
+        }
+        action("⚙", "Manage Google access", "Review or remove Google account permissions.") {
+            appDialog().setTitle("Manage Google access")
+                .setMessage("Authorized Google account: " + email + "\n\nManage or remove DocNexa access on your Google Account. Existing Drive backups are not deleted.")
+                .setPositiveButton("Open Google Account") { _, _ ->
+                    if (account == signedInUserId()) prefs.edit().remove(accountPrefKey("drive_last_email")).apply()
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/connections"))) }
+                }.setNegativeButton("Cancel", null).show()
+        }
+        dialog.show()
     }
 
     private fun chooseDirectDriveUpload(token: String, email: String, account: String, batch: Boolean) {
