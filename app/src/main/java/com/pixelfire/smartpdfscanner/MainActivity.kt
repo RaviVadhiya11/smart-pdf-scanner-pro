@@ -2212,135 +2212,170 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTrashScreen() {
-        val trashed = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toList()
+        val owner = signedInUserId()
+        val trashed = prefs.getStringSet("trash_uris", emptySet()).orEmpty().toList().filter { raw ->
+            val uri = Uri.parse(raw)
+            // Never expose another account's private FileProvider documents.
+            if (uri.authority != "$packageName.fileprovider") true
+            else {
+                val parts = uri.pathSegments
+                val index = parts.indexOf("accounts")
+                index >= 0 && index + 2 == parts.lastIndex &&
+                    parts[index + 1] == owner.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            }
+        }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(8))
-            background = rounded(0xFFF5F8FF.toInt(), 20)
+            setPadding(dp(14), dp(8), dp(14), dp(12))
         }
-        val heading = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        popupHeader(panel, "DOCNEXA • DOCUMENT RECOVERY", "Recycle bin",
+            if (trashed.isEmpty()) "No documents in Trash" else "${trashed.size} document(s) in Trash")
+        fun binIcon(): View = object : View(this@MainActivity) {
+            private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF2563EB.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = 2.5f
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                val side = minOf(width, height).toFloat()
+                if (side <= 0f) return
+                canvas.save()
+                canvas.translate((width-side)/2f,(height-side)/2f)
+                canvas.scale(side/48f,side/48f)
+                canvas.drawRoundRect(13f,17f,35f,39f,4f,4f,ink)
+                canvas.drawLine(9f,14f,39f,14f,ink)
+                canvas.drawRoundRect(19f,8f,29f,14f,2f,2f,ink)
+                canvas.drawLine(20f,22f,20f,33f,ink)
+                canvas.drawLine(28f,22f,28f,33f,ink)
+                canvas.restore()
+            }
+        }.apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        val dialog = appDialog().setTitle("Trash").setView(toolDialogScroll(panel,0.73f))
+            .setPositiveButton("Close",null).create()
+        fun currentEntry(raw:String):Boolean =
+            owner == signedInUserId() && prefs.getStringSet("trash_uris",emptySet()).orEmpty().contains(raw)
+        fun removeEntry(raw:String) {
+            val entries = prefs.getStringSet("trash_uris",emptySet()).orEmpty().toMutableSet()
+            entries.remove(raw)
+            prefs.edit().putStringSet("trash_uris",entries).apply()
         }
-        heading.addView(documentIconTile(54))
-        val headingText = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
+        fun refreshAfterAction(message:String) {
+            Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            buildScreen()
+            if (!isFinishing && !isDestroyed && owner == signedInUserId()) showTrashScreen()
         }
-        headingText.addView(label("Recently deleted", 17f, 0xFF172B4D.toInt(), true))
-        headingText.addView(gap(3))
-        headingText.addView(label("${trashed.size} document(s) in Trash", 11f, 0xFF718096.toInt()))
-        heading.addView(headingText)
-        panel.addView(heading)
-        panel.addView(gap(14))
-
         if (trashed.isEmpty()) {
             val empty = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(18), dp(28), dp(18), dp(28))
-                background = rounded(0xFFFFFFFF.toInt(), 16, 0xFFE2EAF5.toInt())
+                setPadding(dp(16),dp(20),dp(16),dp(20))
+                background = rounded(0xFFF8FAFF.toInt(),18,0xFFDCE7F5.toInt())
             }
-            empty.addView(documentIconTile(76))
+            val artwork = FrameLayout(this).apply {
+                background = rounded(0xFFE5EEFF.toInt(),24)
+                addView(binIcon(),FrameLayout.LayoutParams(dp(54),dp(54),Gravity.CENTER))
+            }
+            empty.addView(artwork,LinearLayout.LayoutParams(dp(80),dp(80)))
             empty.addView(gap(12))
-            empty.addView(label("Trash is empty", 17f, 0xFF263957.toInt(), true))
+            empty.addView(label("Trash is empty",19f,0xFF172B4D.toInt(),true).apply{gravity=Gravity.CENTER})
             empty.addView(gap(5))
-            empty.addView(label("Deleted PDFs will appear here. You can restore them or delete them permanently.", 11f, 0xFF718096.toInt()).apply {
-                gravity = Gravity.CENTER
-            })
+            empty.addView(label("Deleted documents will appear here. Restore them whenever they are still in Trash.",12f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
             panel.addView(empty)
-            // Keep the native ad inside the Trash popup, above its action button.
-            addNativeAdCard(panel)
-            showPremiumDialog(appDialog().setTitle("Trash").setView(panel)
-                .setPositiveButton("OK", null))
-            return
-        }
-
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = true
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            clipToPadding = false
-            setPadding(0, 0, 0, dp(8))
-        }
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        trashed.forEach { raw ->
-            val target = Uri.parse(raw)
-            val name = target.lastPathSegment ?: "Deleted PDF"
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(10), dp(10), dp(10))
-                background = rounded(0xFFFFFFFF.toInt(), 14, 0xFFE2EAF5.toInt())
-                layoutParams = LinearLayout.LayoutParams(-1, dp(82)).apply { bottomMargin = dp(9) }
-            }
-            // Render the first PDF page as a real thumbnail; fall back to the PDF tile
-            // when the original content URI is no longer readable.
-            val thumbnail = createPdfThumbnail(target)
-            if (thumbnail != null) {
-                card.addView(android.widget.ImageView(this).apply {
-                    setImageBitmap(thumbnail)
-                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                    background = rounded(0xFFFFFFFF.toInt(), 8, 0xFFE2EAF5.toInt())
-                    contentDescription = "Preview of $name"
-                    layoutParams = LinearLayout.LayoutParams(dp(58), dp(68))
-                })
-            } else {
-                card.addView(documentIconTile(58))
-            }
-            val info = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(11), 0, dp(4), 0)
-            }
-            info.addView(label(name, 13f, 0xFF263957.toInt(), true).apply {
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            info.addView(gap(4))
-            info.addView(label("PDF document  •  In Trash", 10.5f, 0xFF718096.toInt()))
-            card.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
-            card.addView(TextView(this).apply {
-                text = "•••"
-                textSize = 19f
-                setTextColor(0xFF64748B.toInt())
-                setPadding(dp(10), dp(8), dp(4), dp(8))
-                setOnClickListener {
-                    appDialog().setTitle(name)
-                        .setPremiumItems(arrayOf("Restore document", "Delete permanently")) { _, action ->
-                            val set = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
-                            if (action == 0) {
-                                set.remove(target.toString())
-                                prefs.edit().putStringSet("trash_uris", set).apply()
-                                Toast.makeText(this@MainActivity, "PDF restored", Toast.LENGTH_SHORT).show()
-                                showTrashScreen()
-                            } else {
-                                appDialog()
-                                    .setTitle("Delete permanently?")
-                                    .setMessage("This PDF will be removed from your device.")
-                                    .setNegativeButton("Cancel", null)
-                                    .setPositiveButton("Delete") { _, _ ->
-                                        try {
-                                            val privateFile = privateDocumentFile(target)
-                                            if (privateFile != null) privateFile.delete() else contentResolver.delete(target, null, null)
-                                        } catch (_: Exception) {}
-                                        val updated = (prefs.getStringSet("trash_uris", emptySet()) ?: emptySet()).toMutableSet()
-                                        updated.remove(target.toString())
-                                        prefs.edit().putStringSet("trash_uris", updated).apply()
-                                        Toast.makeText(this@MainActivity, "Deleted permanently", Toast.LENGTH_SHORT).show()
-                                        showTrashScreen()
-                                    }.show()
-                            }
-                        }.setNegativeButton("Cancel", null).show()
+        } else {
+            panel.addView(label("RECENTLY DELETED",12f,0xFF52627A.toInt(),true))
+            panel.addView(gap(8))
+            trashed.forEach { raw ->
+                val target = Uri.parse(raw)
+                val file = privateDocumentFile(target)
+                val name = file?.name ?: target.lastPathSegment ?: "Deleted document"
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12),dp(10),dp(12),dp(10))
+                    background = rounded(0xFFF8FAFF.toInt(),16,0xFFDCE7F5.toInt())
                 }
-            })
-            list.addView(card)
+                val row = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL }
+                val preview = ImageView(this).apply {
+                    scaleType=ImageView.ScaleType.FIT_CENTER
+                    contentDescription="Preview of "+name
+                    background=rounded(0xFFE5EEFF.toInt(),10)
+                    visibility=View.GONE
+                }
+                val fallback = documentIconTile(48)
+                row.addView(fallback)
+                row.addView(preview,LinearLayout.LayoutParams(dp(48),dp(60)))
+                val info=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),0,0,0)}
+                info.addView(label(name,14f,0xFF172B4D.toInt(),true).apply{
+                    maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END
+                })
+                info.addView(label((file?.let{formatFileSize(it.length())}?.plus(" • ") ?: "")+"In Trash",11f,0xFF52627A.toInt()))
+                row.addView(info,LinearLayout.LayoutParams(0,-2,1f))
+                card.addView(row);card.addView(gap(9))
+                val actions=LinearLayout(this).apply{
+                    orientation=if(resources.configuration.screenWidthDp<360 || resources.configuration.fontScale>=1.3f) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                }
+                fun action(title:String,role:ButtonRole,click:()->Unit){
+                    val button=nativeButton(this@MainActivity,role).apply{
+                        this.text=title;setOnClickListener{click()}
+                    }
+                    val params=if(actions.orientation==LinearLayout.HORIZONTAL) LinearLayout.LayoutParams(0,-2,1f)
+                        else LinearLayout.LayoutParams(-1,-2)
+                    params.setMargins(dp(3),dp(3),dp(3),dp(3))
+                    actions.addView(button,params)
+                }
+                action("Restore",ButtonRole.Secondary){
+                    if(currentEntry(raw)){
+                        removeEntry(raw)
+                        refreshAfterAction("Document restored")
+                    }
+                }
+                action("Delete permanently",ButtonRole.Danger){
+                    if(currentEntry(raw)) appDialog().setTitle("Delete permanently?")
+                        .setMessage(name+"\n\nThis removes the original file. It cannot be restored from Trash.")
+                        .setNegativeButton("Cancel",null)
+                        .setPositiveButton("Delete"){_,_->
+                            if(currentEntry(raw)){
+                                val removed=runCatching{
+                                    if(target.authority=="$packageName.fileprovider") privateDocumentFile(target)?.delete()==true
+                                    else contentResolver.delete(target,null,null)>0
+                                }.getOrDefault(false)
+                                if(removed){
+                                    removeEntry(raw)
+                                    refreshAfterAction("Deleted permanently")
+                                }else Toast.makeText(this@MainActivity,"Could not delete the file. Trash entry retained.",Toast.LENGTH_LONG).show()
+                            }
+                        }.show()
+                }
+                card.addView(actions)
+                panel.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(8)})
+                if(name.endsWith(".pdf",true) && !pagePreviewExecutor.isShutdown){
+                    // Thumbnails are read off the UI thread and discarded after the dialog closes.
+                    pagePreviewExecutor.execute{
+                        val bitmap=if(owner==signedInUserId()) createPdfThumbnail(target) else null
+                        if(bitmap!=null) runOnUiThread{
+                            if(dialog.isShowing && owner==signedInUserId() && !isDestroyed){
+                                preview.setImageBitmap(bitmap);preview.visibility=View.VISIBLE;fallback.visibility=View.GONE
+                            }else bitmap.recycle()
+                        }
+                    }
+                }
+            }
         }
-        scroll.addView(list)
-        panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(300)))
-        // Keep the native ad inside the Trash popup, above its action button.
-        addNativeAdCard(panel)
-        showPremiumDialog(appDialog().setTitle("Trash • ${trashed.size} item(s)")
-            .setView(panel).setPositiveButton("Close", null))
+        val note=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(12),dp(10),dp(12),dp(10))
+            background=rounded(0xFFEFF5FF.toInt(),12)
+        }
+        note.addView(label("Recovery & safety",12f,0xFF172B4D.toInt(),true))
+        note.addView(label("Restoring returns a document to your library. Permanent deletion requires confirmation and cannot be undone.",11f,0xFF52627A.toInt()))
+        panel.addView(gap(9));panel.addView(note)
+        var disposeAd:()->Unit={}
+        dialog.setOnDismissListener{disposeAd()}
+        dialog.show()
+        disposeAd=addNativeAdCard(panel)
     }
 
     private fun showAppDrawer() {
