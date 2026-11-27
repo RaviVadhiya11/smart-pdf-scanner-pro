@@ -11273,39 +11273,110 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putString(key,org.json.JSONArray(ordered).toString()).apply()
     }
     private fun showDocumentViewerHub(){
-        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
-        popupHeader(panel,"DOCNEXA • DOCUMENT STUDIO","All Document Viewer","Read files offline or browse device and cloud storage.")
-        val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.76f)).setNegativeButton("Close",null).create()
-        addPopupOption(panel,"document","Browse all files","Choose a document from the system file picker.",true){dialog.dismiss();documentViewerPicker.launch(arrayOf("*/*"))}
-        val categories=listOf(
-            Triple("PDF","PDF",arrayOf("application/pdf")),
-            Triple("W","Word",arrayOf("application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-            Triple("X","Excel",arrayOf("application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
-            Triple("P","PowerPoint",arrayOf("application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation")),
-            Triple("gallery","Images",arrayOf("image/*")),
-            Triple("TXT","Text / CSV",arrayOf("text/*","application/rtf")),
-            Triple("ZIP","Archives",arrayOf("application/zip","application/x-zip-compressed")),
-            Triple("ALL","All formats",arrayOf("*/*"))
+        val panel=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(12),dp(6),dp(12),dp(12))
+        }
+        popupHeader(panel,"DOCNEXA • DOCUMENT STUDIO","All Document Viewer","One place for documents, images and archives.")
+        val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.78f)).setNegativeButton("Close",null).create()
+        fun browse(mimes:Array<String>){
+            try{
+                documentViewerPicker.launch(mimes)
+                dialog.dismiss()
+            }catch(_:Exception){
+                Toast.makeText(this@MainActivity,"No compatible file picker is available.",Toast.LENGTH_LONG).show()
+            }
+        }
+        fun section(title:String,subtitle:String){
+            panel.addView(gap(4))
+            panel.addView(label(title,13f,0xFF172B4D.toInt(),true))
+            panel.addView(label(subtitle,11f,0xFF52627A.toInt()))
+            panel.addView(gap(7))
+        }
+        addPopupOption(panel,"document","Browse all files","Select from phone storage or a connected cloud provider.",true){browse(arrayOf("*/*"))}
+
+        section("QUICK ACCESS","Your private DocNexa document library")
+        data class LibraryShortcut(val symbol:String,val title:String,val mode:String)
+        val shortcuts=listOf(
+            LibraryShortcut("▤","My files","All"),
+            LibraryShortcut("↻","Recent","Recent"),
+            LibraryShortcut("♡","Favourites","Favourites")
         )
-        categories.chunked(2).forEach{pair->
+        val compact=resources.configuration.screenWidthDp>=360 && resources.configuration.fontScale<1.3f
+        shortcuts.chunked(if(compact)3 else 1).forEach{group->
             val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
-            pair.forEach{(symbol,title,mimes)->
+            group.forEach{shortcut->
                 val tile=LinearLayout(this).apply{
-                    orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=dp(86)
-                    setPadding(dp(7),dp(10),dp(7),dp(10));background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x223478F6),rounded(0xFFF1F6FF.toInt(),14,0xFFDCE7F5.toInt()),null)
-                    isClickable=true;isFocusable=true;setOnClickListener{dialog.dismiss();documentViewerPicker.launch(mimes)}
+                    orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER
+                    minimumHeight=dp(64);setPadding(dp(4),dp(8),dp(4),dp(8))
+                    background=android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(0x223478F6),
+                        rounded(0xFFF3F7FF.toInt(),14,0xFFDCE7F5.toInt()),null)
+                    isClickable=true;isFocusable=true
+                    contentDescription=shortcut.title
+                    setOnClickListener{dialog.dismiss();showViewerLibrary(shortcut.mode)}
                 }
-                tile.addView(label(if(symbol=="gallery")"▧" else symbol,19f,0xFF2563EB.toInt(),true).apply{gravity=Gravity.CENTER})
-                tile.addView(gap(5));tile.addView(label(title,13f,0xFF172B4D.toInt(),true).apply{gravity=Gravity.CENTER})
-                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(dp(3),dp(4),dp(3),dp(4))})
+                tile.addView(label(shortcut.symbol,20f,0xFF2563EB.toInt(),true).apply{
+                    gravity=Gravity.CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                })
+                tile.addView(label(shortcut.title,12f,0xFF172B4D.toInt(),true).apply{gravity=Gravity.CENTER})
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(dp(3),0,dp(3),dp(6))})
             }
             panel.addView(row)
         }
-        panel.addView(gap(8))
-        addPopupOption(panel,"document","My files","Browse and search files saved in this DocNexa account."){dialog.dismiss();showViewerLibrary("All")}
-        addPopupOption(panel,"↻","Recently viewed","Previously opened files saved inside DocNexa."){dialog.dismiss();showViewerLibrary("Recent")}
-        addPopupOption(panel,"♡","Favourites","Your starred local documents."){dialog.dismiss();showViewerLibrary("Favourites")}
-        panel.addView(label("Office preview reads text and worksheet values, not the original visual layout. Legacy Office and other formats can open in a compatible installed app.",11f,0xFF52627A.toInt()))
+
+        section("BROWSE BY FORMAT","Choose the type of file you want to open")
+        data class FormatCard(val symbol:String,val title:String,val extensions:String,val accent:Int,val tint:Int,val mimes:Array<String>)
+        val categories=listOf(
+            FormatCard("PDF","PDF documents","PDF",0xFFB42336.toInt(),0xFFFCE7EB.toInt(),arrayOf("application/pdf")),
+            FormatCard("W","Word","DOC · DOCX",0xFF185ABD.toInt(),0xFFE5EEFF.toInt(),arrayOf("application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            FormatCard("X","Excel","XLS · XLSX",0xFF16734A.toInt(),0xFFE2F4E9.toInt(),arrayOf("application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            FormatCard("P","PowerPoint","PPT · PPTX",0xFFB84422.toInt(),0xFFFFEBE3.toInt(),arrayOf("application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation")),
+            FormatCard("gallery","Images","JPG · PNG · more",0xFF6941B0.toInt(),0xFFF1E9FC.toInt(),arrayOf("image/*")),
+            FormatCard("TXT","Text / CSV","TXT · CSV · RTF",0xFF087F91.toInt(),0xFFE1F4F6.toInt(),arrayOf("text/*","application/rtf")),
+            FormatCard("ZIP","Archives","ZIP file listing",0xFF96600C.toInt(),0xFFFFF1D6.toInt(),arrayOf("application/zip","application/x-zip-compressed")),
+            FormatCard("ALL","Other files","Any file type",0xFF475569.toInt(),0xFFE8EEF6.toInt(),arrayOf("*/*"))
+        )
+        categories.chunked(if(compact)2 else 1).forEach{pair->
+            val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.TOP}
+            pair.forEach{format->
+                val tile=LinearLayout(this).apply{
+                    orientation=LinearLayout.VERTICAL;gravity=Gravity.START
+                    minimumHeight=dp(88);setPadding(dp(10),dp(9),dp(10),dp(9))
+                    background=android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(0x223478F6),
+                        rounded(0xFFF8FAFF.toInt(),15,0xFFDCE7F5.toInt()),null)
+                    isClickable=true;isFocusable=true
+                    contentDescription=format.title+", "+format.extensions
+                    setOnClickListener{browse(format.mimes)}
+                }
+                val icon=FrameLayout(this).apply{
+                    background=rounded(format.tint,10)
+                    importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    if(format.symbol=="gallery"){
+                        addView(popupGlyph("gallery",format.accent),FrameLayout.LayoutParams(-1,-1))
+                    }else{
+                        addView(label(format.symbol,if(format.symbol.length>1)11f else 19f,format.accent,true).apply{
+                            gravity=Gravity.CENTER
+                        },FrameLayout.LayoutParams(-1,-1))
+                    }
+                }
+                tile.addView(icon,LinearLayout.LayoutParams(dp(35),dp(35)))
+                tile.addView(gap(4))
+                tile.addView(label(format.title,13f,0xFF172B4D.toInt(),true))
+                tile.addView(label(format.extensions,10f,0xFF52627A.toInt()))
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(dp(3),0,dp(3),dp(7))})
+            }
+            panel.addView(row)
+        }
+        val note=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(12),dp(10),dp(12),dp(10))
+            background=rounded(0xFFF1F6FF.toInt(),14,0xFFDCE7F5.toInt())
+        }
+        note.addView(label("Private & offline-friendly",12f,0xFF172B4D.toInt(),true))
+        note.addView(label("Local files can be opened offline. Cloud files may need internet. Office previews show text and worksheet values; original layouts and unsupported formats need a compatible installed app.",11f,0xFF52627A.toInt()))
+        panel.addView(gap(3));panel.addView(note)
         dialog.show()
     }
 
