@@ -751,6 +751,53 @@ class MainActivity : AppCompatActivity() {
      * One shared DocNexa premium dialog skin. All appDialog() call sites inherit
      * the same rounded surface, typography, input styling and clear action hierarchy.
      */
+    private enum class ButtonRole { Primary, Secondary, Premium, Danger }
+
+    /** Shared native controls, including buttons created dynamically inside tools and dialogs.
+     * Keep actual enabled states, click handlers and explicit tool layout parameters unchanged.
+     * Existing branded home actions and the native ad CTA retain their dedicated appearance.
+     */
+    private fun nativeButton(context: android.content.Context, role: ButtonRole = ButtonRole.Secondary): Button {
+        val foreground = when(role) {
+            ButtonRole.Primary -> 0xFFFFFFFF.toInt()
+            ButtonRole.Secondary -> 0xFF174C94.toInt()
+            ButtonRole.Premium -> 0xFF5936AA.toInt()
+            ButtonRole.Danger -> 0xFFB42336.toInt()
+        }
+        val disabled = intArrayOf(-android.R.attr.state_enabled)
+        val normal = when(role) {
+            ButtonRole.Primary -> gradient(0xFF3478F6.toInt(),0xFF1556BE.toInt(),12)
+            ButtonRole.Secondary -> rounded(0xFFF0F5FF.toInt(),12,0xFFD4E3F7.toInt())
+            ButtonRole.Premium -> rounded(0xFFF2EDFF.toInt(),12,0xFFD9C9F8.toInt())
+            ButtonRole.Danger -> rounded(0xFFFFF1F2.toInt(),12,0xFFF2CDD3.toInt())
+        }
+        val surface = android.graphics.drawable.StateListDrawable().apply {
+            addState(disabled,rounded(0xFFE8EDF5.toInt(),12,0xFFD9E2EE.toInt()))
+            addState(intArrayOf(),normal)
+        }
+        val ripple=android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(if(role==ButtonRole.Primary)0x33FFFFFF else 0x223478F6),
+            surface,null)
+        return Button(context).apply {
+            isAllCaps=false
+            textSize=13f
+            typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL)
+            gravity=Gravity.CENTER
+            minWidth=0
+            minimumWidth=0
+            minHeight=dp(48)
+            minimumHeight=dp(48)
+            maxLines=2
+            setTextColor(android.content.res.ColorStateList(
+                arrayOf(disabled,intArrayOf()),intArrayOf(0xFF65748A.toInt(),foreground)))
+            backgroundTintList=null
+            background=android.graphics.drawable.InsetDrawable(ripple,dp(2),dp(3),dp(2),dp(3))
+            setPadding(dp(10),dp(8),dp(10),dp(8))
+            stateListAnimator=null
+            elevation=0f
+        }
+    }
+
     private fun appDialog(): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
         override fun create(): AlertDialog {
             val dialog = super.create()
@@ -886,9 +933,9 @@ class MainActivity : AppCompatActivity() {
         val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         holder.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(strip) })
         val pager = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val previous = Button(this).apply { text = "‹ Previous"; isAllCaps = false; textSize = 11f }
+        val previous = nativeButton(this, ButtonRole.Secondary).apply { text = "‹ Previous"; isAllCaps = false; textSize = 11f }
         val position = label("", 11f, 0xFF64748B.toInt()).apply { gravity = Gravity.CENTER }
-        val next = Button(this).apply { text = "Next ›"; isAllCaps = false; textSize = 11f }
+        val next = nativeButton(this, ButtonRole.Secondary).apply { text = "Next ›"; isAllCaps = false; textSize = 11f }
         pager.addView(previous, LinearLayout.LayoutParams(-2, dp(48)))
         pager.addView(position, LinearLayout.LayoutParams(0, -2, 1f))
         pager.addView(next, LinearLayout.LayoutParams(-2, dp(48)))
@@ -899,7 +946,7 @@ class MainActivity : AppCompatActivity() {
         fun selection(): List<Int> = runCatching { PdfPagePlan.selection(field.text.toString(), count) }.getOrDefault(emptyList())
         fun choose(pages: List<Int>) { field.setText(PdfPagePlan.formatSelection(pages)) }
         fun shortcut(title: String, action: () -> Unit) {
-            toolbar.addView(Button(this).apply {
+            toolbar.addView(nativeButton(this, ButtonRole.Secondary).apply {
                 text = title; isAllCaps = false; textSize = 11f
                 setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-2, dp(48)))
@@ -951,7 +998,7 @@ class MainActivity : AppCompatActivity() {
                     card.addView(label("Position ${batchStart + index + 1}", 10f, 0xFF64748B.toInt()))
                     val moves = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                     listOf(-1 to "‹", 1 to "›").forEach { (direction, symbol) ->
-                        moves.addView(Button(this).apply {
+                        moves.addView(nativeButton(this, ButtonRole.Secondary).apply {
                             text = symbol; minWidth = 0; minimumWidth = 0
                             contentDescription = "Move page ${pageIndex + 1} ${if (direction < 0) "earlier" else "later"}"
                             isEnabled = selected.size == count && selected.indexOf(pageIndex) + direction in selected.indices
@@ -1570,7 +1617,7 @@ class MainActivity : AppCompatActivity() {
         }
         folderHeading.addView(label("Folders (${homeFolders.size})", 17f, navy, true),
             LinearLayout.LayoutParams(0, -2, 1f))
-        folderHeading.addView(Button(this).apply {
+        folderHeading.addView(nativeButton(this, ButtonRole.Primary).apply {
             text = "▣ +"
             isAllCaps = false
             contentDescription = "Create new folder"
@@ -3801,7 +3848,7 @@ class MainActivity : AppCompatActivity() {
         }
         val group = android.widget.RadioGroup(this)
         options.forEachIndexed { index, option ->
-            group.addView(android.widget.RadioButton(this).apply {
+            group.addView(android.widget.RadionativeButton(this, ButtonRole.Secondary).apply {
                 id = 6200 + index
                 text = option
             })
@@ -4277,7 +4324,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         quickHeader.addView(label("Quick Access", 17f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-        val customize = Button(this).apply {
+        val customize = nativeButton(this, ButtonRole.Secondary).apply {
             text = "Customize"
             textSize = 11f
             isAllCaps = false
@@ -4367,7 +4414,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         listOf("All", "Create", "Organize", "Edit", "Convert", "Protect", "View & share").forEach { name ->
-            chips.addView(Button(this).apply {
+            chips.addView(nativeButton(this, ButtonRole.Secondary).apply {
                 text = name
                 textSize = 11f
                 isAllCaps = false
@@ -4909,7 +4956,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 panel.addView(label("Drag black rectangles over sensitive details. Review every region before saving. Other pages are not automatically redacted.",12f,0xFF64748B.toInt()))
                 panel.addView(editor, LinearLayout.LayoutParams(-1,dp(340)))
-                panel.addView(Button(this).apply { text="Undo last region"; setOnClickListener { if(regions.isNotEmpty()) regions.removeAt(regions.lastIndex); editor.invalidate() } })
+                panel.addView(nativeButton(this, ButtonRole.Secondary).apply { text="Undo last region"; setOnClickListener { if(regions.isNotEmpty()) regions.removeAt(regions.lastIndex); editor.invalidate() } })
                 val dialog = appDialog().setTitle("PDF Redaction • Page "+(pageIndex+1)).setView(panel)
                     .setNegativeButton("Cancel",null).setPositiveButton("Export redacted PDF",null).create()
                 dialog.setOnDismissListener { preview.recycle() }
@@ -5125,7 +5172,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         listOf("All","Convert","Edit","AI","Utility").forEach { name ->
-            tabs.addView(Button(this).apply { text=name; isAllCaps=false; textSize=11f; setOnClickListener { category=name; render() } })
+            tabs.addView(nativeButton(this, ButtonRole.Secondary).apply { text=name; isAllCaps=false; textSize=11f; setOnClickListener { category=name; render() } })
         }
         search.addTextChangedListener(object:android.text.TextWatcher{
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
@@ -5401,7 +5448,7 @@ class MainActivity : AppCompatActivity() {
             val hint=label("Auto-renewing • Price shown when available",11f,0xFF64748B.toInt())
             card.addView(price);card.addView(hint);card.addView(gap(5))
             card.addView(label("All Premium features • Auto-renewing",12f,0xFF263957.toInt()))
-            val button=Button(this).apply{text="Checking availability…";isAllCaps=false;isEnabled=false;minHeight=dp(48);backgroundTintList=android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(0xFFE3EAF5.toInt(),0xFF2563EB.toInt()));setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(0xFF53657E.toInt(),0xFFFFFFFF.toInt())))}
+            val button=nativeButton(this, ButtonRole.Primary).apply{text="Checking availability…";isAllCaps=false;isEnabled=false;minHeight=dp(48)}
             card.addView(button,LinearLayout.LayoutParams(-1,-2))
             planButtons[plan]=button;planPrices[plan]=price;planHints[plan]=hint
             panel.addView(card);panel.addView(gap(8))
@@ -5710,8 +5757,8 @@ class MainActivity : AppCompatActivity() {
                 val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
                 val crop=ImageCropView(this,source)
                 panel.addView(crop,LinearLayout.LayoutParams(-1,dp(320)))
-                panel.addView(Button(this).apply{text="Rotate 90°";setOnClickListener{crop.rotateImage()}})
-                panel.addView(Button(this).apply{text="Reset crop";setOnClickListener{crop.resetCrop()}})
+                panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Rotate 90°";setOnClickListener{crop.rotateImage()}})
+                panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Reset crop";setOnClickListener{crop.resetCrop()}})
                 val dialog=appDialog().setTitle("Crop & Rotate").setView(panel).setPositiveButton("Preview export"){_,_->
                     val result=crop.getCroppedBitmap().copy(Bitmap.Config.ARGB_8888,false)
                     advancedToolJob("Exporting crop…"){studioResult(result,"Cropped")}
@@ -5785,7 +5832,7 @@ class MainActivity : AppCompatActivity() {
         banner.addView(label("DOCNEXA • BUSINESS STUDIO",11f,0xFFE4E7FF.toInt(),true))
         banner.addView(gap(6));banner.addView(label("Create professional bills & invoices",22f,android.graphics.Color.WHITE,true))
         banner.addView(gap(5));banner.addView(label("Private on-device records • A4 PDF • Share and print",12f,0xFFE4E7FF.toInt()))
-        banner.addView(gap(12));banner.addView(Button(this).apply{text="+ Create invoice";isAllCaps=false;setOnClickListener{showInvoiceEditor("Invoice")}},LinearLayout.LayoutParams(-1,dp(52)))
+        banner.addView(gap(12));banner.addView(nativeButton(this, ButtonRole.Primary).apply{text="+ Create invoice";isAllCaps=false;setOnClickListener{showInvoiceEditor("Invoice")}},LinearLayout.LayoutParams(-1,dp(52)))
         panel.addView(banner);panel.addView(gap(12))
         val draftCount=invoiceRecords("Drafts").length()
         val historyCount=getSavedPdfs().count{it.first.startsWith("Billing_")}
@@ -5824,7 +5871,7 @@ class MainActivity : AppCompatActivity() {
             val obj=records.optJSONObject(i)?:continue
             val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
             row.addView(label(obj.optString("name")+"\n"+obj.optString("detail"),13f,0xFF263957.toInt(),true),LinearLayout.LayoutParams(0,-2,1f))
-            row.addView(Button(this).apply{text="Delete";isAllCaps=false;setOnClickListener{
+            row.addView(nativeButton(this, ButtonRole.Danger).apply{text="Delete";isAllCaps=false;setOnClickListener{
                 appDialog().setTitle("Delete record?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
                     val updated=org.json.JSONArray();for(j in 0 until records.length())if(j!=i)updated.put(records.get(j))
                     prefs.edit().putString(accountPrefKey("invoice_records_"+kind),updated.toString()).apply()
@@ -5951,7 +5998,7 @@ class MainActivity : AppCompatActivity() {
         val contact=field("Phone / email",initial("contact",profile?.optString("contact").orEmpty()),80)
         val gstin=field("Business GSTIN (if registered)",initial("gstin",profile?.optString("extra").orEmpty()),15)
         var logo:ByteArray?=null;var signature:ByteArray?=null
-        panel.addView(Button(this).apply{text="Add business logo • PRO";isAllCaps=false;setOnClickListener{
+        panel.addView(nativeButton(this, ButtonRole.Premium).apply{text="Add business logo • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Business logo")){invoiceLogoCallback={data->logo=data;text="Logo added • Change"};invoiceLogoPicker.launch(arrayOf("image/*"))}
         }})
         section("2 • Customer details")
@@ -5959,7 +6006,7 @@ class MainActivity : AppCompatActivity() {
         val customerAddress=field("Customer address",initial("customerAddress"),150)
         val customerGstin=field("Customer GSTIN (optional)",initial("customerGstin"),15)
         val supply=field("Place of supply / state",initial("supply"),50)
-        panel.addView(Button(this).apply{text="Use saved customer • PRO";isAllCaps=false;setOnClickListener{
+        panel.addView(nativeButton(this, ButtonRole.Premium).apply{text="Use saved customer • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Customer manager")){
                 val records=invoiceRecords("Customers")
                 if(records.length()==0){Toast.makeText(this@MainActivity,"Save a customer in Customers first",Toast.LENGTH_LONG).show();return@setOnClickListener}
@@ -5974,7 +6021,7 @@ class MainActivity : AppCompatActivity() {
         val due=field("Due date (optional)",initial("due"),10)
         fun calendar(field:EditText){val cal=java.util.Calendar.getInstance();runCatching{SimpleDateFormat("dd/MM/yyyy",Locale.US).apply{isLenient=false}.parse(field.text.toString())?.let{cal.time=it}};android.app.DatePickerDialog(this,{_,year,month,day->field.setText(String.format(Locale.US,"%02d/%02d/%04d",day,month+1,year))},cal.get(java.util.Calendar.YEAR),cal.get(java.util.Calendar.MONTH),cal.get(java.util.Calendar.DAY_OF_MONTH)).show()}
         val dateActions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
-        listOf("Pick date" to date,"Pick due date" to due).forEach{(title,target)->dateActions.addView(Button(this).apply{text=title;isAllCaps=false;setOnClickListener{calendar(target)}},LinearLayout.LayoutParams(0,-2,1f))};panel.addView(dateActions)
+        listOf("Pick date" to date,"Pick due date" to due).forEach{(title,target)->dateActions.addView(nativeButton(this, ButtonRole.Secondary).apply{text=title;isAllCaps=false;setOnClickListener{calendar(target)}},LinearLayout.LayoutParams(0,-2,1f))};panel.addView(dateActions)
         val taxMode=android.widget.CheckBox(this).apply{text="Interstate supply (IGST instead of CGST + SGST)";isChecked=initialDraft?.optBoolean("interstate")?:false;panel.addView(this)}
         section("4 • Items / products")
         val rows=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL};panel.addView(rows)
@@ -5995,14 +6042,14 @@ class MainActivity : AppCompatActivity() {
             val q=itemField("Quantity",saved?.optString("qty","1")?:"1",10,true)
             val p=itemField("Unit rate (INR)",saved?.optString("rate").orEmpty(),13,true)
             val t=itemField("GST rate (%)",saved?.optString("tax","0")?:"0",6,true)
-            box.addView(Button(this).apply{text="Choose GST rate";isAllCaps=false;setOnClickListener{val rates=arrayOf("0","5","12","18","28");appDialog().setTitle("Common GST rates").setItems(rates.map{it+"%"}.toTypedArray()){_,i->t.setText(rates[i])}.setNegativeButton("Custom / Close",null).show()}})
+            box.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose GST rate";isAllCaps=false;setOnClickListener{val rates=arrayOf("0","5","12","18","28");appDialog().setTitle("Common GST rates").setItems(rates.map{it+"%"}.toTypedArray()){_,i->t.setText(rates[i])}.setNegativeButton("Custom / Close",null).show()}})
             val entry=Entry(box,n,h,q,p,t);entries.add(entry)
             val lineTotal=label("Item subtotal: INR 0.00",12f,0xFF2563EB.toInt(),true)
             box.addView(lineTotal)
             fun updateLine(){val qty=q.text.toString().toBigDecimalOrNull();val rate=p.text.toString().toBigDecimalOrNull();lineTotal.text=if(qty!=null&&rate!=null) "Item subtotal: INR "+InvoiceDocument.format(qty*rate) else "Enter quantity and rate"}
             listOf(q,p,t).forEach{input->watch(input);input.addTextChangedListener(object:android.text.TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){updateLine()};override fun afterTextChanged(s:android.text.Editable?){}})}
             updateLine()
-            box.addView(Button(this).apply{text="Use saved product • PRO";isAllCaps=false;setOnClickListener{
+            box.addView(nativeButton(this, ButtonRole.Premium).apply{text="Use saved product • PRO";isAllCaps=false;setOnClickListener{
                 if(requirePremiumTool("Product manager")){
                     val records=invoiceRecords("Products")
                     if(records.length()==0){Toast.makeText(this@MainActivity,"Save a product first",Toast.LENGTH_LONG).show();return@setOnClickListener}
@@ -6011,14 +6058,14 @@ class MainActivity : AppCompatActivity() {
                     }.show()
                 }
             }})
-            box.addView(Button(this).apply{text="Remove item";isAllCaps=false;setOnClickListener{if(entries.size>1){entries.remove(entry);rows.removeView(box);updateTotals()}}})
+            box.addView(nativeButton(this, ButtonRole.Danger).apply{text="Remove item";isAllCaps=false;setOnClickListener{if(entries.size>1){entries.remove(entry);rows.removeView(box);updateTotals()}}})
             rows.addView(box);rows.addView(gap(4));updateTotals()
         }
         val savedItems=initialDraft?.optJSONArray("items")
         if(savedItems==null||savedItems.length()==0)addEntry() else for(i in 0 until minOf(savedItems.length(),100))addEntry(savedItems.optJSONObject(i))
-        panel.addView(Button(this).apply{text="+ Add item";isAllCaps=false;setOnClickListener{addEntry()}})
+        panel.addView(nativeButton(this, ButtonRole.Primary).apply{text="+ Add item";isAllCaps=false;setOnClickListener{addEntry()}})
         val discount=field("Total discount (INR)",initial("discount","0"),13,true)
-        panel.addView(Button(this).apply{text="Apply percentage discount";isAllCaps=false;setOnClickListener{
+        panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Apply percentage discount";isAllCaps=false;setOnClickListener{
             val input=EditText(this@MainActivity).apply{hint="Discount % (0–100)";inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL;filters=arrayOf(android.text.InputFilter.LengthFilter(6))}
             val holder=LinearLayout(this@MainActivity).apply{setPadding(dp(16),dp(8),dp(16),dp(8));addView(input,LinearLayout.LayoutParams(-1,-2))}
             val picker=appDialog().setTitle("Percentage discount").setView(holder).setNegativeButton("Cancel",null).setPositiveButton("Apply",null).create();picker.show()
@@ -6029,7 +6076,7 @@ class MainActivity : AppCompatActivity() {
         val paid=if(tracked)field("Amount received (INR)",initial("paid","0"),16,true)else EditText(this).apply{setText("0")}
         val method=if(tracked)field("Payment method (Cash / UPI / Bank / Card)",initial("method"),60)else EditText(this)
         val reference=if(tracked)field("Payment reference (optional)",initial("reference"),80)else EditText(this)
-        if(tracked)panel.addView(Button(this).apply{text="Choose payment method";isAllCaps=false;setOnClickListener{val methods=arrayOf("Cash","UPI","Bank transfer","Card","Cheque","Other");appDialog().setTitle("Payment method").setItems(methods){_,i->method.setText(methods[i])}.setNegativeButton("Cancel",null).show()}})
+        if(tracked)panel.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Choose payment method";isAllCaps=false;setOnClickListener{val methods=arrayOf("Cash","UPI","Bank transfer","Card","Cheque","Other");appDialog().setTitle("Payment method").setItems(methods){_,i->method.setText(methods[i])}.setNegativeButton("Cancel",null).show()}})
         val summary=label("",14f,0xFF172B4D.toInt(),true).apply{setPadding(dp(12),dp(14),dp(12),dp(14));background=rounded(0xFFEAF2FF.toInt(),14)}
         panel.addView(gap(8));panel.addView(summary)
         updateTotals={
@@ -6055,10 +6102,10 @@ class MainActivity : AppCompatActivity() {
         }
         template.setSelection((initialDraft?.optInt("template",0)?:0).coerceIn(0,5))
         panel.addView(template)
-        panel.addView(Button(this).apply{text="Add handwritten signature • PRO";isAllCaps=false;setOnClickListener{
+        panel.addView(nativeButton(this, ButtonRole.Premium).apply{text="Add handwritten signature • PRO";isAllCaps=false;setOnClickListener{
             if(requirePremiumTool("Invoice signature")){
                 val pad=SignatureCanvas(this@MainActivity).apply{setBackgroundColor(android.graphics.Color.WHITE)}
-                val container=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL;addView(pad,LinearLayout.LayoutParams(-1,dp(180)));addView(Button(this@MainActivity).apply{text="Clear";setOnClickListener{pad.clear()}})}
+                val container=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL;addView(pad,LinearLayout.LayoutParams(-1,dp(180)));addView(nativeButton(this@MainActivity, ButtonRole.Secondary).apply{text="Clear";setOnClickListener{pad.clear()}})}
                 appDialog().setTitle("Draw signature").setView(container).setNegativeButton("Cancel",null).setPositiveButton("Use signature"){_,_->
                     if(pad.hasSignature()){val bitmap=pad.toBitmap();try{signature=ByteArrayOutputStream().also{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}.toByteArray();text="Signature added • Change"}finally{bitmap.recycle()}}
                 }.show()
@@ -6151,8 +6198,8 @@ class MainActivity : AppCompatActivity() {
             }
             info.text="Page ${index+1} / ${renderer.pageCount} • Total INR "+InvoiceDocument.format(InvoiceDocument.totals(draft).total)
         }
-        nav.addView(Button(this).apply{text="‹ Previous";setOnClickListener{if(index>0){index--;render()}}},LinearLayout.LayoutParams(0,-2,1f))
-        nav.addView(Button(this).apply{text="Next ›";setOnClickListener{if(index<renderer.pageCount-1){index++;render()}}},LinearLayout.LayoutParams(0,-2,1f))
+        nav.addView(nativeButton(this, ButtonRole.Secondary).apply{text="‹ Previous";setOnClickListener{if(index>0){index--;render()}}},LinearLayout.LayoutParams(0,-2,1f))
+        nav.addView(nativeButton(this, ButtonRole.Secondary).apply{text="Next ›";setOnClickListener{if(index<renderer.pageCount-1){index++;render()}}},LinearLayout.LayoutParams(0,-2,1f))
         panel.addView(nav)
         val dialog=appDialog().setTitle("Invoice PDF preview").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Edit",null).setPositiveButton("Save PDF",null).create()
         dialog.setOnDismissListener{image.setImageDrawable(null);bitmap?.recycle();renderer.close();temp.delete()}
@@ -7084,7 +7131,7 @@ class MainActivity : AppCompatActivity() {
         val canvas = SignatureCanvas(this)
         val typed = EditText(this).apply { hint = "Type your name / signature"; textSize = 23f }
         var selectedSignatureFont = "Cursive"
-        val fontButton = Button(this).apply { text = "Font: $selectedSignatureFont" }
+        val fontButton = nativeButton(this, ButtonRole.Secondary).apply { text = "Font: $selectedSignatureFont" }
         fontButton.setOnClickListener { anchor ->
             val menu = PopupMenu(this, anchor)
             listOf("Cursive", "Serif", "Sans Serif", "Monospace", "Elegant", "Bold", "Italic").forEach { menu.menu.add(it) }
@@ -7176,9 +7223,9 @@ class MainActivity : AppCompatActivity() {
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            addView(Button(this@MainActivity).apply { text = "Undo"; setOnClickListener { canvas.undo() } })
-            addView(Button(this@MainActivity).apply { text = "Clear"; setOnClickListener { canvas.clear(); typed.setText("") } })
-            addView(Button(this@MainActivity).apply {
+            addView(nativeButton(this@MainActivity, ButtonRole.Secondary).apply { text = "Undo"; setOnClickListener { canvas.undo() } })
+            addView(nativeButton(this@MainActivity, ButtonRole.Secondary).apply { text = "Clear"; setOnClickListener { canvas.clear(); typed.setText("") } })
+            addView(nativeButton(this@MainActivity, ButtonRole.Primary).apply {
                 text = "Save PNG"
                 setOnClickListener {
                     val bitmap = buildSignatureBitmap(canvas, typed.text.toString(), selectedSignatureFont)
@@ -8954,7 +9001,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(statusText)
             panel.addView(gap(12))
             fun resultButton(title: String, primary: Boolean, action: () -> Unit): com.google.android.material.button.MaterialButton =
-                com.google.android.material.button.MaterialButton(this).apply {
+                com.google.android.material.button.MaterialnativeButton(this, ButtonRole.Secondary).apply {
                     text = title; isAllCaps = false; textSize = 12.5f
                     maxLines = 2
                     setPadding(dp(5), dp(5), dp(5), dp(5))
@@ -9629,7 +9676,7 @@ class MainActivity : AppCompatActivity() {
         val preview = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
         root.addView(preview, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(label("Keep the QR code inside the camera frame. It scans automatically.", 13f, 0xFFFFFFFF.toInt()).apply { setPadding(dp(8), dp(12), dp(8), dp(12)) })
-        val close = Button(this).apply { text = "Close scanner"; setOnClickListener { closeQrCamera(); buildScreen() } }
+        val close = nativeButton(this, ButtonRole.Secondary).apply { text = "Close scanner"; setOnClickListener { closeQrCamera(); buildScreen() } }
         root.addView(close, LinearLayout.LayoutParams(-1, dp(48)))
         setScreenContent(root)
         closeQrCamera()
@@ -9851,16 +9898,16 @@ class MainActivity : AppCompatActivity() {
                 details.addView(label("Position ${index + 1} of ${orderedUris.size}", 10f, 0xFF718096.toInt()))
                 row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
                 val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-                val up = android.widget.Button(this).apply {
-                    text = "↑"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(36)
+                val up = nativeButton(this, ButtonRole.Secondary).apply {
+                    text = "↑"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(48)
                     isEnabled = index > 0
                     setOnClickListener {
                         java.util.Collections.swap(orderedUris, index, index - 1)
                         refreshRows()
                     }
                 }
-                val down = android.widget.Button(this).apply {
-                    text = "↓"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(36)
+                val down = nativeButton(this, ButtonRole.Secondary).apply {
+                    text = "↓"; isAllCaps = false; textSize = 15f; minWidth = dp(38); minHeight = dp(48)
                     isEnabled = index < orderedUris.lastIndex
                     setOnClickListener {
                         java.util.Collections.swap(orderedUris, index, index + 1)
@@ -10235,7 +10282,7 @@ class MainActivity : AppCompatActivity() {
             }
             row.addView(preview)
             row.addView(label(if (index == 0) "  Front side" else "  Back side", 14f, 0xFF263957.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(Button(this).apply {
+            row.addView(nativeButton(this, ButtonRole.Secondary).apply {
                 text = "Crop"
                 isAllCaps = false
                 setOnClickListener {
@@ -10489,7 +10536,7 @@ class MainActivity : AppCompatActivity() {
             row.addView(thumb)
             row.addView(label("Page ${index + 1}", 13f, 0xFF263957.toInt(), true))
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-            fun action(caption: String, callback: () -> Unit) = Button(this@MainActivity).apply {
+            fun action(caption: String, callback: () -> Unit) = nativeButton(this@MainActivity, ButtonRole.Secondary).apply {
                 text = caption; isAllCaps = false; textSize = 10f; setPadding(dp(3), 0, dp(3), 0)
                 setOnClickListener { callback() }
             }
@@ -10578,7 +10625,7 @@ class MainActivity : AppCompatActivity() {
                     duplicateRow.addView(label("Duplicated page", 13f, 0xFF263957.toInt(), true))
                     val duplicateActions = LinearLayout(this@MainActivity).apply {
                         gravity = Gravity.CENTER
-                        addView(Button(this@MainActivity).apply {
+                        addView(nativeButton(this@MainActivity, ButtonRole.Danger).apply {
                             text = "Remove duplicate"; isAllCaps = false; textSize = 10f
                             setOnClickListener {
                                 val at = rows.indexOf(duplicateRow)
@@ -10592,11 +10639,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         })
                     }
-                    duplicateActions.addView(Button(this@MainActivity).apply {
+                    duplicateActions.addView(nativeButton(this@MainActivity, ButtonRole.Secondary).apply {
                             text = "↑"; isAllCaps = false
                             setOnClickListener { val at = rows.indexOf(duplicateRow); movePage(at, at - 1) }
                         })
-                        duplicateActions.addView(Button(this@MainActivity).apply {
+                        duplicateActions.addView(nativeButton(this@MainActivity, ButtonRole.Secondary).apply {
                             text = "↓"; isAllCaps = false
                             setOnClickListener { val at = rows.indexOf(duplicateRow); movePage(at, at + 1) }
                         })
@@ -10885,7 +10932,7 @@ class MainActivity : AppCompatActivity() {
             orientation = android.widget.RadioGroup.VERTICAL
         }
         names.forEachIndexed { index, name ->
-            choices.addView(android.widget.RadioButton(this).apply {
+            choices.addView(android.widget.RadionativeButton(this, ButtonRole.Secondary).apply {
                 id = View.generateViewId()
                 text = name
                 isChecked = index == selected
