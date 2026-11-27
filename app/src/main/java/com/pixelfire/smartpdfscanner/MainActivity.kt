@@ -3848,7 +3848,7 @@ class MainActivity : AppCompatActivity() {
         }
         val group = android.widget.RadioGroup(this)
         options.forEachIndexed { index, option ->
-            group.addView(android.widget.RadionativeButton(this, ButtonRole.Secondary).apply {
+            group.addView(android.widget.RadioButton(this).apply {
                 id = 6200 + index
                 text = option
             })
@@ -9001,7 +9001,7 @@ class MainActivity : AppCompatActivity() {
             panel.addView(statusText)
             panel.addView(gap(12))
             fun resultButton(title: String, primary: Boolean, action: () -> Unit): com.google.android.material.button.MaterialButton =
-                com.google.android.material.button.MaterialnativeButton(this, ButtonRole.Secondary).apply {
+                com.google.android.material.button.MaterialButton(this).apply {
                     text = title; isAllCaps = false; textSize = 12.5f
                     maxLines = 2
                     setPadding(dp(5), dp(5), dp(5), dp(5))
@@ -10932,7 +10932,7 @@ class MainActivity : AppCompatActivity() {
             orientation = android.widget.RadioGroup.VERTICAL
         }
         names.forEachIndexed { index, name ->
-            choices.addView(android.widget.RadionativeButton(this, ButtonRole.Secondary).apply {
+            choices.addView(android.widget.RadioButton(this).apply {
                 id = View.generateViewId()
                 text = name
                 isChecked = index == selected
