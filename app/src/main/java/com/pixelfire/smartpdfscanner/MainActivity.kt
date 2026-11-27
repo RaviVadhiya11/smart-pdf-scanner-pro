@@ -750,6 +750,7 @@ class MainActivity : AppCompatActivity() {
         connectPlayBilling()
         requestAdConsent()
         openNotificationPdf(intent)
+        handleViewerIntent(intent)
         initializeRemoteConfig()
         pendingResultSource = savedInstanceState?.getString("result_pending_source")?.let { Uri.parse(it) }
         pendingResultName = savedInstanceState?.getString("result_pending_name")
@@ -2803,6 +2804,15 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         handleSocialAuthIntent(intent)
         openNotificationPdf(intent)
+        handleViewerIntent(intent)
+    }
+
+    private fun handleViewerIntent(intent:Intent?){
+        if(intent?.action!=Intent.ACTION_VIEW)return
+        val uri=intent.data ?:return
+        if(uri.scheme!="content")return
+        val owner=signedInUserId()
+        window.decorView.post{if(!isFinishing&&!isDestroyed&&owner==signedInUserId())openDocumentViewer(uri)}
     }
 
     private fun openNotificationPdf(intent: Intent?) {
@@ -8442,13 +8452,7 @@ class MainActivity : AppCompatActivity() {
     // Google Docs import/conversion support depends on the installed Google app version.
     private fun openPdfWithGoogleDocs(uri: Uri) {
         if (!requireInternet("Google Docs online features")) return
-        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try {
-            startActivity(Intent.createChooser(view, "Open PDF with Google Docs or another app"))
-        } catch (_: Exception) {
-            Toast.makeText(this, "No compatible document app found", Toast.LENGTH_LONG).show()
-        }
+        openViewerExternal(uri,"application/pdf")
     }
 
     private fun addWatermarkDialog(uri: Uri) {
@@ -11151,6 +11155,36 @@ class MainActivity : AppCompatActivity() {
         if(uri!=null)openDocumentViewer(uri)
     }
     private var activeDocumentViewer:AlertDialog?=null
+    private val viewerImportBusy=AtomicBoolean(false)
+    private fun saveViewerLocal(uri:Uri,name:String){
+        if(!viewerImportBusy.compareAndSet(false,true)){
+            Toast.makeText(this,"A file is already being copied.",Toast.LENGTH_SHORT).show();return
+        }
+        val owner=signedInUserId();val folder=selectedFolder;val directory=privateDocumentsDir()
+        Toast.makeText(this,"Saving a private copy…",Toast.LENGTH_SHORT).show()
+        Thread{
+            try{
+                val target=PrivateDocumentStore.save(directory,name){out->
+                    (contentResolver.openInputStream(uri)?:error("Cannot read file")).use{input->
+                        val buffer=ByteArray(32768);var total=0L
+                        while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=128L*1024*1024){"Private import supports up to 128 MB"};out.write(buffer,0,n)}
+                    }
+                }
+                runOnUiThread{
+                    if(!isFinishing&&!isDestroyed&&owner==signedInUserId()){
+                        val local=privateDocumentUri(target)
+                        if(target.extension.equals("pdf",true)){
+                            folderAssignments[local.toString()]=folder
+                            prefs.edit().putString(accountPrefKey("folder_assignments"),folderAssignmentSnapshot()).apply()
+                        }
+                        Toast.makeText(this,"Saved inside DocNexa",Toast.LENGTH_SHORT).show()
+                        openDocumentViewer(local)
+                    }
+                }
+            }catch(e:Exception){runOnUiThread{if(!isFinishing&&!isDestroyed&&owner==signedInUserId())Toast.makeText(this,e.message?:"Cannot save a private copy",Toast.LENGTH_LONG).show()}}
+            finally{viewerImportBusy.set(false)}
+        }.start()
+    }
     private val viewerReadExecutor=Executors.newSingleThreadExecutor()
     private fun viewerName(uri:Uri):String=privateDocumentFile(uri)?.name ?: runCatching{
         contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use{if(it.moveToFirst())it.getString(0)else null}
@@ -11307,6 +11341,7 @@ class MainActivity : AppCompatActivity() {
         val dialog=appDialog().setTitle("Document Viewer").setView(toolDialogScroll(panel,0.79f)).setNegativeButton("Close",null).create()
         activeDocumentViewer=dialog
         var currentBitmap:Bitmap?=null
+        var previewImage:ImageView?=null
         var generation=0
         var textContent:String?=null
         fun valid()=dialog.isShowing&&!isFinishing&&!isDestroyed&&owner==signedInUserId()
@@ -11322,6 +11357,7 @@ class MainActivity : AppCompatActivity() {
                 if(requirePremiumTool("Document viewer text PDF")){val content=textContent.orEmpty();dialog.dismiss();createPdfFromText(content,name.substringBeforeLast('.').take(70))}
             })
             val local=privateDocumentFile(uri)
+            if(local==null)actions.add("Save inside DocNexa" to {saveViewerLocal(uri,name)})
             if(local!=null){
                 val key=accountPrefKey("viewer_favourites")
                 val stars=(prefs.getStringSet(key,emptySet())?:emptySet()).toMutableSet()
@@ -11360,12 +11396,14 @@ class MainActivity : AppCompatActivity() {
         }
         dialog.setOnDismissListener{
             generation++
+            previewImage?.setImageDrawable(null)
             currentBitmap?.recycle();currentBitmap=null
             if(activeDocumentViewer===dialog)activeDocumentViewer=null
         }
         dialog.show()
         if(kind==DocumentViewerPlan.Kind.PDF||kind==DocumentViewerPlan.Kind.IMAGE){
             val image=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;adjustViewBounds=true;contentDescription="Document page preview"}
+            previewImage=image
             val vertical=ScrollView(this).apply{isFillViewport=false;addView(image,ViewGroup.LayoutParams(-1,-2))}
             val horizontal=HorizontalScrollView(this).apply{addView(vertical,ViewGroup.LayoutParams(-2,-1));isFillViewport=true}
             body.addView(horizontal,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.43f).toInt()))
@@ -11491,11 +11529,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openPdf(uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try { startActivity(intent) }
-        catch (_: Exception) {
-            Toast.makeText(this, "No PDF viewer found. Your PDF is still saved.", Toast.LENGTH_LONG).show()
-        }
+        if(uri.scheme=="content")openDocumentViewer(uri) else openViewerExternal(uri,"application/pdf")
     }
 }
