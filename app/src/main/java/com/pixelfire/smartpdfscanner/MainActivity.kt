@@ -5773,7 +5773,13 @@ class MainActivity : AppCompatActivity() {
         banner.addView(label("DOCNEXA • BUSINESS STUDIO",11f,0xFFE4E7FF.toInt(),true))
         banner.addView(gap(6));banner.addView(label("Create professional bills & invoices",22f,android.graphics.Color.WHITE,true))
         banner.addView(gap(5));banner.addView(label("Private on-device records • A4 PDF • Share and print",12f,0xFFE4E7FF.toInt()))
+        banner.addView(gap(12));banner.addView(Button(this).apply{text="+ Create invoice";isAllCaps=false;setOnClickListener{showInvoiceEditor("Invoice")}},LinearLayout.LayoutParams(-1,dp(52)))
         panel.addView(banner);panel.addView(gap(12))
+        val draftCount=invoiceRecords("Drafts").length()
+        val historyCount=getSavedPdfs().count{it.first.startsWith("Billing_")}
+        val overview=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setPadding(dp(12),dp(12),dp(12),dp(12));background=rounded(0xFFFFFFFF.toInt(),16,0xFFDCE6F5.toInt())}
+        fun metric(value:Int,title:String,action:()->Unit){val tile=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;minimumHeight=dp(62);isClickable=true;isFocusable=true;setOnClickListener{action()}};tile.addView(label(value.toString(),23f,0xFF1769E8.toInt(),true));tile.addView(label(title,12f,0xFF52627A.toInt()));overview.addView(tile,LinearLayout.LayoutParams(0,-2,1f))}
+        metric(historyCount,"Saved PDFs"){showInvoiceHistory()};metric(draftCount,"Drafts"){showInvoiceDrafts()};panel.addView(overview);panel.addView(gap(12))
         val kinds=listOf("Invoice" to "Professional service invoice","Bill" to "Simple sales bill","GST Invoice" to "Item tax and GST details","Quotation" to "Price proposal","Estimate" to "Estimated project cost","Receipt" to "Payment received document","Delivery Challan" to "Goods delivery document")
         val tiles: List<Triple<String,String,()->Unit>> = kinds.map{(kind,desc)->Triple(kind,desc,{showInvoiceEditor(kind)})}+listOf(
             Triple("Business Profile","Save business details",{showInvoiceDirectory("Business")}),
@@ -5785,7 +5791,7 @@ class MainActivity : AppCompatActivity() {
         )
         tiles.chunked(2).forEach{pair->
             val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
-            pair.forEach{(title,description,action)->row.addView(toolCard(title,description,"₹",0xFF2563EB.toInt(),action),LinearLayout.LayoutParams(0,dp(128),1f).apply{setMargins(dp(4),dp(4),dp(4),dp(4))})}
+            pair.forEach{(title,description,action)->row.addView(toolCard(title,description,when{title.startsWith("Business")->"B";title.startsWith("Customers")->"C";title.startsWith("Products")->"P";title.contains("History")->"↺";title.contains("Drafts")->"✎";title.contains("Reports")->"▤";title=="Receipt"->"✓";else->"₹"},0xFF2563EB.toInt(),action),LinearLayout.LayoutParams(0,dp(128),1f).apply{setMargins(dp(4),dp(4),dp(4),dp(4))})}
             if(pair.size==1)row.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
             panel.addView(row)
         }
@@ -5954,6 +5960,9 @@ class MainActivity : AppCompatActivity() {
         val number=field("Document number",initial("number",when(kind){"Bill"->"BILL";"Receipt"->"REC";"Quotation"->"QUO";"Estimate"->"EST";"Delivery Challan"->"DC";else->"INV"}+"-"+SimpleDateFormat("yyMMdd-HHmmss",Locale.US).format(Date())),24)
         val date=field("Date (DD/MM/YYYY)",initial("date",SimpleDateFormat("dd/MM/yyyy",Locale.US).format(Date())),10)
         val due=field("Due date (optional)",initial("due"),10)
+        fun calendar(field:EditText){val cal=java.util.Calendar.getInstance();runCatching{SimpleDateFormat("dd/MM/yyyy",Locale.US).apply{isLenient=false}.parse(field.text.toString())?.let{cal.time=it}};android.app.DatePickerDialog(this,{_,year,month,day->field.setText(String.format(Locale.US,"%02d/%02d/%04d",day,month+1,year))},cal.get(java.util.Calendar.YEAR),cal.get(java.util.Calendar.MONTH),cal.get(java.util.Calendar.DAY_OF_MONTH)).show()}
+        val dateActions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        listOf("Pick date" to date,"Pick due date" to due).forEach{(title,target)->dateActions.addView(Button(this).apply{text=title;isAllCaps=false;setOnClickListener{calendar(target)}},LinearLayout.LayoutParams(0,-2,1f))};panel.addView(dateActions)
         val taxMode=android.widget.CheckBox(this).apply{text="Interstate supply (IGST instead of CGST + SGST)";isChecked=initialDraft?.optBoolean("interstate")?:false;panel.addView(this)}
         section("4 • Items / products")
         val rows=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL};panel.addView(rows)
@@ -5974,6 +5983,7 @@ class MainActivity : AppCompatActivity() {
             val q=itemField("Quantity",saved?.optString("qty","1")?:"1",10,true)
             val p=itemField("Unit rate (INR)",saved?.optString("rate").orEmpty(),13,true)
             val t=itemField("GST rate (%)",saved?.optString("tax","0")?:"0",6,true)
+            box.addView(Button(this).apply{text="Choose GST rate";isAllCaps=false;setOnClickListener{val rates=arrayOf("0","5","12","18","28");appDialog().setTitle("Common GST rates").setItems(rates.map{it+"%"}.toTypedArray()){_,i->t.setText(rates[i])}.setNegativeButton("Custom / Close",null).show()}})
             val entry=Entry(box,n,h,q,p,t);entries.add(entry)
             val lineTotal=label("Item subtotal: INR 0.00",12f,0xFF2563EB.toInt(),true)
             box.addView(lineTotal)
@@ -5996,11 +6006,18 @@ class MainActivity : AppCompatActivity() {
         if(savedItems==null||savedItems.length()==0)addEntry() else for(i in 0 until minOf(savedItems.length(),100))addEntry(savedItems.optJSONObject(i))
         panel.addView(Button(this).apply{text="+ Add item";isAllCaps=false;setOnClickListener{addEntry()}})
         val discount=field("Total discount (INR)",initial("discount","0"),13,true)
+        panel.addView(Button(this).apply{text="Apply percentage discount";isAllCaps=false;setOnClickListener{
+            val input=EditText(this@MainActivity).apply{hint="Discount % (0–100)";inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL;filters=arrayOf(android.text.InputFilter.LengthFilter(6))}
+            val holder=LinearLayout(this@MainActivity).apply{setPadding(dp(16),dp(8),dp(16),dp(8));addView(input,LinearLayout.LayoutParams(-1,-2))}
+            val picker=appDialog().setTitle("Percentage discount").setView(holder).setNegativeButton("Cancel",null).setPositiveButton("Apply",null).create();picker.show()
+            picker.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{try{val percentage=input.text.toString().toBigDecimalOrNull()?:error("Enter percentage");val subtotal=entries.fold(java.math.BigDecimal.ZERO){sum,e->val q=e.qty.text.toString().toBigDecimalOrNull()?:error("Enter quantity");val rate=e.price.text.toString().toBigDecimalOrNull()?:error("Enter rate");require(q.signum()>0&&rate.signum()>=0){"Check item values"};sum+InvoiceDocument.money(q*rate)};discount.setText(InvoiceDocument.format(InvoiceDocument.percentageDiscount(subtotal,percentage)));picker.dismiss()}catch(e:Exception){input.error=e.message?:"Invalid percentage"}}
+        }})
         val notes=field("Notes / payment terms",initial("notes"),300)
         val tracked=InvoiceDocument.paymentTracked(kind)
         val paid=if(tracked)field("Amount received (INR)",initial("paid","0"),16,true)else EditText(this).apply{setText("0")}
         val method=if(tracked)field("Payment method (Cash / UPI / Bank / Card)",initial("method"),60)else EditText(this)
         val reference=if(tracked)field("Payment reference (optional)",initial("reference"),80)else EditText(this)
+        if(tracked)panel.addView(Button(this).apply{text="Choose payment method";isAllCaps=false;setOnClickListener{val methods=arrayOf("Cash","UPI","Bank transfer","Card","Cheque","Other");appDialog().setTitle("Payment method").setItems(methods){_,i->method.setText(methods[i])}.setNegativeButton("Cancel",null).show()}})
         val summary=label("",14f,0xFF172B4D.toInt(),true).apply{setPadding(dp(12),dp(14),dp(12),dp(14));background=rounded(0xFFEAF2FF.toInt(),14)}
         panel.addView(gap(8));panel.addView(summary)
         updateTotals={
@@ -6066,6 +6083,7 @@ class MainActivity : AppCompatActivity() {
                 val parser=SimpleDateFormat("dd/MM/yyyy",Locale.US).apply{isLenient=false}
                 fun validDate(s:String):Boolean=runCatching{val p=parser.parse(s);p!=null&&parser.format(p)==s}.getOrDefault(false)
                 require(validDate(value(date))&&(value(due).isBlank()||validDate(value(due)))){"Use valid DD/MM/YYYY dates"}
+                require(value(due).isBlank()||!parser.parse(value(due))!!.before(parser.parse(value(date)))){"Due date cannot be before document date"}
                 val items=entries.map{e->
                     require(value(e.name).isNotBlank()){"Enter each item description"}
                     val quantity=decimal(e.qty,"1000000",3);require(quantity.signum()>0){"Quantity must be positive"}
@@ -6077,6 +6095,7 @@ class MainActivity : AppCompatActivity() {
                 if(pro&&!requirePremiumTool("Premium invoice design"))return@setOnClickListener
                 val draft=InvoiceDocument.Draft(kind,value(number),value(date),value(due),value(business),value(address),value(contact),value(gstin).uppercase(Locale.ROOT),value(customer),value(customerAddress),value(customerGstin).uppercase(Locale.ROOT),value(supply),items,decimal(discount,"100000000000000",2),taxMode.isChecked,value(notes),template.selectedItemPosition,logo,signature,decimal(paid,"10000000000000000",2),value(method),value(reference))
                 val totals=InvoiceDocument.totals(draft)
+                require(totals.total<=java.math.BigDecimal("999999999999999.99")){"Invoice total exceeds supported amount"}
                 if(tracked)InvoiceDocument.paymentStatus(totals.total,draft.paid)
                 if(kind=="Receipt")require(draft.paid.signum()>0 && draft.paid.compareTo(totals.total)==0){"A receipt must record the full received amount. Use an invoice for an outstanding balance."}
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
@@ -6101,8 +6120,13 @@ class MainActivity : AppCompatActivity() {
         try{temp.writeBytes(data)}catch(e:Exception){temp.delete();Toast.makeText(this,"Could not preview invoice",Toast.LENGTH_LONG).show();return}
         val renderer=try{PdfRenderer(android.os.ParcelFileDescriptor.open(temp,android.os.ParcelFileDescriptor.MODE_READ_ONLY))}
         catch(e:Exception){temp.delete();Toast.makeText(this,"Could not open preview",Toast.LENGTH_LONG).show();return}
-        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(8))}
-        val image=ImageView(this).apply{adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER}
+        val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8))}
+        val amounts=InvoiceDocument.totals(draft)
+        val hero=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(12),dp(14),dp(12));background=gradient(0xFF073B91.toInt(),0xFF06245F.toInt(),16)}
+        hero.addView(label(draft.kind+" • "+draft.number,12f,0xFFDCE8FF.toInt(),true));hero.addView(label("INR "+InvoiceDocument.format(amounts.total),22f,0xFFFFFFFF.toInt(),true))
+        if(InvoiceDocument.paymentTracked(draft.kind))hero.addView(label(InvoiceDocument.paymentStatus(amounts.total,draft.paid)+" • Balance INR "+InvoiceDocument.format(amounts.total-draft.paid),12f,0xFFDCE8FF.toInt()))
+        panel.addView(hero);panel.addView(gap(8))
+        val image=ImageView(this).apply{adjustViewBounds=true;scaleType=ImageView.ScaleType.FIT_CENTER;contentDescription="Invoice PDF page preview";background=rounded(0xFFF3F7FF.toInt(),10,0xFFDCE6F5.toInt())}
         val info=label("",12f,0xFF263957.toInt(),true)
         panel.addView(info);panel.addView(image,LinearLayout.LayoutParams(-1,dp(360)))
         val nav=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
@@ -6118,7 +6142,7 @@ class MainActivity : AppCompatActivity() {
         nav.addView(Button(this).apply{text="‹ Previous";setOnClickListener{if(index>0){index--;render()}}},LinearLayout.LayoutParams(0,-2,1f))
         nav.addView(Button(this).apply{text="Next ›";setOnClickListener{if(index<renderer.pageCount-1){index++;render()}}},LinearLayout.LayoutParams(0,-2,1f))
         panel.addView(nav)
-        val dialog=appDialog().setTitle("Invoice PDF preview").setView(panel).setNegativeButton("Edit",null).setPositiveButton("Save PDF",null).create()
+        val dialog=appDialog().setTitle("Invoice PDF preview").setView(toolDialogScroll(panel,0.72f)).setNegativeButton("Edit",null).setPositiveButton("Save PDF",null).create()
         dialog.setOnDismissListener{image.setImageDrawable(null);bitmap?.recycle();renderer.close();temp.delete()}
         dialog.show();render()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{

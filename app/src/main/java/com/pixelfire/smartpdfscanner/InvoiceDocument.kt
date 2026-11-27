@@ -16,6 +16,10 @@ internal object InvoiceDocument {
     val zero = BigDecimal.ZERO.setScale(2)
     fun money(n: BigDecimal): BigDecimal = n.setScale(2, RoundingMode.HALF_UP)
     fun format(n: BigDecimal) = money(n).toPlainString()
+    fun percentageDiscount(base:BigDecimal,percent:BigDecimal):BigDecimal {
+        require(base.signum()>=0 && percent.signum()>=0 && percent<=BigDecimal("100") && percent.scale()<=2) { "Enter a percentage from 0 to 100 (up to 2 decimals)" }
+        return money(base.multiply(percent).movePointLeft(2))
+    }
     data class Item(val description:String,val hsn:String,val qty:BigDecimal,val rate:BigDecimal,val gst:BigDecimal) {
         val base get() = money(qty.multiply(rate))
     }
@@ -27,6 +31,8 @@ internal object InvoiceDocument {
     fun totals(d:Draft):Amounts = totals(d.items,d.discount,d.interstate)
     fun totals(items:List<Item>,discount:BigDecimal,interstate:Boolean):Amounts {
         require(items.isNotEmpty() && items.size<=100)
+        require(items.all{it.qty.signum()>0 && it.rate.signum()>=0 && it.gst.signum()>=0 && it.gst<=BigDecimal("100")}) { "Invalid item quantity, rate or tax" }
+        require(discount.stripTrailingZeros().scale()<=2) { "Discount supports up to two decimal places" }
         val base=items.fold(zero){a,i->a+i.base}
         require(discount>=zero && discount<=base){"Discount cannot exceed subtotal"}
         var allocated=zero; var runningBase=zero; var cgst=zero; var sgst=zero; var igst=zero
@@ -70,6 +76,11 @@ internal object InvoiceDocument {
             canvas!!.drawText(s,x,yy,p)
             p.textAlign=Paint.Align.LEFT
         }
+        fun fitted(s:String,x:Float,yy:Float,maxWidth:Float,size:Float=10f,color:Int=ink,bold:Boolean=false,right:Boolean=false){
+            p.textSize=size;p.typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            val actual=if(p.measureText(s)>maxWidth)size*maxWidth/p.measureText(s) else size
+            text(s,x,yy,actual,color,bold,right)
+        }
         fun rect(x:Float,yy:Float,w:Float,h:Float,color:Int){p.color=color;canvas!!.drawRect(x,yy,x+w,yy+h,p)}
         fun wrapped(s:String,maxWidth:Float,size:Float=10f,bold:Boolean=false):List<String>{
             p.textSize=size;p.typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT
@@ -112,7 +123,7 @@ internal object InvoiceDocument {
                 wrapped(d.business,345f-(bx-34f),16f,true).forEach{text(it,bx,hy,16f,ink,true);hy+=19f}
                 wrapped(listOf(d.businessAddress,d.contact,if(d.gstin.isNotBlank())"GSTIN: "+d.gstin else "").filter{it.isNotBlank()}.joinToString("\n"),345f-(bx-34f)).forEach{text(it,bx,hy,10f,muted);hy+=13f}
                 text(d.kind.uppercase(Locale.ROOT),561f,38f,14f,accent,true,true)
-                text("No. "+d.number,561f,56f,9f,ink,true,true)
+                fitted("No. "+d.number,561f,56f,168f,9f,ink,true,true)
                 text("Date: "+d.date,561f,70f,10f,muted,right=true)
                 if(d.due.isNotBlank())text("Due: "+d.due,561f,84f,10f,muted,right=true)
                 if(tracked){
@@ -145,20 +156,20 @@ internal object InvoiceDocument {
                 if(y+h>779f){newPage();tableHeader()}
                 rect(34f,y,527f,h,if(index%2==0)0xFFF3F6FA.toInt() else Color.WHITE)
                 lines.forEachIndexed{n,line->text(line,43f,y+15f+n*13f)}
-                text(i.qty.stripTrailingZeros().toPlainString(),348f,y+15f,right=true)
-                text(format(i.rate),424f,y+15f,right=true)
-                text(i.gst.stripTrailingZeros().toPlainString()+"%",478f,y+15f,right=true)
-                text(format(i.base),552f,y+15f,right=true)
+                fitted(i.qty.stripTrailingZeros().toPlainString(),348f,y+15f,43f,right=true)
+                fitted(format(i.rate),424f,y+15f,70f,right=true)
+                fitted(i.gst.stripTrailingZeros().toPlainString()+"%",478f,y+15f,48f,right=true)
+                fitted(format(i.base),552f,y+15f,69f,right=true)
                 y+=h
             }
             if(y+(if(tracked)235f else 180f)>780f)newPage()
             y+=18f
-            fun amount(name:String,value:BigDecimal){text(name,324f,y,11f,muted);text("INR "+format(value),552f,y,11f,ink,true,true);y+=18f}
+            fun amount(name:String,value:BigDecimal){text(name,324f,y,11f,muted);fitted("INR "+format(value),552f,y,118f,11f,ink,true,true);y+=18f}
             amount("Subtotal",t.base);if(t.discount.signum()>0)amount("Discount",-t.discount)
             if(t.cgst.signum()>0||t.sgst.signum()>0){amount("Taxable value",t.net);amount("CGST",t.cgst);amount("SGST",t.sgst)}
             if(t.igst.signum()>0){amount("Taxable value",t.net);amount("IGST",t.igst)}
             rect(315f,y-3f,246f,34f,accent);text("TOTAL",325f,y+18f,12f,Color.WHITE,true)
-            text("INR "+format(t.total),551f,y+18f,13f,Color.WHITE,true,true);y+=49f
+            fitted("INR "+format(t.total),551f,y+18f,160f,13f,Color.WHITE,true,true);y+=49f
             if(tracked){
                 amount("Amount received",d.paid)
                 amount("Balance due",t.total-d.paid)

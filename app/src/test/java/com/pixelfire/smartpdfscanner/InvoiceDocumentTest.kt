@@ -39,4 +39,14 @@ class InvoiceDocumentTest {
         assertEquals("20.70",InvoiceDocument.format(t.igst))
         assertEquals("200.70",InvoiceDocument.format(t.total))
     }
+    @Test fun percentageDiscountRoundsToPaise() {
+        assertEquals("12.35",InvoiceDocument.format(InvoiceDocument.percentageDiscount(BigDecimal("123.45"),BigDecimal("10"))))
+        assertEquals("123.45",InvoiceDocument.format(InvoiceDocument.percentageDiscount(BigDecimal("123.45"),BigDecimal("100"))))
+    }
+    @Test(expected=IllegalArgumentException::class) fun rejectsInvalidPercentage() {
+        InvoiceDocument.percentageDiscount(BigDecimal("100"),BigDecimal("101"))
+    }
+    @Test(expected=IllegalArgumentException::class) fun rejectsNegativeQuantity() {
+        InvoiceDocument.totals(listOf(InvoiceDocument.Item("A","",BigDecimal("-1"),BigDecimal("100"),BigDecimal.ZERO)),BigDecimal.ZERO,false)
+    }
 }
