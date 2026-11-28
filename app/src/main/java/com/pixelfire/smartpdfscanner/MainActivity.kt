@@ -11868,7 +11868,7 @@ class MainActivity : AppCompatActivity() {
             background=rounded(0xFFF1F6FF.toInt(),14,0xFFDCE7F5.toInt())
         }
         note.addView(label("Private & offline-friendly",12f,0xFF172B4D.toInt(),true))
-        note.addView(label("Internet access is required to use DocNexa. Local document rendering stays on-device. Office previews show text and worksheet values; original layouts and unsupported formats need a compatible installed app.",11f,0xFF52627A.toInt()))
+        note.addView(label("Internet access is required to use DocNexa. Local document rendering stays on-device. Office layout previews support basic modern Office content. Exact layout and unsupported formats need a compatible installed app.",11f,0xFF52627A.toInt()))
         panel.addView(gap(3));panel.addView(note)
         dialog.show()
     }
@@ -11976,6 +11976,8 @@ class MainActivity : AppCompatActivity() {
         var previewImage:ImageView?=null
         var generation=0
         var textContent:String?=null
+        var officeWeb:android.webkit.WebView?=null
+        fun clearOfficeWeb(){officeWeb?.let{web->(web.parent as? ViewGroup)?.removeView(web);web.stopLoading();web.destroy()};officeWeb=null}
         fun valid()=dialog.isShowing&&!isFinishing&&!isDestroyed&&owner==signedInUserId()
         share.setOnClickListener{if(valid())shareViewerFile(uri,mime)}
         more.setOnClickListener{
@@ -12003,6 +12005,7 @@ class MainActivity : AppCompatActivity() {
             appDialog().setTitle("Document actions").setPremiumItems(actions.map{it.first}.toTypedArray()){_,index->if(valid())actions[index].second()}.setNegativeButton("Cancel",null).show()
         }
         fun showText(value:String,notice:String){
+            clearOfficeWeb()
             textContent=value
             state.text=notice
             controls.removeAllViews()
@@ -12094,6 +12097,7 @@ class MainActivity : AppCompatActivity() {
         }
         dialog.setOnDismissListener{
             generation++
+            clearOfficeWeb()
             previewImage?.setImageDrawable(null)
             currentBitmap?.recycle();currentBitmap=null
             if(activeDocumentViewer===dialog)activeDocumentViewer=null
@@ -12159,27 +12163,78 @@ class MainActivity : AppCompatActivity() {
             plus.setOnClickListener{zoom=(zoom+0.25f).coerceAtMost(3f);applyZoom()}
             horizontal.post{if(valid())applyZoom()};render()
         }else if(kind==DocumentViewerPlan.Kind.OFFICE||kind==DocumentViewerPlan.Kind.EXTERNAL){
-            state.text="Original format • No file conversion"
-            val options=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-            val scroll=ScrollView(this).apply{addView(options)}
-            body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-            popupHeader(options,"DOCNEXA • ORIGINAL FILE","Open original document","Use a compatible installed app to preserve the document layout.")
-            addPopupOption(options,"document","Open original file","Choose an installed viewer for this file type.",true){if(valid())openViewerExternal(uri,mime)}
-            if(kind==DocumentViewerPlan.Kind.OFFICE){
-                addPopupOption(options,"document","Offline text only","Optional text extraction; not the original Office layout."){
-                    if(valid()){
-                        state.text="Reading offline text…"
-                        viewerReadExecutor.execute{
-                            try{
-                                val value=readOfficeViewerText(uri,DocumentViewerPlan.officeExtension(name,mime))
-                                runOnUiThread{if(valid())showText(value,"Offline text only • Office layout and images not shown")}
-                            }catch(_:Exception){runOnUiThread{if(valid())state.text="Text extraction unavailable. Open the original file instead."}}
-                            catch(_:OutOfMemoryError){runOnUiThread{if(valid())state.text="Not enough memory for text extraction."}}
-                        }
+            state.text=if(kind==DocumentViewerPlan.Kind.OFFICE)"Opening structured Office preview…" else "Original format • No file conversion"
+            val open=nativeButton(this,ButtonRole.Primary).apply{this.text="Open original";setOnClickListener{if(valid())openViewerExternal(uri,mime)}}
+            controls.addView(open,LinearLayout.LayoutParams(0,-2,1f))
+            val fallback=nativeButton(this).apply{this.text="Text only";setOnClickListener{
+                if(valid()){
+                    generation++
+                    val request=generation
+                    state.text="Reading offline text…"
+                    viewerReadExecutor.execute{
+                        try{
+                            val value=readOfficeViewerText(uri,DocumentViewerPlan.officeExtension(name,mime))
+                            runOnUiThread{if(valid()&&request==generation)showText(value,"Offline text only • Office layout and images not shown")}
+                        }catch(_:Exception){runOnUiThread{if(valid()&&request==generation)state.text="Text extraction unavailable. Open the original file instead."}}
+                        catch(_:OutOfMemoryError){runOnUiThread{if(valid()&&request==generation)state.text="Not enough memory for text extraction."}}
                     }
                 }
+            }}
+            if(kind==DocumentViewerPlan.Kind.OFFICE){
+                controls.addView(fallback,LinearLayout.LayoutParams(0,-2,1f))
+                body.addView(label("Loading read-only document preview…",13f,0xFF52627A.toInt()))
+                val request=++generation
+                viewerReadExecutor.execute{
+                    try{
+                        val result=contentResolver.openInputStream(uri)?.use{OfficeLayoutPreview.read(it,DocumentViewerPlan.officeExtension(name,mime))}?:error("Cannot open Office file")
+                        runOnUiThread{
+                            if(!valid()||request!=generation)return@runOnUiThread
+                            body.removeAllViews()
+                            state.text=result.note
+                            val nav=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
+                            val previous=nativeButton(this).apply{this.text="‹";contentDescription="Previous document section"}
+                            val following=nativeButton(this).apply{this.text="›";contentDescription="Next document section"}
+                            val section=label("",12f,0xFF172B4D.toInt(),true).apply{gravity=Gravity.CENTER;maxLines=2}
+                            nav.addView(previous,LinearLayout.LayoutParams(dp(52),-2))
+                            nav.addView(section,LinearLayout.LayoutParams(0,-2,1f))
+                            nav.addView(following,LinearLayout.LayoutParams(dp(52),-2))
+                            body.addView(nav)
+                            val web=android.webkit.WebView(this).apply{
+                                settings.javaScriptEnabled=false
+                                settings.allowFileAccess=false
+                                settings.allowContentAccess=false
+                                settings.blockNetworkLoads=true
+                                settings.domStorageEnabled=false
+                                settings.setSupportZoom(true)
+                                settings.builtInZoomControls=true
+                                settings.displayZoomControls=false
+                                webViewClient=object:android.webkit.WebViewClient(){
+                                    override fun shouldOverrideUrlLoading(view:android.webkit.WebView?,request:android.webkit.WebResourceRequest?)=true
+                                    @Suppress("DEPRECATION")
+                                    override fun shouldOverrideUrlLoading(view:android.webkit.WebView?,url:String?)=true
+                                }
+                                setBackgroundColor(0xFFEAF0F8.toInt())
+                            }
+                            officeWeb=web
+                            body.addView(web,LinearLayout.LayoutParams(-1,0,1f))
+                            var index=0
+                            fun showSection(){
+                                val item=result.sections[index]
+                                section.text=item.name+" • "+(index+1)+"/"+result.sections.size
+                                previous.isEnabled=index>0;following.isEnabled=index+1<result.sections.size
+                                web.loadDataWithBaseURL(null,OfficeLayoutPreview.html(item),"text/html","UTF-8",null)
+                            }
+                            previous.setOnClickListener{if(valid()&&index>0){index--;showSection()}}
+                            following.setOnClickListener{if(valid()&&index+1<result.sections.size){index++;showSection()}}
+                            showSection()
+                        }
+                    }catch(_:Exception){runOnUiThread{if(valid()&&request==generation){body.removeAllViews();state.text="Structured preview unavailable. Open original or try Text only.";body.addView(label("The file may use unsupported features or exceed preview limits. Original file is unchanged.",13f,0xFF52627A.toInt()))}}}
+                    catch(_:OutOfMemoryError){runOnUiThread{if(valid()&&request==generation){body.removeAllViews();state.text="Not enough memory for Office preview. Open original instead."}}}
+                }
+            }else{
+                popupHeader(body,"DOCNEXA • ORIGINAL FILE","Open original document","A compatible installed app is required for this file format.")
+                body.addView(label("Your original file is unchanged.",12f,0xFF52627A.toInt()))
             }
-            options.addView(label("The original file is unchanged. A compatible app is required for this format; DocNexa does not include a full Office layout engine.",12f,0xFF52627A.toInt()))
         }else if(kind==DocumentViewerPlan.Kind.TEXT||kind==DocumentViewerPlan.Kind.ZIP){
             viewerReadExecutor.execute{
                 try{
