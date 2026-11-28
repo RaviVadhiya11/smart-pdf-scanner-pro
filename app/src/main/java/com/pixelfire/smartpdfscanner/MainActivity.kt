@@ -748,7 +748,7 @@ class MainActivity : AppCompatActivity() {
         PDFBoxResourceLoader.init(applicationContext)
         buildScreen()
         connectPlayBilling()
-        requestAdConsent()
+        // Consent is requested once the first validated connection is available.
         openNotificationPdf(intent)
         handleViewerIntent(intent)
         initializeRemoteConfig()
@@ -1100,6 +1100,9 @@ class MainActivity : AppCompatActivity() {
                         styleAction(AlertDialog.BUTTON_POSITIVE, true)
                         styleAction(AlertDialog.BUTTON_NEGATIVE, false)
                         styleAction(AlertDialog.BUTTON_NEUTRAL, false)
+                        // A background export can open a dialog after connectivity is lost.
+                        // Keep the offline gate above newly attached app-owned tool dialogs.
+                        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
                     }
                 }
                 override fun onViewDetachedFromWindow(view: View) = Unit
@@ -2264,6 +2267,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopStrictOnlineMonitoring()
+        onlineGateDialog?.dismiss()
+        onlineGateDialog = null
         billingHandler.removeCallbacks(billingRefreshTask)
         billingReadyCallbacks.clear()
         playBillingClient?.endConnection()
@@ -2659,6 +2665,7 @@ class MainActivity : AppCompatActivity() {
         }
         drawer.show()
         drawer.window?.setLayout(drawerWidth,-1)
+        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
     }
 
     private fun showHelpAndFaq() {
@@ -3181,6 +3188,7 @@ class MainActivity : AppCompatActivity() {
         val dialogWidth = minOf((screenWidth * 0.94f).toInt(), dp(520))
         val dialogHeight = minOf((screenHeight * 0.86f).toInt(), screenHeight - dp(80))
         dialog.window?.setLayout(dialogWidth, dialogHeight)
+        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
     }
 
     private fun resendCloudConfirmation(email: String, dialog: AlertDialog? = null) {
@@ -3262,25 +3270,161 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun isInternetAvailable(): Boolean {
+    private var onlineGateDialog: android.app.Dialog? = null
+    private var onlineGateStatus: TextView? = null
+    private var onlineForeground = false
+    private var onlineCallbackRegistered = false
+    private var onlineConsentRequested = false
+    private val onlineHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val onlineMonitor = object : Runnable {
+        override fun run() {
+            if (!onlineForeground || isFinishing || isDestroyed) return
+            refreshStrictOnlineGate()
+            onlineHandler.postDelayed(this, 1500L)
+        }
+    }
+    private val onlineNetworkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: android.net.Network) = scheduleOnlineRefresh()
+        override fun onLost(network: android.net.Network) = scheduleOnlineRefresh()
+        override fun onCapabilitiesChanged(network: android.net.Network, capabilities: NetworkCapabilities) = scheduleOnlineRefresh()
+    }
+    private fun scheduleOnlineRefresh() {
+        onlineHandler.post {
+            if (onlineForeground && !isFinishing && !isDestroyed) refreshStrictOnlineGate()
+        }
+    }
+    private fun startStrictOnlineMode() {
+        onlineForeground = true
+        if (!onlineCallbackRegistered) {
+            val manager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            onlineCallbackRegistered = runCatching {
+                manager.registerDefaultNetworkCallback(onlineNetworkCallback)
+            }.isSuccess
+        }
+        refreshStrictOnlineGate()
+        onlineHandler.removeCallbacks(onlineMonitor)
+        onlineHandler.postDelayed(onlineMonitor, 1500L)
+    }
+    private fun stopStrictOnlineMonitoring() {
+        onlineForeground = false
+        onlineHandler.removeCallbacksAndMessages(null)
+        if (onlineCallbackRegistered) {
+            onlineCallbackRegistered = false
+            val manager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            runCatching { manager.unregisterNetworkCallback(onlineNetworkCallback) }
+        }
+    }
+    private fun isInternetAvailable(): Boolean = runCatching {
         val manager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val network = manager.activeNetwork ?: return false
-            val capabilities = manager.getNetworkCapabilities(network) ?: return false
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        } else {
-            @Suppress("DEPRECATION")
-            manager.activeNetworkInfo?.isConnected == true
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+            !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+    }.getOrDefault(false)
+
+    private fun refreshStrictOnlineGate(raise: Boolean = false) {
+        if (!onlineForeground || isFinishing || isDestroyed) return
+        if (isInternetAvailable()) {
+            onlineGateDialog?.dismiss()
+            onlineGateDialog = null
+            onlineGateStatus = null
+            if (!onlineConsentRequested) {
+                onlineConsentRequested = true
+                requestAdConsent()
+            }
+            return
+        }
+        // Only re-create the gate when another app-owned window was attached above it.
+        // The existing activity and tool dialogs stay intact, including in-progress work.
+        if (onlineGateDialog?.isShowing == true && !raise) return
+        onlineGateDialog?.dismiss()
+        val blocker = android.app.Dialog(this, android.R.style.Theme_Material_Light_NoActionBar)
+        blocker.setCancelable(false)
+        blocker.setCanceledOnTouchOutside(false)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18),dp(20),dp(18),dp(20))
+            background = gradient(0xFFF5F8FF.toInt(),0xFFE8F0FF.toInt(),0)
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(root,ViewGroup.LayoutParams(-1,-2))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(18),dp(22),dp(18),dp(18))
+            background = rounded(0xFFFFFFFF.toInt(),24,0xFFDCE7F5.toInt())
+        }
+        val art = FrameLayout(this).apply {
+            background = rounded(0xFFE6EFFF.toInt(),22)
+            addView(object:View(this@MainActivity){
+                private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF2563EB.toInt();style = Paint.Style.STROKE
+                    strokeWidth=2.5f;strokeCap=Paint.Cap.ROUND
+                }
+                override fun onDraw(canvas:Canvas){
+                    super.onDraw(canvas)
+                    val side=minOf(width,height).toFloat()
+                    if(side<=0f)return
+                    canvas.save();canvas.translate((width-side)/2f,(height-side)/2f);canvas.scale(side/48f,side/48f)
+                    canvas.drawArc(3f,10f,45f,45f,225f,90f,false,ink)
+                    canvas.drawArc(11f,19f,37f,42f,225f,90f,false,ink)
+                    canvas.drawCircle(24f,35f,1.5f,ink)
+                    ink.color=0xFFFFFFFF.toInt();ink.strokeWidth=6f;canvas.drawLine(9f,8f,39f,39f,ink)
+                    ink.color=0xFF2563EB.toInt();ink.strokeWidth=2.5f;canvas.drawLine(9f,8f,39f,39f,ink)
+                    canvas.restore()
+                }
+            },FrameLayout.LayoutParams(dp(62),dp(62),Gravity.CENTER))
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        content.addView(art,LinearLayout.LayoutParams(dp(90),dp(90)))
+        content.addView(gap(14))
+        content.addView(label("No Internet Connection",22f,0xFF102B60.toInt(),true).apply{gravity=Gravity.CENTER})
+        content.addView(gap(7))
+        content.addView(label("DocNexa requires an active internet connection. Connect to Wi-Fi or mobile data to continue.",13f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
+        content.addView(gap(12))
+        val connection = label("Waiting for a verified internet connection…",12f,0xFF52627A.toInt()).apply {
+            gravity=Gravity.CENTER
+            accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        onlineGateStatus=connection
+        content.addView(connection)
+        content.addView(gap(12))
+        content.addView(nativeButton(this,ButtonRole.Primary).apply {
+            this.text="Try Again"
+            setOnClickListener {
+                if(isInternetAvailable())refreshStrictOnlineGate()
+                else onlineGateStatus?.text="Still offline. Check Wi-Fi or mobile data."
+            }
+        },LinearLayout.LayoutParams(-1,-2))
+        content.addView(nativeButton(this,ButtonRole.Secondary).apply {
+            this.text="Network Settings"
+            setOnClickListener{
+                runCatching{startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))}
+                    .onFailure{runCatching{startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))}}
+            }
+        },LinearLayout.LayoutParams(-1,-2))
+        content.addView(gap(8))
+        content.addView(label("Your saved documents are safe. Local processing already started may finish.",11f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
+        content.addView(gap(10))
+        content.addView(label("DOCNEXA • SECURE DOCUMENT STUDIO",10f,0xFF174C94.toInt(),true).apply{gravity=Gravity.CENTER})
+        root.addView(content,LinearLayout.LayoutParams(minOf(dp(440),(resources.displayMetrics.widthPixels-dp(36)).coerceAtLeast(dp(1))),-2))
+        blocker.setContentView(scroll)
+        onlineGateDialog=blocker
+        blocker.show()
+        blocker.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xFFF5F8FF.toInt()))
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
     }
 
     private fun requireInternet(feature: String): Boolean {
         if (isInternetAvailable()) return true
-        appDialog()
-            .setTitle("Internet connection required")
-            .setMessage("$feature is available in Online Mode. Connect to Wi-Fi or mobile data and try again. Your offline scan and PDF files remain available.")
-            .setPositiveButton("OK", null).show()
+        refreshStrictOnlineGate()
         return false
     }
 
@@ -5451,12 +5595,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        startStrictOnlineMode()
         refreshPlayPurchases(false)
         billingHandler.removeCallbacks(billingRefreshTask)
         billingHandler.postDelayed(billingRefreshTask, 60_000L)
     }
 
     override fun onPause() {
+        stopStrictOnlineMonitoring()
         billingHandler.removeCallbacks(billingRefreshTask)
         super.onPause()
     }
