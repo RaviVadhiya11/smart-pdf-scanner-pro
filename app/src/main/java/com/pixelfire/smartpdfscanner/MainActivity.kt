@@ -382,9 +382,12 @@ class MainActivity : AppCompatActivity() {
     private val qrCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) openLiveQrCamera() else Toast.makeText(this, "Camera permission is required for live QR scanning.", Toast.LENGTH_LONG).show() }
 
     private val scanExportBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var pendingScanFilter:Int?=null
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
+        val chosenFilter=pendingScanFilter
+        pendingScanFilter=null
         if (result.resultCode != RESULT_OK) {
             status.text = "Scan cancelled."
             return@registerForActivityResult
@@ -400,7 +403,7 @@ class MainActivity : AppCompatActivity() {
         val owner=signedInUserId()
         val directory=privateDocumentsDir()
         val folder=selectedFolder
-        val mode=prefs.getInt("scanner_filter_mode",0).coerceIn(0,3)
+        val mode=ScanQualityPlan.mode(chosenFilter ?: prefs.getInt("scanner_filter_mode",0))
         val progress=appDialog().setTitle("Preparing your scan")
             .setMessage("Preserving original images…").setCancelable(false).create()
         progress.show()
@@ -411,6 +414,9 @@ class MainActivity : AppCompatActivity() {
             var saved:Uri?=null
             var quality="Print-ready A4"
             val errors=mutableListOf<String>()
+            val lowDetail=mutableListOf<Int>()
+            val unevenLight=mutableListOf<Int>()
+            var checkedPages=0
             try {
                 val stamp=System.currentTimeMillis()
                 val stable=pageUris.mapIndexed{index,uri->
@@ -429,6 +435,18 @@ class MainActivity : AppCompatActivity() {
                     errors.add(stage+": low memory");android.util.Log.w("DocNexaScan",stage+" memory limit");null
                 }
                 if(sources.isNotEmpty()){
+                    sources.forEachIndexed{index,uri->
+                        update("Checking scan quality • page "+(index+1)+" of "+sources.size)
+                        try{
+                            val sample=decodeImageSafely(uri,640,420_000L)
+                            try{
+                                val review=inspectScanQuality(sample)
+                                checkedPages++
+                                if(review.lowDetail)lowDetail.add(index+1)
+                                if(review.unevenLight)unevenLight.add(index+1)
+                            }finally{sample.recycle()}
+                        }catch(_:Exception){}catch(_:OutOfMemoryError){}
+                    }
                     update("Creating A4 PDF • preserving page detail…")
                     saved=attempt("High quality"){createPrintReadyScanPdf(sources,directory,mode,6000,16_000_000L,stamp)}
                     if(saved==null && mode!=0){
@@ -463,6 +481,17 @@ class MainActivity : AppCompatActivity() {
                         notifyDocumentReady(finalPdf)
                         buildScreen()
                         showExportSuccess(finalPdf,finalPdf.lastPathSegment?:"Scanned_Document.pdf","application/pdf")
+                        val report=buildString{
+                            append(quality+" • "+imageCount+" original image(s) saved")
+                            if(checkedPages>0){
+                                append("\nQuality checked: "+checkedPages+"/"+pageUris.size+" page(s)")
+                                if(lowDetail.isNotEmpty())append("\nReview focus / low detail: pages "+lowDetail.joinToString(", "))
+                                if(unevenLight.isNotEmpty())append("\nUneven lighting: pages "+unevenLight.joinToString(", "))
+                                if(lowDetail.isEmpty()&&unevenLight.isEmpty())append("\nNo obvious quality warnings detected.")
+                                else append("\nReview original pages before printing. Blank pages may also trigger warnings.")
+                            }
+                        }
+                        updateResultStatus(report)
                         Toast.makeText(this,quality+" • "+imageCount+" original image(s) saved",Toast.LENGTH_LONG).show()
                     }else{
                         status.text="PDF save failed"
@@ -732,6 +761,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         trackPrivacyWindow(window)
+        pendingScanFilter=savedInstanceState?.getInt("pending_scan_filter",-1)?.takeIf{it>=0}
         credentialOperation=savedInstanceState?.getString("app_lock_credential_operation")
         // Reattach the AndroidX callback if authentication survives recreation.
         biometricPrompt
@@ -2252,6 +2282,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("pending_scan_filter",pendingScanFilter ?: -1)
         outState.putString("app_lock_credential_operation",credentialOperation)
         pendingResultSource?.let { outState.putString("result_pending_source", it.toString()) }
         outState.putString("result_pending_name", pendingResultName)
@@ -10643,10 +10674,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8))}
-        popupHeader(panel,"DOCNEXA • SMART SCAN","High-quality document scan","Capture, crop and preserve clear original pages.")
+        popupHeader(panel,"DOCNEXA • SMART SCAN PRO","High-quality document scan","Automatic edge crop, perspective correction and page quality review.")
         val dialog=appDialog().setTitle("Scan style").setView(toolDialogScroll(panel,0.74f)).setNegativeButton("Cancel",null).create()
         addPopupOption(panel,"camera","Natural Color","Preserve colors and fine detail; best for photos and receipts.",true){
-            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE,0)
         }
         addPopupOption(panel,"✦","Enhanced Document","Google scanner cleanup for printed documents and unwanted marks."){
             dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
@@ -10654,11 +10685,23 @@ class MainActivity : AppCompatActivity() {
         addPopupOption(panel,"◐","Scan with Filters","Choose color, grayscale or other available scanner filters."){
             dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
         }
-        panel.addView(label("Original JPEG pages are saved separately. A4 PDF export fits the full page without cropping. Quality depends on the camera and source; use good light and review focus before saving.",12f,0xFF52627A.toInt()))
+        addPopupOption(panel,"✦","Shadow Cleanup","Reduce uneven paper illumination while preserving color."){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL,4)
+        }
+        addPopupOption(panel,"◐","Clean Paper","Normalize paper lighting and create grayscale pages."){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL,5)
+        }
+        addPopupOption(panel,"TXT","Adaptive B&W","High contrast text mode for black-and-white printed pages."){
+            dialog.dismiss();launchDocumentScan(GmsDocumentScannerOptions.SCANNER_MODE_FULL,6)
+        }
+        addPopupOption(panel,"edit","Scanner filter settings","Preview all seven export filters and set the default."){dialog.dismiss();showScannerFilterSettings()}
+        panel.addView(label("Original scanner JPEG pages are saved separately. The A4 PDF fits each complete page without cropping. Quality review is heuristic; check focus before printing.",12f,0xFF52627A.toInt()))
         dialog.show()
     }
 
-    private fun launchDocumentScan(scannerMode: Int) {
+    private fun launchDocumentScan(scannerMode: Int,filter:Int?=null) {
+        if(!requireInternet("Document scan"))return
+        pendingScanFilter=filter ?: ScanQualityPlan.mode(prefs.getInt("scanner_filter_mode",0))
         status.text = "Opening scanner…"
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
@@ -10672,9 +10715,11 @@ class MainActivity : AppCompatActivity() {
         GmsDocumentScanning.getClient(options)
             .getStartScanIntent(this)
             .addOnSuccessListener { sender ->
+                if(isFinishing||isDestroyed||!requireInternet("Document scan")){pendingScanFilter=null;return@addOnSuccessListener}
                 scanLauncher.launch(IntentSenderRequest.Builder(sender).build())
             }
             .addOnFailureListener { error ->
+                pendingScanFilter=null
                 status.text = "Scanner unavailable. Check Google Play services and internet."
                 Toast.makeText(this, error.localizedMessage ?: "Scanner error", Toast.LENGTH_LONG).show()
             }
@@ -11329,7 +11374,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showScannerFilterSettings() {
-        val names = arrayOf("Original color", "Grayscale", "High contrast B&W", "Enhanced color")
+        val names = ScanQualityPlan.filters
         var selected = prefs.getInt("scanner_filter_mode", 0).coerceIn(0, names.lastIndex)
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -11361,8 +11406,12 @@ class MainActivity : AppCompatActivity() {
         panel.addView(preview, LinearLayout.LayoutParams(-1, dp(190)))
         val current = label("", 13f, 0xFF2563EB.toInt(), true)
         panel.addView(current)
+        var activePreview:Bitmap?=null
         fun updatePreview() {
             val filtered = filterScannedPage(sample, selected)
+            preview.setImageBitmap(null)
+            activePreview?.let{if(it!==sample)it.recycle()}
+            activePreview=filtered
             preview.setImageBitmap(filtered)
             current.text = "Preview: ${names[selected]}"
         }
@@ -11390,12 +11439,41 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .create()
-        dialog.setOnDismissListener { sample.recycle() }
+        dialog.setOnDismissListener { preview.setImageDrawable(null);activePreview?.let{if(it!==sample)it.recycle()};sample.recycle() }
         dialog.show()
     }
 
+    private fun scanSampleGray(source:Bitmap):Triple<IntArray,Int,Int>{
+        val scale=minOf(1f,480f/maxOf(source.width,source.height))
+        val small=Bitmap.createScaledBitmap(source,(source.width*scale).toInt().coerceAtLeast(1),(source.height*scale).toInt().coerceAtLeast(1),true)
+        try{
+            val pixels=IntArray(small.width*small.height)
+            small.getPixels(pixels,0,small.width,0,0,small.width,small.height)
+            for(i in pixels.indices)pixels[i]=ScanQualityPlan.luminance(pixels[i])
+            return Triple(pixels,small.width,small.height)
+        }finally{if(small!==source)small.recycle()}
+    }
+    private fun inspectScanQuality(source:Bitmap):ScanQualityPlan.Review{
+        val (gray,w,h)=scanSampleGray(source)
+        return ScanQualityPlan.inspect(gray,w,h)
+    }
     private fun filterScannedPage(source: Bitmap, mode: Int): Bitmap {
         if (mode == 0) return source
+        if(mode in 4..6){
+            val (gray,w,h)=scanSampleGray(source)
+            val paper=ScanQualityPlan.background(gray,w,h)
+            val target=Bitmap.createBitmap(source.width,source.height,Bitmap.Config.ARGB_8888)
+            try{
+                val row=IntArray(source.width)
+                for(y in 0 until source.height){
+                    source.getPixels(row,0,source.width,0,y,source.width,1)
+                    for(x in row.indices)row[x]=ScanQualityPlan.correct(row[x],paper.at(x,y,source.width,source.height),mode)
+                    target.setPixels(row,0,source.width,0,y,source.width,1)
+                }
+                return target
+            }catch(e:Exception){target.recycle();throw e}
+            catch(e:OutOfMemoryError){target.recycle();throw e}
+        }
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val matrix = android.graphics.ColorMatrix()
