@@ -28,6 +28,11 @@ Run `gradle :app:assembleDebug` for APK or `gradle :app:bundleRelease` for AAB.
 The GitHub Actions workflow stops with an explicit error when any required signing secret is missing; it does not publish an unsigned release artifact. A private upload keystore is required for a Play Store upload. Do not commit a keystore or passwords to this public repository.
 To enable signed releases, create an upload keystore privately and configure GitHub Actions repository secrets named `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The workflow decodes the keystore to a temporary runner file and signs the release AAB when all four secrets are present. Never paste passwords or keystore data into chat or a public issue.
 
+## Current access and security behavior
+- A validated internet connection is required to use DocNexa. On-device processing remains local unless a remote feature is chosen.
+- Optional App Lock (off by default) uses the Android device PIN, pattern or password. It blocks screenshots in DocNexa-owned windows while enabled; it is not file-level encryption.
+- PDF document-card thumbnails are rendered off the UI thread. Device verification of the access gate, credential flow and performance remains necessary.
+
 ## Scope and testing
 The current app includes code and dependencies for scanning, OCR, PDF editing and document utilities, cloud features, and advertising. Their complete behavior is not established by a successful CI build. Test every user-facing action on physical devices, including error states, large files, permissions, consent, authentication and account deletion, before Play submission.
 
