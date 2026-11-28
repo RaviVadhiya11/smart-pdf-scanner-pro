@@ -731,6 +731,10 @@ class MainActivity : AppCompatActivity() {
         UserMessagingPlatform.showPrivacyOptionsForm(this) { formError ->
             if (formError != null) {
                 Toast.makeText(this, "Privacy options could not be opened: ${formError.message}", Toast.LENGTH_LONG).show()
+            } else {
+                adsConsentAllowed=UserMessagingPlatform.getConsentInformation(this).canRequestAds()
+                if(!adsConsentAllowed)premiumAdDisposers.toList().forEach{it()}
+                else if(!isFinishing&&!isDestroyed)MobileAds.initialize(this){runOnUiThread{if(!isFinishing&&!isDestroyed)buildScreen()}}
             }
         }
     }
@@ -2948,6 +2952,8 @@ class MainActivity : AppCompatActivity() {
                         .putString("cloud_user_id", result.userId)
                         .putString("cloud_email", result.email)
                         .apply()
+                    clearPremiumVerification();billingCheckGeneration++
+                    refreshPlayPurchases(false)
                     Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
                     syncCloudNow()
                 }
@@ -3291,6 +3297,8 @@ class MainActivity : AppCompatActivity() {
                             .putString("cloud_user_id", result.userId)
                             .putString("cloud_email", email).apply()
                         dialog.dismiss()
+                        clearPremiumVerification();billingCheckGeneration++
+                        refreshPlayPurchases(false)
                         Toast.makeText(this, "Welcome to DocNexa Cloud.", Toast.LENGTH_LONG).show()
                         syncCloudNow()
                     } else if (signUp) {
@@ -3619,6 +3627,7 @@ class MainActivity : AppCompatActivity() {
                     .remove("cloud_user_id")
                     .remove("cloud_email")
                     .apply()
+                clearPremiumVerification();billingCheckGeneration++
                 lastPdf = null
                 pendingDocumentNotification = null
                 pendingDocumentUri = null
@@ -4997,7 +5006,7 @@ class MainActivity : AppCompatActivity() {
      * The ad is inserted between Quick Access and the PDF Tools grid.
      */
     private fun addNativeAdCard(parent: LinearLayout, insertIndex: Int = parent.childCount): () -> Unit {
-        if (!adsConsentAllowed || hasVerifiedPremium()) return {}
+        if (!adsConsentAllowed || hasVerifiedPremium() || !isInternetAvailable() || appLockRequired()) return {}
         val disposed = AtomicBoolean(false)
         var displayedAd: NativeAd? = null
         var displayedAdView: NativeAdView? = null
@@ -5019,12 +5028,12 @@ class MainActivity : AppCompatActivity() {
 
         val loader = AdLoader.Builder(this, getString(R.string.native_ad_unit_id))
             .forNativeAd { nativeAd ->
-                if (disposed.get() || hasVerifiedPremium() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
+                if (disposed.get() || !adsConsentAllowed || hasVerifiedPremium() || !isInternetAvailable() || appLockRequired() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                     nativeAd.destroy()
                     return@forNativeAd
                 }
                 runOnUiThread {
-                    if (disposed.get() || hasVerifiedPremium() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
+                    if (disposed.get() || !adsConsentAllowed || hasVerifiedPremium() || !isInternetAvailable() || appLockRequired() || isFinishing || isDestroyed || !slot.isAttachedToWindow) {
                         nativeAd.destroy()
                         return@runOnUiThread
                     }
@@ -5743,15 +5752,29 @@ class MainActivity : AppCompatActivity() {
     private var billingCheckGeneration = 0
     @Volatile private var verifiedPremiumUser = ""
     @Volatile private var verifiedPremiumUntil = 0L
+    @Volatile private var verifiedPremiumElapsedUntil = 0L
+    private var billingQueuedRefresh = false
+    private var billingQueuedNotify = false
+    private fun clearPremiumVerification(){
+        verifiedPremiumUser="";verifiedPremiumUntil=0L;verifiedPremiumElapsedUntil=0L
+    }
+    private fun finishBillingCheck(){
+        billingChecking=false
+        if(billingQueuedRefresh){
+            val notify=billingQueuedNotify
+            billingQueuedRefresh=false;billingQueuedNotify=false
+            billingHandler.post{refreshPlayPurchases(notify)}
+        }
+    }
     private var premiumDialog: AlertDialog? = null
     private val premiumProduct = "docnexa_premium"
     private val premiumPlans = listOf("premium-monthly", "premium-yearly")
     private val billingRefreshTask = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (verifiedPremiumUser.isNotBlank() && (verifiedPremiumUser != signedInUserId() || verifiedPremiumUntil <= System.currentTimeMillis())) {
-                verifiedPremiumUser = ""
-                verifiedPremiumUntil = 0
+            if (verifiedPremiumUser.isNotBlank() && (!hasVerifiedPremium())) {
+                clearPremiumVerification()
+                refreshMembershipLabels()
                 buildScreen()
             }
             refreshPlayPurchases(false)
@@ -5774,7 +5797,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasVerifiedPremium(): Boolean =
         verifiedPremiumUser.isNotBlank() && verifiedPremiumUser == signedInUserId() &&
-            verifiedPremiumUntil > System.currentTimeMillis()
+            verifiedPremiumUntil > System.currentTimeMillis() &&
+            verifiedPremiumElapsedUntil > android.os.SystemClock.elapsedRealtime()
 
     override fun onResume() {
         super.onResume()
@@ -5838,28 +5862,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshPlayPurchases(notify: Boolean) {
-        if (isFinishing || isDestroyed || billingChecking) return
+        if (isFinishing || isDestroyed) return
+        if(billingChecking){billingQueuedRefresh=true;billingQueuedNotify=billingQueuedNotify||notify;return}
+        if(!isInternetAvailable()){
+            if(notify)Toast.makeText(this,"Connect to the internet to verify membership.",Toast.LENGTH_LONG).show()
+            return
+        }
         val user = signedInUserId()
         val auth = cloudToken()
         if (user == "guest" || auth.isBlank()) {
-            verifiedPremiumUser = ""; verifiedPremiumUntil = 0L
+            clearPremiumVerification()
+            refreshMembershipLabels()
             if (notify) Toast.makeText(this, "Sign in to restore your membership.", Toast.LENGTH_LONG).show()
             return
         }
         connectPlayBilling {
             val client = playBillingClient ?: return@connectPlayBilling
-            if (billingChecking) return@connectPlayBilling
+            if (billingChecking){billingQueuedRefresh=true;billingQueuedNotify=billingQueuedNotify||notify;return@connectPlayBilling}
+            if(user!=signedInUserId()||auth!=cloudToken())return@connectPlayBilling
             billingChecking = true
             val generation = ++billingCheckGeneration
             client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()) { result, purchases ->
                 runOnUiThread {
                     if (isFinishing || isDestroyed) { billingChecking = false; return@runOnUiThread }
                     if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                        billingChecking = false
+                        finishBillingCheck()
                         if (notify) Toast.makeText(this, "Could not check purchases. Try Restore Purchase again.", Toast.LENGTH_LONG).show()
                         return@runOnUiThread
                     }
-                    val tokens = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED && premiumProduct in it.products }.map { it.purchaseToken }
+                    val pending=purchases.any{it.purchaseState==Purchase.PurchaseState.PENDING && premiumProduct in it.products}
+                    val tokens = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED && premiumProduct in it.products }.map { it.purchaseToken }.distinct()
                     Thread {
                         var expiry = 0L
                         var unavailable = false
@@ -5870,15 +5902,17 @@ class MainActivity : AppCompatActivity() {
                             } catch (_: Exception) { unavailable = true }
                         }
                         runOnUiThread {
-                            billingChecking = false
-                            if (isFinishing || isDestroyed || generation != billingCheckGeneration || user != signedInUserId()) return@runOnUiThread
+                            finishBillingCheck()
+                            if (isFinishing || isDestroyed || generation != billingCheckGeneration || user != signedInUserId() || auth!=cloudToken()) return@runOnUiThread
                             val wasPremium = verifiedPremiumUser == user && verifiedPremiumUser.isNotBlank()
                             if (expiry > System.currentTimeMillis()) {
                                 verifiedPremiumUser = user
-                                verifiedPremiumUntil = minOf(expiry, System.currentTimeMillis() + 5 * 60_000L)
+                                val lease=(expiry-System.currentTimeMillis()).coerceIn(0L,5*60_000L)
+                                verifiedPremiumUntil = System.currentTimeMillis()+lease
+                                verifiedPremiumElapsedUntil=android.os.SystemClock.elapsedRealtime()+lease
                                 premiumAdDisposers.toList().forEach { it() }
                             } else if (!unavailable) {
-                                verifiedPremiumUser = ""; verifiedPremiumUntil = 0L
+                                clearPremiumVerification()
                             }
                             refreshMembershipLabels()
                             if (wasPremium && !hasVerifiedPremium()) buildScreen()
@@ -5886,6 +5920,7 @@ class MainActivity : AppCompatActivity() {
                                 val message = when {
                                     hasVerifiedPremium() -> "Premium active • Ads removed"
                                     unavailable -> "Purchase verification unavailable. Please restore again later."
+                                    pending -> "Payment pending. Premium unlocks after successful verification."
                                     else -> "No active verified membership found."
                                 }
                                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -6055,7 +6090,7 @@ class MainActivity : AppCompatActivity() {
                         button.isEnabled=true
                         button.setOnClickListener {
                             if(cloudToken().isBlank()){dialog.dismiss();showCloudLoginDialog()}
-                            else { button.isEnabled=false;beginVerifiedPurchase(dialog,button,item,offer.offerToken) }
+                            else { button.isEnabled=false;beginVerifiedPurchase(dialog,button,item,offer.offerToken,plan) }
                         }
                     }
                     if(offers.isEmpty())message.text="No eligible active base plans found."
@@ -6064,23 +6099,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun beginVerifiedPurchase(dialog:AlertDialog,button:Button,product:ProductDetails,offerToken:String){
+    private fun beginVerifiedPurchase(dialog:AlertDialog,button:Button,product:ProductDetails,offerToken:String,plan:String){
         val account=signedInUserId();val auth=cloudToken()
         if(account=="guest"||auth.isBlank()){button.isEnabled=true;return}
         if(billingCheckoutPreparing){button.isEnabled=true;Toast.makeText(this,"Checkout is already being prepared.",Toast.LENGTH_SHORT).show();return}
         billingCheckoutPreparing=true
         button.text="Checking secure checkout…"
         Thread {
-            val ready=runCatching{SupabaseCloud.playBilling(auth,"ready").optBoolean("ready")}.getOrDefault(false)
+            val ready=runCatching{
+                val response=SupabaseCloud.playBilling(auth,"ready")
+                val active=response.optJSONArray("activePlans")
+                response.optBoolean("ready") && active!=null && (0 until active.length()).any{active.optString(it)==plan}
+            }.getOrDefault(false)
             runOnUiThread {
                 billingCheckoutPreparing=false
                 if(isFinishing||isDestroyed||!dialog.isShowing)return@runOnUiThread
                 button.isEnabled=true
                 button.text="Continue with Google Play"
-                if(!ready || account!=signedInUserId()){
+                if(!ready || account!=signedInUserId() || auth!=cloudToken() || !isInternetAvailable()){
                     Toast.makeText(this,"Secure subscription service is not activated. No payment collected.",Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
+                if(appLockRequired()||!onlineForeground)return@runOnUiThread
                 if(hasVerifiedPremium()){managePlaySubscription();return@runOnUiThread}
                 val id=MessageDigest.getInstance("SHA-256").digest(account.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it.toInt() and 255)}
                 val params=BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product).setOfferToken(offerToken).build()
