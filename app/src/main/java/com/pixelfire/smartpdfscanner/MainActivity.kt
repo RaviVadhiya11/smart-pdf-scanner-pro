@@ -731,6 +731,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        trackPrivacyWindow(window)
         handleSocialAuthIntent(intent)
         // Firebase Analytics records a lightweight app-open event. Crashlytics
         // automatically captures uncaught crashes after Firebase initialization.
@@ -989,6 +990,7 @@ class MainActivity : AppCompatActivity() {
     private fun appDialog(fullScreen: Boolean = false): AlertDialog.Builder = object : com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.DocNexaDialogTheme) {
         override fun create(): AlertDialog {
             val dialog = super.create()
+            trackPrivacyWindow(dialog.window)
             dialog.window?.decorView?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
                     view.post {
@@ -1102,7 +1104,7 @@ class MainActivity : AppCompatActivity() {
                         styleAction(AlertDialog.BUTTON_NEUTRAL, false)
                         // A background export can open a dialog after connectivity is lost.
                         // Keep the offline gate above newly attached app-owned tool dialogs.
-                        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
+                        if (!isInternetAvailable() || appLockRequired()) refreshStrictOnlineGate(raise = true)
                     }
                 }
                 override fun onViewDetachedFromWindow(view: View) = Unit
@@ -2270,6 +2272,9 @@ class MainActivity : AppCompatActivity() {
         stopStrictOnlineMonitoring()
         onlineGateDialog?.dismiss()
         onlineGateDialog = null
+        privacyGateDialog?.dismiss()
+        privacyGateDialog = null
+        privacyWindows.clear()
         billingHandler.removeCallbacks(billingRefreshTask)
         billingReadyCallbacks.clear()
         playBillingClient?.endConnection()
@@ -2664,8 +2669,9 @@ class MainActivity : AppCompatActivity() {
             navigationBarColor=0xFFF5F8FF.toInt()
         }
         drawer.show()
+        trackPrivacyWindow(drawer.window)
         drawer.window?.setLayout(drawerWidth,-1)
-        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
+        if (!isInternetAvailable() || appLockRequired()) refreshStrictOnlineGate(raise = true)
     }
 
     private fun showHelpAndFaq() {
@@ -2753,13 +2759,15 @@ class MainActivity : AppCompatActivity() {
     private fun showPrivacyPolicy() {
         val policy = """
             DOCNEXA – PRIVACY POLICY
-            Last updated: 17 November 2026
+            Last updated: 28 November 2026
 
             1. Account information
             Supabase processes your email address, account ID, authentication credentials and session tokens to provide sign-in, verification, password recovery, cloud sync and account deletion. DocNexa does not store your password in readable form.
 
             2. Documents and permissions
             Scans, images and PDFs are processed to provide scanner, OCR, conversion and PDF tools. Local documents are stored in private app storage. Camera is used when you choose scanning or live QR scanning. Android's file picker is used when you choose a file. The app does not automatically upload every local document.
+
+            Internet access is required to use the app. Local processing can still take place on-device; an internet connection does not mean your files are uploaded. Optional App Lock uses Android device credentials, which DocNexa does not collect or store. When enabled, screenshots are blocked in DocNexa windows.
 
             3. Optional Cloud Sync
             When you sign in and choose Cloud Sync, PDFs are uploaded to a private Supabase Storage bucket in a folder associated with your account ID. Signing out does not delete cloud files. In-app account deletion removes your DocNexa cloud account and its synced PDFs when the deletion service succeeds. Local files and copies exported elsewhere remain on your device.
@@ -2810,7 +2818,7 @@ class MainActivity : AppCompatActivity() {
             • You are responsible for protecting your account credentials and your device.
             • Do not use the app to store or share unlawful, harmful or unauthorised material.
             • PDF conversion, OCR and scanning results may contain errors; review important information before relying on it.
-            • Optional cloud features depend on the configured third-party service and its availability.
+            • DocNexa requires a validated internet connection. Optional cloud features depend on the configured third-party service and its availability.
             • Features may change as the app is updated.
 
             By using DocNexa, you agree to use it responsibly and understand these limitations.
@@ -3187,8 +3195,9 @@ class MainActivity : AppCompatActivity() {
         val screenHeight = resources.displayMetrics.heightPixels
         val dialogWidth = minOf((screenWidth * 0.94f).toInt(), dp(520))
         val dialogHeight = minOf((screenHeight * 0.86f).toInt(), screenHeight - dp(80))
+        trackPrivacyWindow(dialog.window)
         dialog.window?.setLayout(dialogWidth, dialogHeight)
-        if (!isInternetAvailable()) refreshStrictOnlineGate(raise = true)
+        if (!isInternetAvailable() || appLockRequired()) refreshStrictOnlineGate(raise = true)
     }
 
     private fun resendCloudConfirmation(email: String, dialog: AlertDialog? = null) {
@@ -3270,6 +3279,113 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    // Optional app-access gate uses Android's own device credential challenge.
+    // No PIN, password or biometric data is collected or stored by DocNexa.
+    private val privacyWindows = java.util.WeakHashMap<android.view.Window,Boolean>()
+    private var privacyGateDialog: android.app.Dialog? = null
+    private var appLockUnlocked = false
+    private var credentialOperation: String? = null
+    private fun appLockEnabled() = prefs.getBoolean("device_credential_app_lock",false)
+    private fun appLockRequired() = appLockEnabled() && !appLockUnlocked
+    private fun keyguardManager() = getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+    private fun trackPrivacyWindow(target: android.view.Window?) {
+        if(target==null)return
+        privacyWindows[target]=true
+        if(appLockEnabled())target.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else target.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+    private fun refreshPrivacyWindowFlags(){
+        privacyWindows.keys.toList().forEach{trackPrivacyWindow(it)}
+    }
+    private val credentialLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+        val operation=credentialOperation
+        credentialOperation=null
+        if(result.resultCode==android.app.Activity.RESULT_OK && operation!=null){
+            when(operation){
+                "enable" -> {
+                    prefs.edit().putBoolean("device_credential_app_lock",true).apply()
+                    appLockUnlocked=true
+                    Toast.makeText(this,"App Lock enabled",Toast.LENGTH_SHORT).show()
+                }
+                "disable" -> {
+                    prefs.edit().putBoolean("device_credential_app_lock",false).apply()
+                    appLockUnlocked=false
+                    Toast.makeText(this,"App Lock disabled",Toast.LENGTH_SHORT).show()
+                }
+                "unlock" -> appLockUnlocked=true
+            }
+            refreshPrivacyWindowFlags()
+        }
+        refreshStrictOnlineGate()
+    }
+    @Suppress("DEPRECATION")
+    private fun requestDeviceCredential(operation:String){
+        if(credentialOperation!=null)return
+        val manager=keyguardManager()
+        if(!manager.isDeviceSecure){
+            appDialog().setTitle("Device screen lock required")
+                .setMessage("Set a PIN, pattern or password in Android Security settings, then return to DocNexa.")
+                .setPositiveButton("Security settings"){_,_->
+                    runCatching{startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}
+                }.setNegativeButton("Cancel",null).show()
+            return
+        }
+        val intent=manager.createConfirmDeviceCredentialIntent("DocNexa App Lock","Confirm your device screen lock")
+        if(intent==null){
+            Toast.makeText(this,"Device authentication is unavailable.",Toast.LENGTH_LONG).show()
+            return
+        }
+        credentialOperation=operation
+        try{credentialLauncher.launch(intent)}
+        catch(_:Exception){credentialOperation=null;Toast.makeText(this,"Unable to open device authentication.",Toast.LENGTH_LONG).show()}
+    }
+    private fun refreshPrivacyGate(raise:Boolean=false){
+        if(!onlineForeground||isFinishing||isDestroyed)return
+        if(!appLockRequired()){
+            privacyGateDialog?.dismiss();privacyGateDialog=null
+            return
+        }
+        if(privacyGateDialog?.isShowing==true&&!raise)return
+        privacyGateDialog?.dismiss()
+        val gate=android.app.Dialog(this,android.R.style.Theme_Material_Light_NoActionBar)
+        gate.setCancelable(false);gate.setCanceledOnTouchOutside(false)
+        val root=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER
+            setPadding(dp(20),dp(20),dp(20),dp(20));setBackgroundColor(0xFFF3F7FF.toInt())
+        }
+        val card=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL
+            setPadding(dp(18),dp(22),dp(18),dp(18));background=rounded(0xFFFFFFFF.toInt(),24,0xFFDCE7F5.toInt())
+        }
+        val icon=FrameLayout(this).apply{
+            background=rounded(0xFFE5EEFF.toInt(),20)
+            addView(popupGlyph("shield",0xFF2563EB.toInt()),FrameLayout.LayoutParams(-1,-1))
+        }
+        card.addView(icon,LinearLayout.LayoutParams(dp(72),dp(72)));card.addView(gap(12))
+        card.addView(label("DocNexa is locked",21f,0xFF102B60.toInt(),true).apply{gravity=Gravity.CENTER})
+        card.addView(gap(6))
+        card.addView(label("Unlock using your Android device screen lock. Your documents remain private.",13f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
+        card.addView(gap(14))
+        card.addView(nativeButton(this,ButtonRole.Primary).apply{
+            this.text="Unlock DocNexa"
+            setOnClickListener{
+                if(keyguardManager().isDeviceSecure)requestDeviceCredential("unlock")
+                else runCatching{startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}
+            }
+        },LinearLayout.LayoutParams(-1,-2))
+        card.addView(label("If the device screen lock was removed, set one again in Android Security settings.",11f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
+        card.addView(nativeButton(this,ButtonRole.Secondary).apply{
+            this.text="Exit app";setOnClickListener{finish()}
+        },LinearLayout.LayoutParams(-1,-2))
+        root.addView(card,LinearLayout.LayoutParams(minOf(dp(440),(resources.displayMetrics.widthPixels-dp(40)).coerceAtLeast(dp(1))),-2))
+        val scroll=ScrollView(this).apply{isFillViewport=true;addView(root,ViewGroup.LayoutParams(-1,-2))}
+        gate.setContentView(scroll)
+        privacyGateDialog=gate
+        gate.show()
+        trackPrivacyWindow(gate.window)
+        gate.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
+    }
+
     private var onlineGateDialog: android.app.Dialog? = null
     private var onlineGateStatus: TextView? = null
     private var onlineForeground = false
@@ -3329,6 +3445,8 @@ class MainActivity : AppCompatActivity() {
             onlineGateDialog?.dismiss()
             onlineGateDialog = null
             onlineGateStatus = null
+            refreshPrivacyGate(raise)
+            if (appLockRequired()) return
             if (!onlineConsentRequested) {
                 onlineConsentRequested = true
                 requestAdConsent()
@@ -3415,6 +3533,7 @@ class MainActivity : AppCompatActivity() {
         blocker.setContentView(scroll)
         onlineGateDialog=blocker
         blocker.show()
+        trackPrivacyWindow(blocker.window)
         blocker.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xFFF5F8FF.toInt()))
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
@@ -3641,6 +3760,15 @@ class MainActivity : AppCompatActivity() {
         setting("↻", "Restore Purchase", "Check your Google Play membership") { if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true) }
         section("CLOUD STORAGE & BACKUP")
         setting("☁", "Google Drive & Backup", "Import, save and restore selected files") { showDriveBackupHub() }
+        section("PRIVACY & SECURITY")
+        setting("◆","App Lock",if(appLockEnabled())"Enabled • device credential required" else "Protect DocNexa with your device PIN, pattern or password"){
+            val enabled=appLockEnabled()
+            appDialog().setTitle(if(enabled)"Disable App Lock?" else "Enable App Lock?")
+                .setMessage("App Lock uses Android's device credential. When enabled, DocNexa locks after leaving the app and blocks screenshots in its own windows. This is an access lock, not file encryption.")
+                .setPositiveButton(if(enabled)"Disable" else "Enable"){_,_->requestDeviceCredential(if(enabled)"disable" else "enable")}
+                .setNegativeButton("Cancel",null).show()
+        }
+        setting("●","Internet required","Validated Wi-Fi or mobile data is required to use DocNexa"){refreshStrictOnlineGate()}
         section("DOCUMENT PREFERENCES")
         setting("⇅", "Default sort order", sortNames[currentSort]) {
             appDialog().setTitle("Sort documents")
@@ -3653,7 +3781,7 @@ class MainActivity : AppCompatActivity() {
         setting("▤", "Storage location", "DocNexa app storage • ${docs.size} saved PDF(s)") {
             showPremiumDialog(appDialog()
                 .setTitle("DocNexa storage")
-                .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nInternal storage / Download / DocumentScanner\n\nCurrently indexed: ${docs.size} PDF(s).\n\nYou can open this folder from your phone's Files app.")
+                .setMessage("Your scanned and created PDFs are saved in the Documents folder:\n\nAndroid app-private storage (current account)\n\nCurrently indexed: ${docs.size} PDF(s).\n\nUse Save a copy or Share to export documents to a folder you can access outside DocNexa.")
                 .setPositiveButton("OK", null))
         }
 
@@ -4051,18 +4179,30 @@ class MainActivity : AppCompatActivity() {
             layoutParams = params
             setOnClickListener { openPdf(uri) }
         }
-        val thumbnail = createPdfThumbnail(uri)
-        if (thumbnail != null) {
-            card.addView(ImageView(this).apply {
-                setImageBitmap(thumbnail)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                background = rounded(0xFFEAF2FF.toInt(), 13, 0xFFDCE7FA.toInt())
-                contentDescription = "Preview of $name"
-                layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
-            })
-        } else {
-            card.addView(documentIconTile(62))
+        val placeholder = documentIconTile(62)
+        val preview = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = rounded(0xFFEAF2FF.toInt(),13,0xFFDCE7FA.toInt())
+            contentDescription = "Preview of $name"
+            visibility = View.GONE
         }
+        card.addView(placeholder)
+        card.addView(preview,LinearLayout.LayoutParams(dp(62),dp(62)))
+        val thumbnailOwner=signedInUserId()
+        card.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener{
+            override fun onViewAttachedToWindow(view:View){
+                if(pagePreviewExecutor.isShutdown)return
+                pagePreviewExecutor.execute{
+                    val bitmap=if(thumbnailOwner==signedInUserId())createPdfThumbnail(uri) else null
+                    if(bitmap!=null)runOnUiThread{
+                        if(card.isAttachedToWindow&&!isDestroyed&&thumbnailOwner==signedInUserId()){
+                            preview.setImageBitmap(bitmap);preview.visibility=View.VISIBLE;placeholder.visibility=View.GONE
+                        }else bitmap.recycle()
+                    }
+                }
+            }
+            override fun onViewDetachedFromWindow(view:View)=Unit
+        })
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
@@ -4444,30 +4584,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createPdfThumbnail(uri: Uri): Bitmap? {
+        if(uri.authority=="$packageName.fileprovider" && privateDocumentFile(uri)==null)return null
+        var bitmap:Bitmap?=null
         return try {
-            val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: return null
-            descriptor.use { pfd ->
-                PdfRenderer(pfd).use { renderer ->
-                    if (renderer.pageCount <= 0) return null
-                    renderer.openPage(0).use { page ->
-                        val maxSide = dp(124)
-                        val scale = minOf(
-                            maxSide.toFloat() / page.width.toFloat(),
-                            maxSide.toFloat() / page.height.toFloat()
-                        )
-                        val width = (page.width * scale).toInt().coerceAtLeast(1)
-                        val height = (page.height * scale).toInt().coerceAtLeast(1)
-                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(bitmap)
-                        canvas.drawColor(android.graphics.Color.WHITE)
-                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bitmap
-                    }
+            val descriptor=contentResolver.openFileDescriptor(uri,"r")?:return null
+            val renderer=try{PdfRenderer(descriptor)}catch(e:Exception){runCatching{descriptor.close()};throw e}
+            renderer.use{
+                if(it.pageCount<=0)return null
+                it.openPage(0).use{page->
+                    val maxSide=dp(124).coerceIn(1,300)
+                    val scale=minOf(maxSide.toFloat()/page.width,maxSide.toFloat()/page.height)
+                    val target=Bitmap.createBitmap((page.width*scale).toInt().coerceAtLeast(1),(page.height*scale).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
+                    bitmap=target
+                    target.eraseColor(android.graphics.Color.WHITE)
+                    page.render(target,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    target
                 }
             }
-        } catch (_: Exception) {
-            null
-        }
+        }catch(_:Exception){bitmap?.recycle();null}
+        catch(_:OutOfMemoryError){bitmap?.recycle();null}
     }
 
     private fun documentIconTile(sizeDp: Int = 62): View {
@@ -5599,6 +5734,11 @@ class MainActivity : AppCompatActivity() {
         refreshPlayPurchases(false)
         billingHandler.removeCallbacks(billingRefreshTask)
         billingHandler.postDelayed(billingRefreshTask, 60_000L)
+    }
+
+    override fun onStop() {
+        if(appLockEnabled() && credentialOperation==null) appLockUnlocked=false
+        super.onStop()
     }
 
     override fun onPause() {
@@ -11633,7 +11773,7 @@ class MainActivity : AppCompatActivity() {
             background=rounded(0xFFF1F6FF.toInt(),14,0xFFDCE7F5.toInt())
         }
         note.addView(label("Private & offline-friendly",12f,0xFF172B4D.toInt(),true))
-        note.addView(label("Local files can be opened offline. Cloud files may need internet. Office previews show text and worksheet values; original layouts and unsupported formats need a compatible installed app.",11f,0xFF52627A.toInt()))
+        note.addView(label("Internet access is required to use DocNexa. Local document rendering stays on-device. Office previews show text and worksheet values; original layouts and unsupported formats need a compatible installed app.",11f,0xFF52627A.toInt()))
         panel.addView(gap(3));panel.addView(note)
         dialog.show()
     }
