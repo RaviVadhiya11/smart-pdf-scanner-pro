@@ -138,31 +138,47 @@ internal object SupabaseCloud {
         request("POST", "/auth/v1/recover", body, "application/json")
     }
 
-    fun upload(token: String, userId: String, fileName: String, bytes: ByteArray) {
-        val path = "$userId/${safeName(fileName)}"
-        request("POST", "/storage/v1/object/$BUCKET/${encodePath(path)}", bytes, "application/pdf", token,
-            mapOf("x-upsert" to "true"))
-    }
-
-    fun list(token: String, userId: String): List<String> {
-        val body = JSONObject().put("prefix", "$userId/")
-            .put("limit", 1000).put("offset", 0).put("sortBy", JSONObject().put("column", "name").put("order", "asc"))
-            .toString().toByteArray()
-        val raw = request("POST", "/storage/v1/object/list/$BUCKET", body, "application/json", token)
-        val array = JSONArray(raw)
-        val names = mutableListOf<String>()
-        for (i in 0 until array.length()) {
-            val name = array.getJSONObject(i).optString("name")
-            if (name.isNotBlank() && !name.contains("/")) names.add(name)
+    fun backupName(name:String):String=safeName(name)
+    private fun storageConnection(method:String,path:String,token:String):HttpURLConnection=
+        (URL(BASE_URL+path).openConnection() as HttpURLConnection).apply{
+            requestMethod=method;connectTimeout=20000;readTimeout=60000;instanceFollowRedirects=false
+            setRequestProperty("apikey",API_KEY);setRequestProperty("Authorization","Bearer "+token)
         }
-        return names
+    fun uploadFile(token:String,userId:String,name:String,file:java.io.File,allowed:()->Boolean){
+        require(file.isFile&&file.length() in 1..BackupIntegrity.MAX_BYTES&&allowed())
+        val c=storageConnection("POST","/storage/v1/object/$BUCKET/"+encodePath("$userId/"+safeName(name)),token)
+        try{
+            c.doOutput=true;c.setRequestProperty("Content-Type","application/pdf");c.setRequestProperty("x-upsert","false")
+            c.setFixedLengthStreamingMode(file.length())
+            c.outputStream.use{out->file.inputStream().use{BackupIntegrity.copy(it,out,file.length(),true,allowed)}}
+            require(c.responseCode in 200..299){"Cloud upload failed (HTTP "+c.responseCode+")"}
+        }finally{c.disconnect()}
     }
-
-    fun download(token: String, userId: String, fileName: String): ByteArray =
-        requestBytes("GET", "/storage/v1/object/authenticated/$BUCKET/${encodePath("$userId/${safeName(fileName)}")}", null, null, token)
-
-    private fun safeName(name: String): String =
-        name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100).ifBlank { "Document.pdf" }
+    fun list(token:String,userId:String):List<String>{
+        val names=mutableListOf<String>()
+        for(page in 0 until 20){
+            val body=JSONObject().put("prefix","$userId/").put("limit",100).put("offset",page*100)
+                .put("sortBy",JSONObject().put("column","name").put("order","asc")).toString().toByteArray()
+            val rows=JSONArray(request("POST","/storage/v1/object/list/$BUCKET",body,"application/json",token))
+            for(i in 0 until rows.length()){
+                val name=rows.getJSONObject(i).optString("name")
+                if(name.isNotBlank()&&!name.contains("/")&&name==safeName(name))names.add(name)
+            }
+            if(rows.length()<100)return names
+        }
+        error("Cloud inventory exceeds 2,000 files; no files overwritten")
+    }
+    fun downloadPdf(token:String,userId:String,name:String,out:java.io.OutputStream?,allowed:()->Boolean):String{
+        require(name==safeName(name)&&allowed())
+        val c=storageConnection("GET","/storage/v1/object/authenticated/$BUCKET/"+encodePath("$userId/$name"),token)
+        try{
+            require(c.responseCode in 200..299){"Cloud restore failed (HTTP "+c.responseCode+")"}
+            return c.inputStream.use{BackupIntegrity.copy(it,out,c.contentLengthLong,true,allowed)}
+        }finally{c.disconnect()}
+    }
+    fun pdfHash(token:String,userId:String,name:String,allowed:()->Boolean)=downloadPdf(token,userId,name,null,allowed)
+    private fun safeName(name:String):String=
+        name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"),"_").take(100).ifBlank{"Document.pdf"}
 
     private fun encodePath(path: String): String = path.split("/").joinToString("/") {
         URLEncoder.encode(it, "UTF-8").replace("+", "%20")

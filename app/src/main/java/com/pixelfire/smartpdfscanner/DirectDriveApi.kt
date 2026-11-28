@@ -66,12 +66,21 @@ internal object DirectDriveApi {
         } finally { c.disconnect() }
     }
 
-    fun upload(token: String, file: File, mime: String, account: String) {
+    fun upload(token: String, file: File, mime: String, account: String, allowed:()->Boolean):Boolean {
         val length = file.length()
         require(file.isFile && length in 1L..MAX_BYTES)
+        val hash=BackupIntegrity.hash(file,allowed)
+        val q="trashed = false and appProperties has { key='docnexaOwner' and value='"+owner(account)+"' } and appProperties has { key='docnexaSha256' and value='"+hash+"' }"
+        val check=connection(API+"/files?q="+enc(q)+"&fields="+enc("files(id,size)")+"&pageSize=100",token)
+        try{
+            val existing=json(check).optJSONArray("files")
+            if(existing!=null&&(0 until existing.length()).any{existing.getJSONObject(it).optLong("size",-1)==length}){
+                require(allowed()){"Account changed"};return false
+            }
+        }finally{check.disconnect()}
         val boundary = "docnexa_" + UUID.randomUUID().toString()
         val metadata = JSONObject().put("name", file.name).put("mimeType", mime)
-            .put("appProperties", JSONObject().put("docnexaOwner", owner(account)))
+            .put("appProperties", JSONObject().put("docnexaOwner", owner(account)).put("docnexaSha256",hash))
         val head = ("--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
             metadata.toString() + "\r\n--" + boundary + "\r\nContent-Type: " + mime + "\r\n\r\n").toByteArray(Charsets.UTF_8)
         val tail = ("\r\n--" + boundary + "--\r\n").toByteArray(Charsets.UTF_8)
@@ -82,48 +91,49 @@ internal object DirectDriveApi {
             c.setFixedLengthStreamingMode(head.size.toLong() + length + tail.size)
             c.outputStream.use { out ->
                 out.write(head)
-                val copied = file.inputStream().use { it.copyTo(out, 64 * 1024) }
-                require(copied == length) { "File changed during upload" }
+                val copiedHash=file.inputStream().use{BackupIntegrity.copy(it,out,length,false,allowed)}
+                require(copiedHash==hash){"File changed during upload"}
                 out.write(tail)
             }
             require(json(c).optString("id").isNotBlank()) { "Drive did not return a file ID" }
+            return true
         } finally { c.disconnect() }
     }
 
     fun list(token: String, account: String): List<Backup> {
-        val q = "trashed = false and appProperties has { key='docnexaOwner' and value='" + owner(account) + "' }"
-        val url = API + "/files?q=" + enc(q) + "&fields=" + enc("files(id,name),nextPageToken") +
-            "&pageSize=100&orderBy=" + enc("createdTime desc")
-        val c = connection(url, token)
-        try {
-            val files = json(c).optJSONArray("files") ?: return emptyList()
-            return (0 until files.length()).map { i ->
-                val row = files.getJSONObject(i)
-                Backup(row.getString("id"), row.getString("name"))
-            }.filter { it.id.matches(Regex("[A-Za-z0-9_-]+")) }
-        } finally { c.disconnect() }
+        val q="trashed = false and appProperties has { key='docnexaOwner' and value='"+owner(account)+"' }"
+        val url=API+"/files?q="+enc(q)+"&fields="+enc("files(id,name),nextPageToken")+"&pageSize=100&orderBy="+enc("createdTime desc")
+        val results=mutableListOf<Backup>()
+        var next=""
+        repeat(20){
+            val c=connection(url+(if(next.isBlank())"" else "&pageToken="+enc(next)),token)
+            try{
+                val response=json(c)
+                val files=response.optJSONArray("files")
+                if(files!=null)for(i in 0 until files.length()){
+                    val row=files.getJSONObject(i);val id=row.optString("id")
+                    if(id.matches(Regex("[A-Za-z0-9_-]+")))results.add(Backup(id,row.optString("name")))
+                }
+                next=response.optString("nextPageToken")
+                if(next.isBlank())return results
+            }finally{c.disconnect()}
+        }
+        return results
     }
 
-    fun download(token: String, id: String, out: OutputStream, allowed: () -> Boolean) {
-        require(id.matches(Regex("[A-Za-z0-9_-]+")))
-        val c = connection(API + "/files/" + id + "?alt=media", token)
-        try {
+    fun download(token:String,id:String,account:String,out:OutputStream,allowed:()->Boolean){
+        require(id.matches(Regex("[A-Za-z0-9_-]+"))&&allowed())
+        val meta=connection(API+"/files/"+id+"?fields="+enc("id,size,trashed,appProperties"),token)
+        val info=try{json(meta)}finally{meta.disconnect()}
+        val props=info.optJSONObject("appProperties")?:error("Backup owner unavailable")
+        require(!info.optBoolean("trashed")&&props.optString("docnexaOwner")==owner(account)){"Backup belongs to a different account"}
+        val size=info.optLong("size",-1)
+        val c=connection(API+"/files/"+id+"?alt=media",token)
+        try{
             checkResponse(c)
-            require(c.contentLengthLong <= MAX_BYTES) { "Backup exceeds 128 MB" }
-            c.inputStream.use { input ->
-                val buffer = ByteArray(64 * 1024)
-                var total = 0L
-                while (true) {
-                    require(allowed()) { "Account changed during restore" }
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    total += n
-                    require(total <= MAX_BYTES) { "Backup exceeds 128 MB" }
-                    out.write(buffer, 0, n)
-                }
-                require(total > 0L) { "Backup is empty" }
-                require(c.contentLengthLong < 0 || total == c.contentLengthLong) { "Incomplete backup download" }
-            }
-        } finally { c.disconnect() }
+            val actual=c.inputStream.use{BackupIntegrity.copy(it,out,if(size>=0)size else c.contentLengthLong,false,allowed)}
+            val expected=props.optString("docnexaSha256")
+            if(expected.isNotBlank())require(actual==expected){"Backup integrity check failed"}
+        }finally{c.disconnect()}
     }
 }

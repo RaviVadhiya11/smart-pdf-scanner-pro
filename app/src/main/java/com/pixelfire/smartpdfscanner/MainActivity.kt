@@ -3687,58 +3687,99 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private val cloudSyncBusy=AtomicBoolean(false)
     private fun syncCloudNow() {
         if (!requireInternet("Manual Cloud Sync")) return
-        val token = cloudToken()
-        val userId = prefs.getString("cloud_user_id", "") ?: ""
-        if (token.isBlank() || userId.isBlank()) { showCloudLoginDialog(); return }
-        val localDocs = getSavedPdfs()
-        status.text = "Syncing this account with DocNexa Cloud…"
-        Thread {
-            try {
-                var activeToken = token
-                val refreshToken = prefs.getString("cloud_refresh_token", "") ?: ""
-                if (refreshToken.isNotBlank()) {
-                    try {
-                        val refreshed = SupabaseCloud.refreshSession(refreshToken)
-                        if (refreshed.userId != userId) throw IllegalStateException("The refreshed session belongs to a different account. Please sign in again.")
-                        activeToken = refreshed.accessToken
-                        prefs.edit()
-                            .putString("cloud_access_token", refreshed.accessToken)
-                            .putString("cloud_refresh_token", refreshed.refreshToken)
-                            .putString("cloud_email", refreshed.email)
-                            .apply()
-                    } catch (refreshError: Exception) {
-                        android.util.Log.w("DocNexa", "Session refresh failed; trying the current access token", refreshError)
+        if(cloudToken().isBlank()||signedInUserId()=="guest"){showCloudLoginDialog();return}
+        if(cloudSyncBusy.get()){Toast.makeText(this,"Cloud sync is already running.",Toast.LENGTH_SHORT).show();return}
+        val owner=signedInUserId()
+        appDialog().setTitle("DocNexa Cloud • Backup & Restore")
+            .setMessage("Back up your saved PDFs to this DocNexa account and restore missing cloud copies. Existing files will not be overwritten. Identical copies are skipped; different files with the same name are preserved separately. Files in Trash are not uploaded.")
+            .setPositiveButton("Sync now"){_,_->if(owner==signedInUserId())runCloudSync()}
+            .setNegativeButton("Not now"){_,_->buildScreen()}.show()
+    }
+    private fun runCloudSync(){
+        val owner=signedInUserId()
+        val token=cloudToken()
+        val refresh=prefs.getString("cloud_refresh_token","").orEmpty()
+        if(owner=="guest"||token.isBlank()||!isInternetAvailable()||!cloudSyncBusy.compareAndSet(false,true))return
+        val directory=privateDocumentsDir()
+        val files=getSavedPdfs().mapNotNull{(_,uri)->privateDocumentFile(uri)}
+        // Keep trashed names out of restore as well. Trash remains locally recoverable.
+        val trashed=prefs.getStringSet("trash_uris",emptySet()).orEmpty().mapNotNull{raw->
+            val u=Uri.parse(raw);val p=u.pathSegments;val i=p.indexOf("accounts")
+            if(u.authority=="$packageName.fileprovider"&&i>=0&&i+2==p.lastIndex&&p[i+1]==owner.replace(Regex("[^A-Za-z0-9_-]"),"_"))p.last() else null
+        }.toSet()
+        val progress=appDialog().setTitle("Cloud backup & restore").setMessage("Checking cloud inventory…").setCancelable(false).create()
+        progress.show()
+        val cancelled=AtomicBoolean(false)
+        fun allowed()=!cancelled.get()&&!isFinishing&&!isDestroyed&&owner==signedInUserId()
+        fun step(message:String){runOnUiThread{if(allowed()&&progress.isShowing)progress.setMessage(message)}}
+        Thread{
+            var uploaded=0;var restored=0;var skipped=0;var failed=0;var fatal=""
+            try{
+                var activeToken=token
+                if(refresh.isNotBlank()){
+                    val refreshed=runCatching{SupabaseCloud.refreshSession(refresh)}.getOrNull()
+                    if(refreshed!=null){
+                        require(refreshed.userId==owner&&allowed()&&cloudToken()==token){"Account changed during sync"}
+                        activeToken=refreshed.accessToken
+                        prefs.edit().putString("cloud_access_token",activeToken)
+                            .putString("cloud_refresh_token",refreshed.refreshToken.ifBlank{refresh}).apply()
                     }
                 }
-                var uploaded = 0
-                for ((name, uri) in localDocs) {
-                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("Could not read $name")
-                    SupabaseCloud.upload(activeToken, userId, name, bytes)
-                    uploaded++
+                require(allowed()){"Account changed"}
+                val remote=SupabaseCloud.list(activeToken,owner).toMutableSet()
+                val localHashes=mutableSetOf<String>()
+                val hashes=mutableMapOf<String,String>()
+                fun remoteHash(name:String):String=hashes.getOrPut(name){SupabaseCloud.pdfHash(activeToken,owner,name){allowed()}}
+                for((index,file) in files.withIndex()){
+                    if(!allowed())break
+                    step("Backing up "+(index+1)+"/"+files.size+" • "+file.name)
+                    try{
+                        val hash=BackupIntegrity.hash(file){allowed()}
+                        localHashes.add(hash)
+                        val original=SupabaseCloud.backupName(file.name)
+                        val target=if(original !in remote||remoteHash(original)==hash)original else BackupIntegrity.conflictName(original,hash)
+                        if(target in remote){
+                            require(remoteHash(target)==hash){"Cloud name conflict"}
+                            skipped++
+                        }else{
+                            SupabaseCloud.uploadFile(activeToken,owner,target,file){allowed()}
+                            remote.add(target);hashes[target]=hash;uploaded++
+                        }
+                    }catch(_:Exception){failed++}
                 }
-                val remoteFiles = SupabaseCloud.list(activeToken, userId)
-                var downloaded = 0
-                val localNames = getSavedPdfs().map { it.first }.toMutableSet()
-                for (name in remoteFiles) {
-                    if (name !in localNames && name.endsWith(".pdf", true)) {
-                        val bytes = SupabaseCloud.download(activeToken, userId, name)
-                        val saved = saveCloudPdf(name, bytes)
-                        if (saved != null) { downloaded++; localNames.add(name) }
-                    }
+                val names=remote.filter{it.endsWith(".pdf",true)&&it !in trashed}
+                for((index,name) in names.withIndex()){
+                    if(!allowed())break
+                    step("Checking restore "+(index+1)+"/"+names.size+" • "+name)
+                    try{
+                        val hash=remoteHash(name)
+                        if(hash in localHashes)continue
+                        // Never restore a locally trashed file, even through a conflict-name alias.
+                        val trashedMatch=trashed.any{old->name==SupabaseCloud.backupName(old)||name.startsWith(SupabaseCloud.backupName(old).substringBeforeLast('.')+"_cloud_")}
+                        if(trashedMatch)continue
+                        val file=PrivateDocumentStore.save(directory,name){out->
+                            val downloadedHash=SupabaseCloud.downloadPdf(activeToken,owner,name,out){allowed()}
+                            require(downloadedHash==hash&&allowed()){"Cloud file changed during restore"}
+                        }
+                        require(file.isFile)
+                        localHashes.add(hash);restored++
+                    }catch(_:Exception){failed++}
                 }
-                runOnUiThread {
-                    status.text = "Cloud sync complete"
-                    recent.text = "Cloud: $uploaded uploaded • $downloaded restored"
-                    Toast.makeText(this, "Sync complete: $uploaded uploaded, $downloaded downloaded.", Toast.LENGTH_LONG).show()
+            }catch(e:Exception){fatal=e.localizedMessage.orEmpty()}
+            finally{
+                cloudSyncBusy.set(false)
+                runOnUiThread{
+                    if(isFinishing||isDestroyed)return@runOnUiThread
+                    progress.dismiss()
+                    if(owner!=signedInUserId())return@runOnUiThread
                     buildScreen()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "Cloud sync failed"
-                    Toast.makeText(this, e.localizedMessage ?: "Cloud sync failed. Check internet and Storage policies.", Toast.LENGTH_LONG).show()
+                    status.text=if(failed==0&&fatal.isBlank())"Cloud sync complete" else "Cloud sync incomplete"
+                    if(failed==0&&fatal.isBlank())prefs.edit().putLong(accountPrefKey("cloud_last_sync"),System.currentTimeMillis()).apply()
+                    appDialog().setTitle(status.text.toString()).setMessage("Uploaded: "+uploaded+"\nRestored: "+restored+"\nIdentical backups skipped: "+skipped+"\nFailed operations: "+failed+(if(fatal.isNotBlank())"\n\n"+fatal.take(240) else "")+"\n\nOriginal local files were retained.")
+                        .setPositiveButton("Done",null).setNeutralButton("Sync again"){_,_->syncCloudNow()}.show()
                 }
             }
         }.start()
@@ -3821,6 +3862,8 @@ class MainActivity : AppCompatActivity() {
         setting("↻", "Restore Purchase", "Check your Google Play membership") { if(cloudToken().isBlank()) showCloudLoginDialog() else refreshPlayPurchases(true) }
         section("CLOUD STORAGE & BACKUP")
         setting("☁", "Google Drive & Backup", "Import, save and restore selected files") { showDriveBackupHub() }
+        val lastCloud=prefs.getLong(accountPrefKey("cloud_last_sync"),0L)
+        setting("↻","DocNexa Cloud Sync",if(lastCloud>0)"Last successful sync: "+java.text.DateFormat.getDateTimeInstance().format(Date(lastCloud)) else "Manual PDF backup and restore • no overwrite"){syncCloudNow()}
         section("PRIVACY & SECURITY")
         setting("◆","App Lock",if(appLockEnabled())"Enabled • fingerprint or device screen lock" else "Protect DocNexa with fingerprint, PIN or password"){
             requestDeviceCredential(if(appLockEnabled())"disable" else "enable")
@@ -8907,26 +8950,27 @@ class MainActivity : AppCompatActivity() {
         advancedToolJob("Uploading original files to Drive…") {
             try {
                 var complete = 0
+                var skipped = 0
                 var failed = 0
                 for (file in files) {
                     if (account != signedInUserId() || (batch && !hasVerifiedPremium())) break
                     try {
                         require(privateDocumentFile(privateDocumentUri(file)) == file)
-                        DirectDriveApi.upload(token, file, backupMime(file.name) ?: error("Unsupported file"), account)
-                        complete++
+                        val uploaded=DirectDriveApi.upload(token, file, backupMime(file.name) ?: error("Unsupported file"), account){account==signedInUserId()}
+                        if(uploaded)complete++ else skipped++
                         if (account == signedInUserId()) prefs.edit().putLong(accountPrefKey("manual_backup_time"), System.currentTimeMillis()).apply()
                     } catch (_: Exception) { failed++ }
                 }
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
-                        status.text = "Drive upload: " + complete + " saved"
-                        if(invoiceReadyDialog?.isShowing==true)invoiceReadyStatus?.text=if(complete>0)"Original PDF uploaded to Google Drive." else "Google Drive upload not completed. Your local PDF is safe."
+                        status.text = "Drive backup: " + complete + " uploaded • " + skipped + " already saved"
+                        if(invoiceReadyDialog?.isShowing==true)invoiceReadyStatus?.text=if(complete+skipped>0)"Original PDF backed up in Google Drive." else "Google Drive upload not completed. Your local PDF is safe."
                         if (files.size == 1 && exportResultDialog?.isShowing == true &&
                             exportResults.selected?.uri == privateDocumentUri(files.first()).toString()) {
-                            exportStatusView?.text = if (complete == 1) "Original file uploaded to Google Drive." else "Drive upload not completed. Your original file is safe."
+                            exportStatusView?.text = if (complete+skipped == 1) "Original file backed up in Google Drive." else "Drive upload not completed. Your original file is safe."
                         }
-                        appDialog().setTitle(if (complete == files.size) "Saved to Google Drive" else "Google Drive upload result")
-                            .setMessage("Uploaded: " + complete + "\nFailed: " + failed + "\nNot attempted: " + (files.size - complete - failed) + "\nOriginal local files retained.")
+                        appDialog().setTitle(if (complete+skipped == files.size) "Saved to Google Drive" else "Google Drive upload result")
+                            .setMessage("Uploaded: " + complete + "\nIdentical backup already present: " + skipped + "\nFailed: " + failed + "\nNot attempted: " + (files.size - complete - skipped - failed) + "\nOriginal local files retained.")
                             .setPositiveButton("Done", null)
                             .setNeutralButton("Open Drive") { _, _ ->
                                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/drive/my-drive"))) }
@@ -8967,7 +9011,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val mime = backupMime(item.name) ?: error("Unsupported file")
                 val target = PrivateDocumentStore.save(directory, item.name) { output ->
-                    DirectDriveApi.download(token, item.id, output) { account == signedInUserId() }
+                    DirectDriveApi.download(token, item.id, account, output) { account == signedInUserId() }
                 }
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed && account == signedInUserId()) {
