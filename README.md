@@ -30,7 +30,7 @@ To enable signed releases, create an upload keystore privately and configure Git
 
 ## Current access and security behavior
 - A validated internet connection is required to use DocNexa. On-device processing remains local unless a remote feature is chosen.
-- Optional App Lock (off by default) uses the Android device PIN, pattern or password. It blocks screenshots in DocNexa-owned windows while enabled; it is not file-level encryption.
+- Optional App Lock (off by default) uses Android biometric authentication or the device PIN, pattern or password. It blocks screenshots in DocNexa-owned windows while enabled; it is not file-level encryption.
 - PDF document-card thumbnails are rendered off the UI thread. Device verification of the access gate, credential flow and performance remains necessary.
 
 ## Scope and testing

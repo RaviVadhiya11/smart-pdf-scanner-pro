@@ -732,6 +732,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         trackPrivacyWindow(window)
+        credentialOperation=savedInstanceState?.getString("app_lock_credential_operation")
+        // Reattach the AndroidX callback if authentication survives recreation.
+        biometricPrompt
         handleSocialAuthIntent(intent)
         // Firebase Analytics records a lightweight app-open event. Crashlytics
         // automatically captures uncaught crashes after Firebase initialization.
@@ -2249,6 +2252,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("app_lock_credential_operation",credentialOperation)
         pendingResultSource?.let { outState.putString("result_pending_source", it.toString()) }
         outState.putString("result_pending_name", pendingResultName)
         outState.putString("drive_backup_account", pendingDriveBackupAccount)
@@ -2767,7 +2771,7 @@ class MainActivity : AppCompatActivity() {
             2. Documents and permissions
             Scans, images and PDFs are processed to provide scanner, OCR, conversion and PDF tools. Local documents are stored in private app storage. Camera is used when you choose scanning or live QR scanning. Android's file picker is used when you choose a file. The app does not automatically upload every local document.
 
-            Internet access is required to use the app. Local processing can still take place on-device; an internet connection does not mean your files are uploaded. Optional App Lock uses Android device credentials, which DocNexa does not collect or store. When enabled, screenshots are blocked in DocNexa windows.
+            Internet access is required to use the app. Local processing can still take place on-device; an internet connection does not mean your files are uploaded. Optional App Lock uses Android biometric authentication or device credentials, which DocNexa does not collect or store. When enabled, screenshots are blocked in DocNexa windows.
 
             3. Optional Cloud Sync
             When you sign in and choose Cloud Sync, PDFs are uploaded to a private Supabase Storage bucket in a folder associated with your account ID. Signing out does not delete cloud files. In-app account deletion removes your DocNexa cloud account and its synced PDFs when the deletion service succeeds. Local files and copies exported elsewhere remain on your device.
@@ -3297,10 +3301,11 @@ class MainActivity : AppCompatActivity() {
     private fun refreshPrivacyWindowFlags(){
         privacyWindows.keys.toList().forEach{trackPrivacyWindow(it)}
     }
-    private val credentialLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+    private fun completeCredential(success:Boolean){
         val operation=credentialOperation
         credentialOperation=null
-        if(result.resultCode==android.app.Activity.RESULT_OK && operation!=null){
+        if(operation==null)return
+        if(success){
             when(operation){
                 "enable" -> {
                     prefs.edit().putBoolean("device_credential_app_lock",true).apply()
@@ -3315,29 +3320,65 @@ class MainActivity : AppCompatActivity() {
                 "unlock" -> appLockUnlocked=true
             }
             refreshPrivacyWindowFlags()
+        }else if(operation=="unlock"){
+            // Cancellation must not expose the underlying document or tool.
+            finish()
+            return
         }
         refreshStrictOnlineGate()
     }
+    private val credentialLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+        completeCredential(result.resultCode==android.app.Activity.RESULT_OK)
+    }
+    private val biometricPrompt: androidx.biometric.BiometricPrompt by lazy {
+        androidx.biometric.BiometricPrompt(this,ContextCompat.getMainExecutor(this),
+            object:androidx.biometric.BiometricPrompt.AuthenticationCallback(){
+                override fun onAuthenticationSucceeded(result:androidx.biometric.BiometricPrompt.AuthenticationResult){
+                    completeCredential(true)
+                }
+                override fun onAuthenticationError(errorCode:Int,errString:CharSequence){
+                    val operation=credentialOperation ?: return
+                    if(errorCode==androidx.biometric.BiometricPrompt.ERROR_LOCKOUT ||
+                        errorCode==androidx.biometric.BiometricPrompt.ERROR_LOCKOUT_PERMANENT ||
+                        errorCode==androidx.biometric.BiometricPrompt.ERROR_HW_UNAVAILABLE ||
+                        errorCode==androidx.biometric.BiometricPrompt.ERROR_NO_BIOMETRICS){
+                        launchSystemCredential(operation)
+                    }else completeCredential(false)
+                }
+            })
+    }
     @Suppress("DEPRECATION")
+    private fun launchSystemCredential(operation:String){
+        val intent=keyguardManager().createConfirmDeviceCredentialIntent("DocNexa","Confirm your device screen lock")
+        if(intent==null){completeCredential(false);return}
+        credentialOperation=operation
+        try{credentialLauncher.launch(intent)}
+        catch(_:Exception){completeCredential(false)}
+    }
     private fun requestDeviceCredential(operation:String){
-        if(credentialOperation!=null)return
-        val manager=keyguardManager()
-        if(!manager.isDeviceSecure){
-            appDialog().setTitle("Device screen lock required")
-                .setMessage("Set a PIN, pattern or password in Android Security settings, then return to DocNexa.")
-                .setPositiveButton("Security settings"){_,_->
-                    runCatching{startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}
-                }.setNegativeButton("Cancel",null).show()
-            return
-        }
-        val intent=manager.createConfirmDeviceCredentialIntent("DocNexa App Lock","Confirm your device screen lock")
-        if(intent==null){
-            Toast.makeText(this,"Device authentication is unavailable.",Toast.LENGTH_LONG).show()
+        if(credentialOperation!=null || isFinishing || isDestroyed)return
+        if(!keyguardManager().isDeviceSecure){
+            Toast.makeText(this,"Set a PIN, pattern or password in Android Security settings first.",Toast.LENGTH_LONG).show()
+            if(operation=="unlock")finish()
+            else runCatching{startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}
             return
         }
         credentialOperation=operation
-        try{credentialLauncher.launch(intent)}
-        catch(_:Exception){credentialOperation=null;Toast.makeText(this,"Unable to open device authentication.",Toast.LENGTH_LONG).show()}
+        val biometric=if(Build.VERSION.SDK_INT>=30) androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+            else androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+        val manager=androidx.biometric.BiometricManager.from(this)
+        if(manager.canAuthenticate(biometric)!=androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS){
+            launchSystemCredential(operation)
+            return
+        }
+        try{
+            val prompt=androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock DocNexa")
+                .setSubtitle("Verify your identity")
+                .setAllowedAuthenticators(biometric or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                .build()
+            biometricPrompt.authenticate(prompt)
+        }catch(_:Exception){launchSystemCredential(operation)}
     }
     private fun refreshPrivacyGate(raise:Boolean=false){
         if(!onlineForeground||isFinishing||isDestroyed)return
@@ -3345,45 +3386,25 @@ class MainActivity : AppCompatActivity() {
             privacyGateDialog?.dismiss();privacyGateDialog=null
             return
         }
-        if(privacyGateDialog?.isShowing==true&&!raise)return
-        privacyGateDialog?.dismiss()
-        val gate=android.app.Dialog(this,android.R.style.Theme_Material_Light_NoActionBar)
-        gate.setCancelable(false);gate.setCanceledOnTouchOutside(false)
-        val root=LinearLayout(this).apply{
-            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER
-            setPadding(dp(20),dp(20),dp(20),dp(20));setBackgroundColor(0xFFF3F7FF.toInt())
+        // A blank, secure privacy cover prevents previews behind the OS prompt.
+        // No custom unlock dialog or extra button is shown.
+        if(privacyGateDialog?.isShowing!=true || (raise && credentialOperation==null)){
+            privacyGateDialog?.dismiss()
+            val cover=android.app.Dialog(this,android.R.style.Theme_Material_Light_NoActionBar)
+            cover.setCancelable(false);cover.setCanceledOnTouchOutside(false)
+            cover.setContentView(View(this).apply{setBackgroundColor(0xFFF5F8FF.toInt())})
+            privacyGateDialog=cover
+            cover.show()
+            trackPrivacyWindow(cover.window)
+            cover.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
         }
-        val card=LinearLayout(this).apply{
-            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL
-            setPadding(dp(18),dp(22),dp(18),dp(18));background=rounded(0xFFFFFFFF.toInt(),24,0xFFDCE7F5.toInt())
-        }
-        val icon=FrameLayout(this).apply{
-            background=rounded(0xFFE5EEFF.toInt(),20)
-            addView(popupGlyph("shield",0xFF2563EB.toInt()),FrameLayout.LayoutParams(-1,-1))
-        }
-        card.addView(icon,LinearLayout.LayoutParams(dp(72),dp(72)));card.addView(gap(12))
-        card.addView(label("DocNexa is locked",21f,0xFF102B60.toInt(),true).apply{gravity=Gravity.CENTER})
-        card.addView(gap(6))
-        card.addView(label("Unlock using your Android device screen lock. Your documents remain private.",13f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
-        card.addView(gap(14))
-        card.addView(nativeButton(this,ButtonRole.Primary).apply{
-            this.text="Unlock DocNexa"
-            setOnClickListener{
-                if(keyguardManager().isDeviceSecure)requestDeviceCredential("unlock")
-                else runCatching{startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}
+        if(credentialOperation==null){
+            window.decorView.post{
+                if(onlineForeground && appLockRequired() && credentialOperation==null &&
+                    !isFinishing && !isDestroyed && isInternetAvailable() && !supportFragmentManager.isStateSaved)
+                    requestDeviceCredential("unlock")
             }
-        },LinearLayout.LayoutParams(-1,-2))
-        card.addView(label("If the device screen lock was removed, set one again in Android Security settings.",11f,0xFF52627A.toInt()).apply{gravity=Gravity.CENTER})
-        card.addView(nativeButton(this,ButtonRole.Secondary).apply{
-            this.text="Exit app";setOnClickListener{finish()}
-        },LinearLayout.LayoutParams(-1,-2))
-        root.addView(card,LinearLayout.LayoutParams(minOf(dp(440),(resources.displayMetrics.widthPixels-dp(40)).coerceAtLeast(dp(1))),-2))
-        val scroll=ScrollView(this).apply{isFillViewport=true;addView(root,ViewGroup.LayoutParams(-1,-2))}
-        gate.setContentView(scroll)
-        privacyGateDialog=gate
-        gate.show()
-        trackPrivacyWindow(gate.window)
-        gate.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
+        }
     }
 
     private var onlineGateDialog: android.app.Dialog? = null
@@ -3761,12 +3782,8 @@ class MainActivity : AppCompatActivity() {
         section("CLOUD STORAGE & BACKUP")
         setting("☁", "Google Drive & Backup", "Import, save and restore selected files") { showDriveBackupHub() }
         section("PRIVACY & SECURITY")
-        setting("◆","App Lock",if(appLockEnabled())"Enabled • device credential required" else "Protect DocNexa with your device PIN, pattern or password"){
-            val enabled=appLockEnabled()
-            appDialog().setTitle(if(enabled)"Disable App Lock?" else "Enable App Lock?")
-                .setMessage("App Lock uses Android's device credential. When enabled, DocNexa locks after leaving the app and blocks screenshots in its own windows. This is an access lock, not file encryption.")
-                .setPositiveButton(if(enabled)"Disable" else "Enable"){_,_->requestDeviceCredential(if(enabled)"disable" else "enable")}
-                .setNegativeButton("Cancel",null).show()
+        setting("◆","App Lock",if(appLockEnabled())"Enabled • fingerprint or device screen lock" else "Protect DocNexa with fingerprint, PIN or password"){
+            requestDeviceCredential(if(appLockEnabled())"disable" else "enable")
         }
         setting("●","Internet required","Validated Wi-Fi or mobile data is required to use DocNexa"){refreshStrictOnlineGate()}
         section("DOCUMENT PREFERENCES")
