@@ -3710,9 +3710,15 @@ class MainActivity : AppCompatActivity() {
             val u=Uri.parse(raw);val p=u.pathSegments;val i=p.indexOf("accounts")
             if(u.authority=="$packageName.fileprovider"&&i>=0&&i+2==p.lastIndex&&p[i+1]==owner.replace(Regex("[^A-Za-z0-9_-]"),"_"))p.last() else null
         }.toSet()
-        val progress=appDialog().setTitle("Cloud backup & restore").setMessage("Checking cloud inventory…").setCancelable(false).create()
-        progress.show()
         val cancelled=AtomicBoolean(false)
+        val progress=appDialog().setTitle("Cloud backup & restore").setMessage("Checking cloud inventory…").setCancelable(false)
+            .setNegativeButton("Stop",null).create()
+        progress.show()
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener{
+            cancelled.set(true)
+            progress.setMessage("Stopping safely…")
+            progress.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled=false
+        }
         fun allowed()=!cancelled.get()&&!isFinishing&&!isDestroyed&&owner==signedInUserId()
         fun step(message:String){runOnUiThread{if(allowed()&&progress.isShowing)progress.setMessage(message)}}
         Thread{
@@ -3758,7 +3764,7 @@ class MainActivity : AppCompatActivity() {
                         val hash=remoteHash(name)
                         if(hash in localHashes)continue
                         // Never restore a locally trashed file, even through a conflict-name alias.
-                        val trashedMatch=trashed.any{old->name==SupabaseCloud.backupName(old)||name.startsWith(SupabaseCloud.backupName(old).substringBeforeLast('.')+"_cloud_")}
+                        val trashedMatch=trashed.any{old->BackupIntegrity.isTrashAlias(SupabaseCloud.backupName(old),name)}
                         if(trashedMatch)continue
                         val file=PrivateDocumentStore.save(directory,name){out->
                             val downloadedHash=SupabaseCloud.downloadPdf(activeToken,owner,name,out){allowed()}
@@ -3768,7 +3774,9 @@ class MainActivity : AppCompatActivity() {
                         localHashes.add(hash);restored++
                     }catch(_:Exception){failed++}
                 }
-            }catch(e:Exception){fatal=e.localizedMessage.orEmpty()}
+                require(allowed()){"Sync interrupted. Completed backups were retained."}
+            }catch(e:Exception){fatal=e.localizedMessage?.takeIf{it.isNotBlank()}?:"Cloud sync interrupted"}
+            catch(_:OutOfMemoryError){fatal="Not enough memory for cloud sync"}
             finally{
                 cloudSyncBusy.set(false)
                 runOnUiThread{
@@ -3776,8 +3784,9 @@ class MainActivity : AppCompatActivity() {
                     progress.dismiss()
                     if(owner!=signedInUserId())return@runOnUiThread
                     buildScreen()
-                    status.text=if(failed==0&&fatal.isBlank())"Cloud sync complete" else "Cloud sync incomplete"
-                    if(failed==0&&fatal.isBlank())prefs.edit().putLong(accountPrefKey("cloud_last_sync"),System.currentTimeMillis()).apply()
+                    val complete=!cancelled.get()&&failed==0&&fatal.isBlank()
+                    status.text=if(complete)"Cloud sync complete" else if(cancelled.get())"Cloud sync stopped" else "Cloud sync incomplete"
+                    if(complete)prefs.edit().putLong(accountPrefKey("cloud_last_sync"),System.currentTimeMillis()).apply()
                     appDialog().setTitle(status.text.toString()).setMessage("Uploaded: "+uploaded+"\nRestored: "+restored+"\nIdentical backups skipped: "+skipped+"\nFailed operations: "+failed+(if(fatal.isNotBlank())"\n\n"+fatal.take(240) else "")+"\n\nOriginal local files were retained.")
                         .setPositiveButton("Done",null).setNeutralButton("Sync again"){_,_->syncCloudNow()}.show()
                 }

@@ -29,6 +29,9 @@ internal object BackupIntegrity {
         require(file.isFile&&file.length() in 1..MAX_BYTES)
         return file.inputStream().use{copy(it,null,file.length(),false,allowed)}
     }
+    fun isTrashAlias(original:String,remote:String):Boolean =
+        original==remote || (remote.startsWith(original.substringBeforeLast('.').take(65)+"_cloud_") &&
+            remote.endsWith(".pdf",true))
     fun conflictName(name:String,hash:String):String{
         require(hash.matches(Regex("[0-9a-f]{64}")))
         return name.substringBeforeLast('.').take(65)+"_cloud_"+hash.take(20)+".pdf"

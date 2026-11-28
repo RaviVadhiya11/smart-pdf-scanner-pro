@@ -57,6 +57,12 @@ Deploy that Edge Function to the same Supabase project used by the app and confi
 
 The function requires a signed-in Supabase user, validates supported tasks and document length, and calls the OpenAI Responses API from the server.
 
+## Cloud backup and restore
+- Sync requires explicit user confirmation, a signed-in DocNexa account and an active internet connection. No automatic upload starts solely because a user signs in.
+- Existing remote files are not overwritten. Conflicts use a content-hash suffix; restore verifies content and publishes complete local copies. Matching content is skipped. Local Trash names and their backup aliases are excluded from restore.
+- The Stop action interrupts transfers cooperatively; already completed copies remain. Interrupted or failed runs do not update the last successful sync timestamp.
+- Transfers are capped at 128 MB per file, and inventory listing is bounded to 2,000 entries. Live service testing remains required.
+
 ## Known conversion scope
 - Office to PDF is an offline text-extraction conversion for DOCX/XLSX/PPTX. It does not reproduce the original Office layout, images or complex tables.
 - PDF to Word creates an editable DOCX from selectable PDF text. Scanned/image-only PDFs should use OCR first.
@@ -65,7 +71,7 @@ The function requires a signed-in Supabase user, validates supported tasks and d
 
 ## Google Play Premium setup (DocNexa 1.7.0)
 
-The app uses the Google Play Billing SDK with a fail-closed server verification flow. No subscription is sold until the authenticated verification backend reports ready. All existing PDF tools remain free. Verified members can hide native ads and use the 4K/8K upscale resolution options; these use ordinary interpolation, not AI super-resolution.
+The app uses the Google Play Billing SDK with a fail-closed server verification flow. No subscription is sold until the authenticated verification backend reports ready. Core PDF tools remain free; selected advanced tools require verified Premium. Verified members can hide native ads and use the 4K/8K upscale resolution options; these use ordinary interpolation, not AI super-resolution.
 
 1. Create the app in Play Console with package `com.pixelfire.smartpdfscanner`, and configure your payments profile and app signing.
 2. Upload a signed AAB to an internal test track. Create subscription product `docnexa_premium` with auto-renewing base plans `premium-monthly` (suggested India price INR 99) and `premium-yearly` (suggested INR 699). Activate the plans. Prices are fetched from Google Play rather than hardcoded.

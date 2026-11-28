@@ -1,6 +1,16 @@
-# DocNexa 1.9.0 release checklist
+# DocNexa 1.9.7 release checklist
 
 Status: release candidate, not approved or published. CI verifies unit tests, lint, signed APK/AAB and release APK 16 KiB ZIP/ELF alignment. Play Console's AAB compatibility report and a 16 KiB device test are still required.
+
+## Phase 5 regression verification
+Build #370 passed GitHub's unit tests, debug/release lint, signed APK/AAB build and APK native alignment. This is build evidence, not device or live-service evidence. The subsequent regression patch requires its own successful CI run.
+
+- App Lock: enable/disable with Android credentials, fingerprint success/failure, PIN fallback, cancel, reopen after backgrounding, rotate during authentication, screenshot protection; keep the user's saved files intact.
+- Strict Online Mode: start offline, lose connectivity mid-tool, captive portal, restore network, retry/settings, and verify an in-progress local export can complete.
+- Cloud Sync: confirm before uploading, stop mid-transfer, verify stopped/incomplete runs never set the last-success timestamp, test same-name different content and identical content, interrupted downloads, long-name Trash aliases, account switch, and 128 MB limit. Compare original and restored SHA-256.
+- Office viewer: DOCX text/table/images, XLSX sheet navigation and cached values, PPTX basic layout and images, external open, text-only fallback, unsupported or oversized content. The preview is not an exact Office rendering engine.
+- Scanner: all seven filters, quality warnings (including blank pages), shadow cleanup, original JPEG retention and A4 export; warnings are heuristic.
+- No claim of live purchase, ad delivery, Drive OAuth or Supabase deployment verification is made by CI.
 
 ## Physical device QA (record Pass/Fail, OS and file used)
 - Android 7 / 11 / 15 / 16: install, upgrade without deleting private files, rotation, large text, navigation, offline and low-memory behavior.

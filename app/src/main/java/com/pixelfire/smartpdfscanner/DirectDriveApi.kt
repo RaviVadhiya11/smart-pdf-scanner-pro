@@ -118,7 +118,7 @@ internal object DirectDriveApi {
                 if(next.isBlank())return results
             }finally{c.disconnect()}
         }
-        return results
+        error("Drive inventory exceeds 2,000 files. Narrow the backup selection.")
     }
 
     fun download(token:String,id:String,account:String,out:OutputStream,allowed:()->Boolean){
